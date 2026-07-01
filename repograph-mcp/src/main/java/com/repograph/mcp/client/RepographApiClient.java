@@ -92,6 +92,41 @@ public class RepographApiClient {
         }
     }
 
+    /**
+     * 执行 POST 请求（无请求体，projectId 等参数通过 path query string 传递）。
+     *
+     * @param path 相对路径（含查询参数），如 {@code /api/v1/vulns/scan/code?projectId=xxx}
+     * @return 解析后的 JSON 响应体
+     * @throws RepographApiException repograph-app 返回错误或连接失败
+     */
+    public JsonNode post(String path) {
+        if (baseUrl == null) throw new RepographApiException("RepoGraph base URL not configured");
+
+        var uri = URI.create(baseUrl + path);
+        var req = HttpRequest.newBuilder(uri)
+                .header("Content-Type", "application/json")
+                .timeout(Duration.ofSeconds(30))
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+
+        log.debug("POST {}", uri);
+        try {
+            var resp = http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            log.debug("← {} ({})", resp.statusCode(), path);
+            if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
+                throw new RepographApiException("RepoGraph API error " + resp.statusCode() + ": " + resp.body());
+            }
+            return mapper.readTree(resp.body());
+        } catch (RepographApiException e) {
+            throw e;
+        } catch (java.net.ConnectException e) {
+            throw new RepographApiException(
+                    "Cannot connect to repograph-app at " + baseUrl + ". Is it running? Try: repograph serve", e);
+        } catch (Exception e) {
+            throw new RepographApiException("HTTP request failed: " + e.getMessage(), e);
+        }
+    }
+
     /** 运行时异常，包装 RepoGraph API 调用失败。 */
     @SuppressWarnings("serial")
     public static class RepographApiException extends RuntimeException {

@@ -193,6 +193,63 @@ public class RepographMcpTools {
                 ),
                 List.of("query")
             )
+        ),
+
+        tool("list_projects",
+            "List all code projects currently indexed in RepoGraph. " +
+            "Returns each project's ID (required by most other tools), root path, node count, and " +
+            "last index timestamp. Call this first when you don't know which projectId to use.",
+            schema(Map.of(), List.of())
+        ),
+
+        tool("trace_taint",
+            "Perform inter-procedural taint analysis starting from a specific method parameter. " +
+            "Traces how tainted data flows across method call boundaries, following CALLS edges " +
+            "until it reaches a known Sink (SQL execution, OS command, deserialization, HTTP output, " +
+            "reflection, JNDI lookup) or the analysis depth limit. " +
+            "Use after search_graphrag identifies a suspicious entry point to confirm whether user " +
+            "input can reach a dangerous operation.",
+            schema(
+                Map.of(
+                    "source",     strProp("Fully qualified name of the taint source method, " +
+                                          "e.g. 'com.example.Controller#submit(String)'"),
+                    "paramIndex", intProp("0-based index of the tainted parameter (default 0)", 0, 20, 0),
+                    "projectId",  strProp("12-char project ID to scope the analysis"),
+                    "maxDepth",   intProp("Max call-graph hops to follow (default 6)", 1, 15, 6)
+                ),
+                List.of("source")
+            )
+        ),
+
+        tool("list_vulns",
+            "List vulnerability findings stored in RepoGraph for a project. " +
+            "Findings come from three scanners: static rule patterns (CodeVulnScanner), " +
+            "inter-procedural taint paths (TaintVulnScanner), and dependency CVEs (DepsVulnScanner). " +
+            "Filter by severity (CRITICAL/HIGH/MEDIUM/LOW) or status (SUSPECTED/CONFIRMED/FIXED/DISMISSED). " +
+            "Use to review existing findings before triggering a new scan, or to build a security report.",
+            schema(
+                Map.of(
+                    "projectId", strProp("12-char project ID (required)"),
+                    "severity",  strProp("Filter by severity: CRITICAL, HIGH, MEDIUM, or LOW"),
+                    "status",    strProp("Filter by status: SUSPECTED, CONFIRMED, FIXED, or DISMISSED")
+                ),
+                List.of("projectId")
+            )
+        ),
+
+        tool("scan_vuln_code",
+            "Trigger a static code vulnerability scan on an indexed project using built-in CWE rules. " +
+            "Scans all method bodies for patterns matching: SQL injection, command injection, " +
+            "path traversal, XSS, insecure deserialization, weak crypto, sensitive data logging, " +
+            "SSRF, and open redirect (9 rules total). " +
+            "Returns a summary with the number of units scanned and new findings discovered. " +
+            "For inter-procedural taint paths use trace_taint instead.",
+            schema(
+                Map.of(
+                    "projectId", strProp("12-char project ID of the project to scan")
+                ),
+                List.of("projectId")
+            )
         )
     );
 
@@ -231,6 +288,10 @@ public class RepographMcpTools {
                 case "find_entrypoints" -> runFindEntrypoints(args);
                 case "analyze_flow"      -> runAnalyzeFlow(args);
                 case "search_graphrag"   -> runSearchGraphRag(args);
+                case "list_projects"     -> runListProjects();
+                case "trace_taint"       -> runTraceTaint(args);
+                case "list_vulns"        -> runListVulns(args);
+                case "scan_vuln_code"    -> runScanVulnCode(args);
                 default -> "Unknown tool: " + name;
             };
             return toolResult(text, false);
@@ -367,6 +428,72 @@ public class RepographMcpTools {
         return formatGraphRagResult(query, result.get());
     }
 
+    private String runListProjects() {
+        Optional<JsonNode> result = client.get("/api/v1/projects");
+        if (result.isEmpty() || !result.get().isArray() || result.get().isEmpty()) {
+            return "No projects indexed yet.\n\n" +
+                   "Run `repograph index <path>` or `POST /api/v1/index/project` to index a codebase.";
+        }
+        JsonNode projects = result.get();
+        var sb = new StringBuilder();
+        sb.append("## Indexed projects (").append(projects.size()).append(")\n\n");
+        sb.append("| projectId | root | nodes | indexed at |\n");
+        sb.append("|-----------|------|-------|------------|\n");
+        for (JsonNode p : projects) {
+            sb.append("| `").append(p.path("projectId").asText()).append("`")
+              .append(" | `").append(p.path("projectRoot").asText()).append("`")
+              .append(" | ").append(p.path("nodeCount").asInt())
+              .append(" | ").append(p.path("indexedAt").asText()).append(" |\n");
+        }
+        return sb.toString().stripTrailing();
+    }
+
+    private String runTraceTaint(JsonNode args) {
+        String source = require(args, "source");
+        int paramIndex = args.path("paramIndex").asInt(0);
+        int maxDepth   = args.path("maxDepth").asInt(6);
+        var path = new StringBuilder("/api/v1/flow/taint")
+                .append("?source=").append(enc(source))
+                .append("&paramIndex=").append(paramIndex)
+                .append("&maxDepth=").append(maxDepth);
+        opt(args, "projectId").ifPresent(v -> path.append("&projectId=").append(enc(v)));
+
+        Optional<JsonNode> result = client.get(path.toString());
+        if (result.isEmpty()) {
+            return "Taint analysis unavailable for `" + source + "`.\n\n" +
+                   "Ensure the method exists in the index (try lookup_symbol first).";
+        }
+        return formatTaintResult(result.get());
+    }
+
+    private String runListVulns(JsonNode args) {
+        String projectId = require(args, "projectId");
+        var path = new StringBuilder("/api/v1/vulns?projectId=").append(enc(projectId));
+        opt(args, "severity").ifPresent(v -> path.append("&severity=").append(enc(v)));
+        opt(args, "status").ifPresent(v -> path.append("&status=").append(enc(v)));
+
+        Optional<JsonNode> result = client.get(path.toString());
+        if (result.isEmpty() || !result.get().isArray() || result.get().isEmpty()) {
+            return "No vulnerability findings for project `" + projectId + "`.\n\n" +
+                   "Run scan_vuln_code to scan for static patterns, or trace_taint for inter-procedural paths.";
+        }
+        return formatVulnList(projectId, result.get());
+    }
+
+    private String runScanVulnCode(JsonNode args) {
+        String projectId = require(args, "projectId");
+        JsonNode result = client.post("/api/v1/vulns/scan/code?projectId=" + enc(projectId));
+        int scanned  = result.path("scannedUnits").asInt(0);
+        int findings = result.path("newFindings").asInt(0);
+        return "## Code vulnerability scan complete\n\n" +
+               "**Project:** `" + projectId + "`\n" +
+               "**Units scanned:** " + scanned + "\n" +
+               "**New findings:** " + findings + "\n\n" +
+               (findings > 0
+                   ? "Run `list_vulns` with `projectId=" + projectId + "` to review the findings."
+                   : "No new findings. Existing findings (if any) are unchanged.");
+    }
+
     private String runAnalyzeFlow(JsonNode args) {
         String target = require(args, "target");
         var path = new StringBuilder("/api/v1/flow/analyze?target=").append(enc(target));
@@ -455,6 +582,94 @@ public class RepographMcpTools {
                   .append(rawSource).append("\n```\n");
             }
             sb.append("\n");
+        }
+
+        return sb.toString().stripTrailing();
+    }
+
+    // ── 安全工具格式化 ────────────────────────────────────────────────────────
+
+    private String formatTaintResult(JsonNode r) {
+        String source = r.path("sourceMethod").asText("?");
+        int paramIdx  = r.path("sourceParamIndex").asInt(0);
+        JsonNode paths = r.path("paths");
+        int analyzed  = r.path("methodsAnalyzed").asInt(0);
+        boolean truncated = r.path("truncated").asBoolean(false);
+
+        var sb = new StringBuilder();
+        sb.append("## Taint analysis: `").append(source).append("` param[").append(paramIdx).append("]\n\n");
+        sb.append("**Methods analyzed:** ").append(analyzed);
+        if (truncated) sb.append("  ⚠ truncated (depth/path limit reached)");
+        sb.append("\n\n");
+
+        if (!paths.isArray() || paths.isEmpty()) {
+            sb.append("No taint paths found — tainted input does not appear to reach a known Sink " +
+                      "within the analysis depth.\n");
+            return sb.toString().stripTrailing();
+        }
+
+        sb.append("**Taint paths found:** ").append(paths.size()).append("\n\n");
+        for (int i = 0; i < paths.size(); i++) {
+            JsonNode p = paths.get(i);
+            boolean sink = p.path("reachesSink").asBoolean(false);
+            String sinkDesc = p.path("sinkDescription").asText("");
+            sb.append("### Path ").append(i + 1);
+            if (sink) sb.append("  🔴 SINK REACHED: `").append(sinkDesc).append("`");
+            sb.append("\n");
+
+            JsonNode hops = p.path("hops");
+            if (hops.isArray()) {
+                for (JsonNode hop : hops) {
+                    String from = slotStr(hop.path("from"));
+                    String to   = slotStr(hop.path("to"));
+                    sb.append("- `").append(hop.path("methodQn").asText("?"))
+                      .append("` : ").append(from).append(" → ").append(to).append("\n");
+                }
+            }
+            sb.append("\n");
+        }
+
+        return sb.toString().stripTrailing();
+    }
+
+    private String slotStr(JsonNode slot) {
+        String kind = slot.path("kind").asText("");
+        int index   = slot.path("index").asInt(-1);
+        String hint = slot.path("calleeHint").asText("");
+        return switch (kind) {
+            case "PARAM"    -> "param[" + index + "]";
+            case "RETURN"   -> "return";
+            case "CALL_ARG" -> hint + ".arg[" + index + "]";
+            case "SINK"     -> "SINK:" + hint + ".arg[" + index + "]";
+            default         -> kind;
+        };
+    }
+
+    private String formatVulnList(String projectId, JsonNode vulns) {
+        var sb = new StringBuilder();
+        sb.append("## Vulnerabilities — project `").append(projectId).append("`\n\n");
+        sb.append(vulns.size()).append(" finding(s):\n\n");
+
+        for (int i = 0; i < vulns.size(); i++) {
+            JsonNode v = vulns.get(i);
+            String severity = v.path("severity").asText("?");
+            String status   = v.path("status").asText("?");
+            String icon = switch (severity) {
+                case "CRITICAL" -> "🔴";
+                case "HIGH"     -> "🟠";
+                case "MEDIUM"   -> "🟡";
+                default         -> "🔵";
+            };
+            sb.append(i + 1).append(". ").append(icon).append(" **[").append(severity).append("]** ")
+              .append(v.path("title").asText(v.path("ruleId").asText("?")))
+              .append(" — ").append(status).append("\n");
+            sb.append("   `").append(v.path("qualifiedName").asText("?")).append("`")
+              .append("  File: `").append(v.path("filePath").asText("?")).append("`")
+              .append(" L").append(v.path("startLine").asInt()).append("\n");
+            String detail = v.path("detail").asText("");
+            if (!detail.isBlank()) sb.append("   ").append(detail).append("\n");
+            sb.append("   CWE: ").append(v.path("cwe").asText("N/A"))
+              .append("  ID: `").append(v.path("id").asText()).append("`\n\n");
         }
 
         return sb.toString().stripTrailing();

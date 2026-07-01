@@ -158,7 +158,11 @@ class McpStdioServerTest {
         assertTrue(names.contains("find_entrypoints"), "Missing find_entrypoints");
         assertTrue(names.contains("analyze_flow"),     "Missing analyze_flow");
         assertTrue(names.contains("search_graphrag"),  "Missing search_graphrag");
-        assertEquals(11, list.size(), "Should have exactly 11 tools");
+        assertTrue(names.contains("list_projects"),    "Missing list_projects");
+        assertTrue(names.contains("trace_taint"),      "Missing trace_taint");
+        assertTrue(names.contains("list_vulns"),       "Missing list_vulns");
+        assertTrue(names.contains("scan_vuln_code"),   "Missing scan_vuln_code");
+        assertEquals(15, list.size(), "Should have exactly 15 tools");
     }
 
     // ── search_graphrag ───────────────────────────────────────────────────────
@@ -210,6 +214,113 @@ class McpStdioServerTest {
         assertTrue(text.contains("AuthService#login"), "Should contain qualifiedName");
         assertTrue(text.contains("entry_point"), "Should contain security signals");
         assertTrue(text.contains("login(String username)"), "Should contain rawSource");
+    }
+
+    // ── list_projects ─────────────────────────────────────────────────────────
+
+    @Test
+    void listProjects_returnsMarkdownTable() throws Exception {
+        RepographApiClient mockClient = mock(RepographApiClient.class);
+        when(mockClient.get("/api/v1/projects")).thenReturn(Optional.of(mapper.readTree("""
+                [{"projectId":"abc123","projectRoot":"/src/myapp",
+                  "nodeCount":500,"indexedAt":"2026-07-01T10:00:00Z"}]""")));
+
+        RepographMcpTools realTools = new RepographMcpTools(mockClient);
+        McpStdioServer localServer = new McpStdioServer(mapper, realTools, mockClient);
+        JsonNode resp = parse(localServer.dispatch("""
+                {"jsonrpc":"2.0","id":11,"method":"tools/call",\
+                "params":{"name":"list_projects","arguments":{}}}"""));
+
+        assertFalse(resp.path("result").path("isError").asBoolean());
+        String text = resp.path("result").path("content").get(0).path("text").asText();
+        assertTrue(text.contains("abc123"),  "Should contain projectId");
+        assertTrue(text.contains("/src/myapp"), "Should contain projectRoot");
+        assertTrue(text.contains("500"),     "Should contain nodeCount");
+    }
+
+    // ── trace_taint ───────────────────────────────────────────────────────────
+
+    @Test
+    void traceTaint_sinkReached_showsRedFlag() throws Exception {
+        RepographApiClient mockClient = mock(RepographApiClient.class);
+        String taintJson = """
+                {
+                  "sourceMethod": "com.example.Ctrl#submit(String)",
+                  "sourceParamIndex": 0,
+                  "paths": [{
+                    "hops": [
+                      {"methodQn":"com.example.Ctrl#submit(String)",
+                       "from":{"kind":"PARAM","index":0,"calleeHint":null},
+                       "to":{"kind":"CALL_ARG","index":0,"calleeHint":"executeQuery"}}
+                    ],
+                    "reachesSink": true,
+                    "sinkDescription": "SINK:executeQuery.arg[0]"
+                  }],
+                  "methodsAnalyzed": 2,
+                  "truncated": false
+                }""";
+        when(mockClient.get(contains("taint"))).thenReturn(Optional.of(mapper.readTree(taintJson)));
+
+        RepographMcpTools realTools = new RepographMcpTools(mockClient);
+        McpStdioServer localServer = new McpStdioServer(mapper, realTools, mockClient);
+        JsonNode resp = parse(localServer.dispatch("""
+                {"jsonrpc":"2.0","id":12,"method":"tools/call",
+                "params":{"name":"trace_taint","arguments":{"source":"com.example.Ctrl#submit(String)"}}}"""));
+
+        assertFalse(resp.path("result").path("isError").asBoolean());
+        String text = resp.path("result").path("content").get(0).path("text").asText();
+        assertTrue(text.contains("SINK REACHED"),          "Should flag sink");
+        assertTrue(text.contains("executeQuery"),          "Should show sink name");
+        assertTrue(text.contains("Ctrl#submit(String)"),   "Should show source method");
+    }
+
+    // ── list_vulns ────────────────────────────────────────────────────────────
+
+    @Test
+    void listVulns_returnsFormattedFindings() throws Exception {
+        RepographApiClient mockClient = mock(RepographApiClient.class);
+        String vulnsJson = """
+                [{"id":"abc1","ruleId":"SQL_INJECTION","cwe":"CWE-89","severity":"HIGH",
+                  "status":"SUSPECTED","qualifiedName":"com.example.Repo#find(String)",
+                  "filePath":"src/Repo.java","startLine":42,
+                  "title":"SQL Injection","detail":"param[0] → SINK:executeQuery.arg[0]",
+                  "foundAt":"2026-07-01T00:00:00Z"}]""";
+        when(mockClient.get(contains("vulns"))).thenReturn(Optional.of(mapper.readTree(vulnsJson)));
+
+        RepographMcpTools realTools = new RepographMcpTools(mockClient);
+        McpStdioServer localServer = new McpStdioServer(mapper, realTools, mockClient);
+        JsonNode resp = parse(localServer.dispatch("""
+                {"jsonrpc":"2.0","id":13,"method":"tools/call",
+                "params":{"name":"list_vulns","arguments":{"projectId":"abc123"}}}"""));
+
+        assertFalse(resp.path("result").path("isError").asBoolean());
+        String text = resp.path("result").path("content").get(0).path("text").asText();
+        assertTrue(text.contains("SQL Injection"),    "Should show title");
+        assertTrue(text.contains("HIGH"),             "Should show severity");
+        assertTrue(text.contains("CWE-89"),           "Should show CWE");
+        assertTrue(text.contains("Repo#find"),        "Should show qualifiedName");
+    }
+
+    // ── scan_vuln_code ────────────────────────────────────────────────────────
+
+    @Test
+    void scanVulnCode_returnsScanSummary() throws Exception {
+        RepographApiClient mockClient = mock(RepographApiClient.class);
+        when(mockClient.post(contains("scan/code"))).thenReturn(
+                mapper.readTree("""
+                        {"projectId":"abc123","scannedUnits":120,"newFindings":3}"""));
+
+        RepographMcpTools realTools = new RepographMcpTools(mockClient);
+        McpStdioServer localServer = new McpStdioServer(mapper, realTools, mockClient);
+        JsonNode resp = parse(localServer.dispatch("""
+                {"jsonrpc":"2.0","id":14,"method":"tools/call",
+                "params":{"name":"scan_vuln_code","arguments":{"projectId":"abc123"}}}"""));
+
+        assertFalse(resp.path("result").path("isError").asBoolean());
+        String text = resp.path("result").path("content").get(0).path("text").asText();
+        assertTrue(text.contains("120"),          "Should show scannedUnits");
+        assertTrue(text.contains("3"),            "Should show newFindings");
+        assertTrue(text.contains("list_vulns"),   "Should suggest next step");
     }
 
     // ── malformed JSON ────────────────────────────────────────────────────────
