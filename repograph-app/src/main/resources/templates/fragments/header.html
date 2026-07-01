@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<header th:fragment="header">
+  <div class="logo">
+    <img th:src="@{/img/logo.png}" src="/img/logo.png" alt="RepoGraph" class="logo-img"/>
+    RepoGraph
+  </div>
+  <div class="header-sep"></div>
+  <div class="project-context">
+    <span class="project-context-label" data-i18n="header.project">Project</span>
+    <select id="global-project" onchange="setGlobalProject(this.value)" aria-label="Active project">
+      <option value="" data-i18n="header.allProjects">All projects</option>
+    </select>
+  </div>
+  <div class="health-badges">
+    <div class="badge" id="hb-qdrant">
+      <div class="badge-dot checking" id="hd-qdrant"></div>
+      <span>Qdrant</span>
+    </div>
+    <div class="badge" id="hb-ollama">
+      <div class="badge-dot checking" id="hd-ollama"></div>
+      <span>Ollama</span>
+    </div>
+    <div class="badge" id="hb-neo4j">
+      <div class="badge-dot checking" id="hd-neo4j"></div>
+      <span>Neo4j</span>
+    </div>
+  </div>
+  <div class="lang-toggle">
+    <button class="lang-btn" id="lang-zh"
+            :class="{ active: $store.repograph.lang === 'zh' }"
+            @click="$store.repograph.setLang('zh')">中文</button>
+    <button class="lang-btn" id="lang-en"
+            :class="{ active: $store.repograph.lang === 'en' }"
+            @click="$store.repograph.setLang('en')">EN</button>
+  </div>
+</header>
+</html>

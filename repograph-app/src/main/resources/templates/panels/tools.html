@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="panel" id="panel-tools" class="panel"
+     :class="{ active: $store.repograph.panel === 'tools' }">
+  <div class="panel-header">
+    <div class="panel-title" data-i18n="tools.title">项目工具</div>
+    <div class="panel-subtitle" data-i18n="tools.subtitle">框架入口点检测与软件物料清单（SBOM）生成</div>
+  </div>
+  <div class="panel-body">
+    <!-- Frameworks -->
+    <div class="card" style="margin-bottom:20px">
+      <div style="font-size:14px;font-weight:600;margin-bottom:10px" data-i18n="tools.frameworks.title">框架入口点</div>
+      <div class="input-row" style="margin-bottom:12px">
+        <input type="text" id="frameworks-project-input" placeholder="project-name"
+          autocomplete="off" list="projects-datalist" data-i18n-ph="ph.projectName"
+          onkeydown="if(event.key==='Enter')doFrameworks()">
+        <button class="btn btn-primary" onclick="doFrameworks()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          <span data-i18n="btn.detect">检测</span>
+        </button>
+      </div>
+      <div id="frameworks-result"></div>
+    </div>
+
+    <!-- SBOM -->
+    <div class="card">
+      <div style="font-size:14px;font-weight:600;margin-bottom:10px" data-i18n="tools.sbom.title">软件物料清单 (SBOM)</div>
+      <div class="input-row" style="margin-bottom:12px">
+        <input type="text" id="sbom-project-input" placeholder="project-name"
+          autocomplete="off" list="projects-datalist" data-i18n-ph="ph.projectName"
+          onkeydown="if(event.key==='Enter')doSbom()">
+        <button class="btn btn-primary" onclick="doSbom()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span data-i18n="btn.download">生成下载</span>
+        </button>
+      </div>
+      <div id="sbom-result"></div>
+    </div>
+
+    <!-- Manage projects -->
+    <div class="card" style="margin-top:20px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:14px;font-weight:600" data-i18n="tools.manage.title">已索引项目</div>
+        <button class="btn btn-ghost" style="font-size:12px;padding:4px 10px" onclick="renderProjectsManage()">
+          <span data-i18n="btn.refresh">刷新</span>
+        </button>
+      </div>
+      <div id="projects-manage-list"><div class="empty-state" data-i18n="tools.manage.loading">加载中…</div></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

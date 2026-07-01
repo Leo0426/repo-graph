@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="panel" id="panel-stats" class="panel"
+     :class="{ active: $store.repograph.panel === 'stats' }">
+  <div class="panel-header">
+    <div class="panel-title" data-i18n="stats.title">项目概览</div>
+    <div class="panel-subtitle" data-i18n="stats.subtitle">所选项目的节点 / 文件 / 边类型聚合统计</div>
+  </div>
+  <div class="panel-body">
+    <div class="input-row" style="margin-bottom:18px">
+      <input type="text" id="stats-project-input" placeholder="project-name"
+        autocomplete="off" list="projects-datalist" data-i18n-ph="ph.projectName"
+        onkeydown="if(event.key==='Enter')loadProjectStats()"
+        onchange="loadProjectStats()">
+      <button class="btn btn-primary" onclick="loadProjectStats()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        <span data-i18n="btn.loadStats">加载</span>
+      </button>
+    </div>
+
+    <div id="stats-content">
+      <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        <p data-i18n="stats.empty">选择一个项目查看概览</p>
+        <span data-i18n="stats.emptyHint">从下拉中选择或粘贴 projectId</span>
+      </div>
+    </div>
+
+    <div id="stats-watch-bar" class="stats-watch-bar" style="display:none">
+      <span class="watch-dot"></span>
+      <span id="stats-watch-label" class="watch-label" data-i18n="watch.idle">未监听</span>
+      <button id="stats-watch-btn" class="btn btn-sm" onclick="toggleWatch()" data-i18n="watch.start">开启监听</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

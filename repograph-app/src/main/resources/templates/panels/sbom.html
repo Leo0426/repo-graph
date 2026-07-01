@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="panel" id="panel-sbom" class="panel"
+     :class="{ active: $store.repograph.panel === 'sbom' }">
+  <div class="panel-header">
+    <div class="panel-title" data-i18n="sbom.title">软件物料清单</div>
+    <div class="panel-subtitle" data-i18n="sbom.subtitle">CycloneDX 格式 · 直接依赖可视化</div>
+  </div>
+  <div class="panel-body">
+    <div class="card" style="margin-bottom:16px">
+      <div class="input-row">
+        <input type="text" id="sbom-view-input" placeholder="project-name"
+          autocomplete="off" list="projects-datalist" data-i18n-ph="ph.projectName"
+          onkeydown="if(event.key==='Enter')loadSbomView()">
+        <button class="btn btn-primary" onclick="loadSbomView()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          <span data-i18n="sbom.btn.view">生成并查看</span>
+        </button>
+        <button class="btn btn-ghost" id="sbom-download-btn" onclick="downloadSbomJson()" style="display:none">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span data-i18n="btn.download">下载 JSON</span>
+        </button>
+      </div>
+    </div>
+    <div id="sbom-view-content"></div>
+  </div>
+</div>
+</body>
+</html>

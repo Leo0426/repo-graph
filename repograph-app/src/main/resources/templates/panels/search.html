@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="panel" id="panel-search" class="panel"
+     :class="{ active: $store.repograph.panel === 'search' }">
+  <div class="panel-header">
+    <div class="panel-title" data-i18n="search.title">语义搜索</div>
+    <div class="panel-subtitle" data-i18n="search.subtitle">通过自然语言或代码片段检索代码单元</div>
+  </div>
+  <div class="panel-body">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+      <div class="tab-row" id="search-tab-row">
+        <button class="tab active" onclick="setSearchMode('semantic',this)" data-i18n="tab.semantic">语义</button>
+        <button class="tab" onclick="setSearchMode('code',this)" data-i18n="tab.code">代码</button>
+      </div>
+      <span style="font-size:12px;color:var(--text-3);font-family:var(--fm)" id="search-mode-hint" data-i18n="hint.semantic">自然语言 → 代码单元</span>
+    </div>
+
+    <div class="input-row" style="margin-bottom:6px">
+      <div class="search-history-wrap">
+        <div class="search-wrap">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input type="text" id="search-input" placeholder="查找所有 HTTP REST 接口…"
+            autocomplete="off" data-i18n-ph="ph.semantic"
+            oninput="onSearchInput(this)"
+            onfocus="showHistory()"
+            onblur="hideHistoryDelayed()">
+          <button class="search-clear" id="search-clear" onclick="clearSearch()" title="Clear">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="search-history" id="search-history"></div>
+      </div>
+      <button class="btn btn-primary" onclick="doSearch()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m22 2-7 20-4-9-9-4 20-7z"/></svg>
+        <span data-i18n="btn.search">搜索</span>
+      </button>
+    </div>
+
+    <div class="kbd-hints" style="margin-bottom:14px">
+      <span><kbd>↵</kbd> <span data-i18n="kbd.search">搜索</span></span>
+      <span><kbd>↑</kbd><kbd>↓</kbd> <span data-i18n="kbd.nav">导航结果</span></span>
+      <span><kbd>⌘</kbd><kbd>K</kbd> / <kbd>/</kbd> <span data-i18n="kbd.focus">聚焦搜索</span></span>
+      <span><kbd>1</kbd>–<kbd>9</kbd> <span data-i18n="kbd.panels">切换面板</span></span>
+    </div>
+
+    <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:18px">
+      <div>
+        <div class="filter-label" style="margin-bottom:6px" data-i18n="filter.language">语言</div>
+        <div class="filter-row">
+          <div class="filter-chip active" data-group="lang" data-val="" onclick="toggleChip(this,'lang')" data-i18n="chip.all">全部</div>
+          <div class="filter-chip" data-group="lang" data-val="java" onclick="toggleChip(this,'lang')">Java</div>
+          <div class="filter-chip" data-group="lang" data-val="c" onclick="toggleChip(this,'lang')">C</div>
+          <div class="filter-chip" data-group="lang" data-val="python" onclick="toggleChip(this,'lang')">Python</div>
+        </div>
+      </div>
+      <div>
+        <div class="filter-label" style="margin-bottom:6px" data-i18n="filter.kind">类型</div>
+        <div class="filter-row">
+          <div class="filter-chip active" data-group="kind" data-val="" onclick="toggleChip(this,'kind')" data-i18n="chip.all">全部</div>
+          <div class="filter-chip" data-group="kind" data-val="CLASS" onclick="toggleChip(this,'kind')" data-i18n="chip.class">类</div>
+          <div class="filter-chip" data-group="kind" data-val="METHOD" onclick="toggleChip(this,'kind')" data-i18n="chip.method">方法</div>
+          <div class="filter-chip" data-group="kind" data-val="FUNCTION" onclick="toggleChip(this,'kind')" data-i18n="chip.function">函数</div>
+          <div class="filter-chip" data-group="kind" data-val="INTERFACE" onclick="toggleChip(this,'kind')" data-i18n="chip.interface">接口</div>
+        </div>
+      </div>
+      <div style="margin-left:auto;display:flex;align-items:flex-end;gap:8px">
+        <div>
+          <div class="filter-label" style="margin-bottom:6px" data-i18n="filter.limit">数量</div>
+          <select id="search-limit" style="width:72px;padding:6px 10px">
+            <option value="5">5</option>
+            <option value="10" selected>10</option>
+            <option value="20">20</option>
+            <option value="50">50</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div id="search-results">
+      <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <p data-i18n="empty.prompt">输入查询内容开始检索</p>
+        <span data-i18n="empty.example">试试："graph callers impact analysis" 或 "HTTP REST 接口"</span>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

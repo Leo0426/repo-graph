@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="zh">
+<head th:replace="~{fragments/head :: head}"></head>
+<body x-data>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <linearGradient id="ring-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00FFB3"/>
+      <stop offset="100%" stop-color="#8B5CF6"/>
+    </linearGradient>
+  </defs>
+</svg>
+
+<header th:replace="~{fragments/header :: header}"></header>
+
+<div class="layout">
+  <nav th:replace="~{fragments/nav :: nav}"></nav>
+  <main>
+    <th:block th:replace="~{panels/search   :: panel}"></th:block>
+    <th:block th:replace="~{panels/graph    :: panel}"></th:block>
+    <th:block th:replace="~{panels/symbol   :: panel}"></th:block>
+    <th:block th:replace="~{panels/stats    :: panel}"></th:block>
+    <th:block th:replace="~{panels/idx      :: panel}"></th:block>
+    <th:block th:replace="~{panels/tools    :: panel}"></th:block>
+    <th:block th:replace="~{panels/sbom     :: panel}"></th:block>
+    <th:block th:replace="~{panels/vulns    :: panel}"></th:block>
+    <th:block th:replace="~{panels/metrics  :: panel}"></th:block>
+    <th:block th:replace="~{panels/health   :: panel}"></th:block>
+    <th:block th:replace="~{panels/benchmark :: panel}"></th:block>
+  </main>
+</div>
+
+<div class="statusbar">
+  <span class="sb-brand">RG v0.1.0</span>
+  <span class="sb-dot">·</span>
+  <span class="sb-status">● ONLINE</span>
+  <span class="sb-dot">·</span>
+  <span class="sb-clock" id="sb-clock">--:--:--</span>
+  <span class="sb-flex"></span>
+  <span class="sb-mode" id="sb-mode">READY</span>
+</div>
+
+<div id="tooltip"></div>
+<div id="toast"></div>
+<datalist id="projects-datalist"></datalist>
+<datalist id="graph-symbols-datalist"></datalist>
+
+<!-- CDN libs -->
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
+
+<!-- I18N constants + Alpine store (must be before Alpine defer) -->
+<script th:src="@{/js/repograph-i18n.js}"></script>
+<script th:src="@{/js/repograph-store.js}"></script>
+<script defer src="https://unpkg.com/alpinejs@3.14.9/dist/cdn.min.js"></script>
+
+<!-- App scripts (defer — run after DOM + Alpine) -->
+<script defer th:src="@{/js/repograph-app.js}"></script>
+<script defer th:src="@{/js/repograph-search.js}"></script>
+<script defer th:src="@{/js/repograph-graph.js}"></script>
+<script defer th:src="@{/js/repograph-stats.js}"></script>
+<script defer th:src="@{/js/repograph-index.js}"></script>
+<script defer th:src="@{/js/repograph-tools.js}"></script>
+<script defer th:src="@{/js/repograph-vulns.js}"></script>
+<script defer th:src="@{/js/repograph-metrics.js}"></script>
+</body>
+</html>

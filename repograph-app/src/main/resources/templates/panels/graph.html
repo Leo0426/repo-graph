@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="panel" id="panel-graph" class="panel"
+     :class="{ active: $store.repograph.panel === 'graph' }">
+  <div class="panel-header">
+    <div class="panel-title" data-i18n="graph.title">代码图谱</div>
+    <div class="panel-subtitle" data-i18n="graph.subtitle">探索调用链、影响分析与类型层次结构</div>
+  </div>
+  <div class="graph-container">
+    <!-- Sidebar -->
+    <div class="graph-sidebar">
+      <div id="graph-target-wrap">
+        <div class="field-label" data-i18n="graph.target">目标符号</div>
+        <input type="text" id="graph-target" placeholder="com.example.Foo#bar(String)" autocomplete="off"
+          list="graph-symbols-datalist"
+          oninput="updateGraphClassHint(this.value);debouncedGraphSymbols()">
+        <div id="graph-class-hint" class="graph-class-hint" style="display:none"
+          data-i18n="graph.classHint">↳ 类级别查询 — 自动展开到所有成员方法</div>
+        <div class="field-label" style="margin-top:8px">项目（可选）</div>
+        <input type="text" id="graph-project" placeholder="project-name" autocomplete="off"
+          list="projects-datalist" data-i18n-ph="ph.projectName">
+      </div>
+
+      <div>
+        <div class="field-label" data-i18n="graph.queryType">查询类型</div>
+        <div class="tab-row" id="graph-tab-row" style="flex-direction:column;width:100%">
+          <button class="tab active" style="text-align:left" onclick="setGraphMode('callers',this)" data-i18n="graph.callers">
+            ↑ 调用方 — 谁调用了它
+          </button>
+          <button class="tab" style="text-align:left" onclick="setGraphMode('callees',this)" data-i18n="graph.callees">
+            ↓ 被调用 — 它调用了谁
+          </button>
+          <button class="tab" style="text-align:left" onclick="setGraphMode('impact',this)" data-i18n="graph.impact">
+            ◎ 影响面 — 受影响的范围
+          </button>
+          <button class="tab" style="text-align:left" onclick="setGraphMode('subtypes',this)" data-i18n="graph.subtypes">
+            ⬦ 子类型 — 实现类
+          </button>
+          <button class="tab" style="text-align:left" onclick="setGraphMode('entrypoints',this)" data-i18n="graph.entrypoints">
+            ⊙ 入口点 — 框架注解方法
+          </button>
+          <button class="tab" style="text-align:left" onclick="setGraphMode('flow',this)" data-i18n="graph.flow">
+            ⇢ 流分析 — 数据流 / CFG / PDG
+          </button>
+          <button class="tab" style="text-align:left" onclick="setGraphMode('deadcode',this)" data-i18n="graph.deadcode">
+            ✗ 死代码 — 无调用方的方法
+          </button>
+          <button class="tab" style="text-align:left" onclick="setGraphMode('testgap',this)" data-i18n="graph.testgap">
+            △ 测试空白 — 无覆盖路径的方法
+          </button>
+        </div>
+      </div>
+
+      <div id="depth-wrap">
+        <div class="field-label"><span data-i18n="graph.depth">深度</span> <span id="depth-val" style="color:var(--mint)">2</span></div>
+        <input type="range" id="graph-depth" min="1" max="5" value="2" style="width:100%;accent-color:var(--mint)"
+          oninput="document.getElementById('depth-val').textContent=this.value">
+      </div>
+
+      <div id="entrypoints-wrap" style="display:none">
+        <div class="field-label" data-i18n="graph.entrypointsProject">项目 ID（可选）</div>
+        <input type="text" id="entrypoints-project" placeholder="project-name" autocomplete="off"
+          list="projects-datalist"
+          data-i18n-ph="ph.projectName" onkeydown="if(event.key==='Enter')doGraphQuery()">
+        <div class="field-label" style="margin-top:8px" data-i18n="graph.entrypointsLang">语言过滤</div>
+        <select id="entrypoints-lang" onchange="doGraphQuery()">
+          <option value="" data-i18n="chip.all">全部</option>
+          <option value="java">Java</option>
+          <option value="c">C</option>
+          <option value="python">Python</option>
+        </select>
+      </div>
+
+      <button class="btn btn-primary" style="width:100%" onclick="doGraphQuery()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51 15.42 17.49M15.41 6.51 8.59 10.49"/></svg>
+        <span data-i18n="btn.queryGraph">查询图谱</span>
+      </button>
+
+      <div class="divider"></div>
+
+      <div class="field-label" id="graph-legend-label" data-i18n="graph.legend">图例</div>
+      <div class="graph-legend">
+        <div class="legend-item"><div class="legend-dot" style="background:#3EFFA0"></div>CLASS</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#A78BFA"></div>METHOD</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#FBBF24"></div>FUNCTION</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#60A5FA"></div>INTERFACE</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#F87171"></div>ROOT</div>
+      </div>
+
+      <div id="node-detail" style="display:none">
+        <div class="divider"></div>
+        <div class="field-label" data-i18n="graph.selectedNode">已选节点</div>
+        <div class="node-detail" id="node-detail-content"></div>
+        <button class="btn btn-ghost" style="width:100%;margin-top:8px;font-size:12px" onclick="pivotToNode()">
+          <span data-i18n="btn.pivotNode">以此节点为目标查询 →</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Canvas -->
+    <div class="graph-canvas">
+      <div class="flow-summary" id="flow-summary"></div>
+      <div class="flow-view-switch" id="flow-view-switch">
+        <button class="flow-view-btn active" data-flow-view="cfg" onclick="switchFlowView('cfg',this)">CFG</button>
+        <button class="flow-view-btn" data-flow-view="pdg" onclick="switchFlowView('pdg',this)">PDG</button>
+      </div>
+      <svg id="graph-svg">
+        <defs>
+          <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="3.5" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <filter id="glow-strong" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="6" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <linearGradient id="link-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#3EFFA0" stop-opacity="0.6"/>
+            <stop offset="100%" stop-color="#A78BFA" stop-opacity="0.3"/>
+          </linearGradient>
+        </defs>
+      </svg>
+      <div class="graph-hint" id="graph-hint" data-i18n="graph.hint">输入符号名称并查询以可视化图谱</div>
+      <div class="graph-controls">
+        <button class="graph-ctrl-btn" onclick="graphZoomIn()" title="Zoom in">+</button>
+        <button class="graph-ctrl-btn" onclick="graphZoomOut()" title="Zoom out">−</button>
+        <button class="graph-ctrl-btn" onclick="graphReset()" title="Reset" style="font-size:12px">⌂</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

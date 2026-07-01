@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="panel" id="panel-health" class="panel"
+     :class="{ active: $store.repograph.panel === 'health' }">
+  <div class="panel-header">
+    <div class="panel-title" data-i18n="health.title">系统健康</div>
+    <div class="panel-subtitle" data-i18n="health.subtitle">外部服务实时状态 · 每 5 秒轮询</div>
+  </div>
+  <div class="panel-body">
+    <div id="health-grid" class="health-grid"
+         hx-get="/api/fragments/health"
+         hx-trigger="load, every 5s"
+         hx-swap="innerHTML">
+      <div class="loading-row"><div class="spinner"></div></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

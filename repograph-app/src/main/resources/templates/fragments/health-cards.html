@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<th:block th:fragment="health-cards">
+
+  <!-- Health cards (main swap target content) -->
+  <div th:class="'health-card ' + ${qdrantCls}">
+    <div class="health-icon-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <rect x="2" y="3" width="20" height="14" rx="2"/>
+        <path d="m8 21 4-4 4 4"/><path d="M12 17v4"/>
+      </svg>
+    </div>
+    <div class="health-info">
+      <div class="health-name">Qdrant</div>
+      <div class="health-desc" data-i18n="health.qdrant.desc">localhost:16334 · gRPC · vector store</div>
+    </div>
+    <div class="health-status" th:text="${qdrant}">unknown</div>
+  </div>
+
+  <div th:class="'health-card ' + ${ollamaCls}">
+    <div class="health-icon-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>
+      </svg>
+    </div>
+    <div class="health-info">
+      <div class="health-name">Ollama</div>
+      <div class="health-desc" data-i18n="health.ollama.desc">192.168.4.113:11434 · nomic-embed-code</div>
+    </div>
+    <div class="health-status" th:text="${ollama}">unknown</div>
+  </div>
+
+  <div th:class="'health-card ' + ${neo4jCls}">
+    <div class="health-icon-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="18" r="3"/>
+        <path d="M8.5 7.5l2.5 8M15.5 7.5l-2.5 8M9 6h6"/>
+      </svg>
+    </div>
+    <div class="health-info">
+      <div class="health-name">Neo4j</div>
+      <div class="health-desc" data-i18n="health.neo4j.desc">localhost:7687 · Bolt · code knowledge graph</div>
+    </div>
+    <div class="health-status" th:text="${neo4j}">unknown</div>
+  </div>
+
+  <!-- OOB badge updates for the header -->
+  <div class="badge" id="hb-qdrant" hx-swap-oob="outerHTML">
+    <div id="hd-qdrant" th:class="'badge-dot ' + ${qdrantDot}"></div>
+    <span>Qdrant</span>
+  </div>
+  <div class="badge" id="hb-ollama" hx-swap-oob="outerHTML">
+    <div id="hd-ollama" th:class="'badge-dot ' + ${ollamaDot}"></div>
+    <span>Ollama</span>
+  </div>
+  <div class="badge" id="hb-neo4j" hx-swap-oob="outerHTML">
+    <div id="hd-neo4j" th:class="'badge-dot ' + ${neo4jDot}"></div>
+    <span>Neo4j</span>
+  </div>
+
+</th:block>
+</body>
+</html>

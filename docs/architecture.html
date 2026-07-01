@@ -1,0 +1,1127 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RepoGraph — Technical Architecture</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:      #070810;
+  --bg-2:    #0c0d1a;
+  --bg-3:    #111325;
+  --border:  rgba(255,255,255,0.07);
+  --mint:    #3EFFA0;
+  --mint-dim:#1f7a4d;
+  --purple:  #A78BFA;
+  --amber:   #FBBF24;
+  --blue:    #60A5FA;
+  --red:     #F87171;
+  --teal:    #2DD4BF;
+  --rose:    #FB7185;
+  --text:    #CBD5E1;
+  --text-2:  #64748B;
+  --text-3:  #334155;
+  --ff: 'Barlow Semi Condensed', sans-serif;
+  --fm: 'JetBrains Mono', monospace;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--ff);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  padding: 0 0 80px;
+}
+
+/* background grid */
+body::after {
+  content: '';
+  position: fixed; inset: 0;
+  background-image:
+    linear-gradient(rgba(62,255,160,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(62,255,160,0.025) 1px, transparent 1px);
+  background-size: 48px 48px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Page header ── */
+.page-header {
+  position: relative; z-index: 1;
+  padding: 48px 60px 36px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(7,8,16,0.8);
+  backdrop-filter: blur(20px);
+  display: flex;
+  align-items: flex-end;
+  gap: 32px;
+  flex-wrap: wrap;
+}
+
+.page-title {
+  font-size: 38px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1;
+}
+.page-title span { color: var(--mint); }
+
+.page-meta {
+  font-family: var(--fm);
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.9;
+}
+
+.version-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background: rgba(62,255,160,0.08);
+  border: 1px solid rgba(62,255,160,0.2);
+  border-radius: 20px;
+  font-family: var(--fm);
+  font-size: 11px;
+  color: var(--mint);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+/* ── Nav pills ── */
+.toc {
+  position: relative; z-index: 1;
+  padding: 16px 60px;
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(7,8,16,0.6);
+  backdrop-filter: blur(16px);
+  flex-wrap: wrap;
+}
+
+.toc-item {
+  padding: 5px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--fm);
+  letter-spacing: 0.05em;
+  color: var(--text-2);
+  text-decoration: none;
+  border: 1px solid var(--border);
+  transition: all 0.2s;
+}
+.toc-item:hover { color: var(--mint); border-color: rgba(62,255,160,0.3); background: rgba(62,255,160,0.06); }
+
+/* ── Content ── */
+.content { position: relative; z-index: 1; padding: 48px 60px; display: flex; flex-direction: column; gap: 56px; }
+
+.section-title {
+  font-size: 13px;
+  font-family: var(--fm);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.section-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+/* ── Module layer diagram ── */
+.arch-diagram { display: flex; flex-direction: column; gap: 0; }
+
+.arch-layer {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  position: relative;
+}
+
+.layer-label {
+  font-family: var(--fm);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 6px 14px;
+  width: 110px;
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+.layer-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  position: relative;
+}
+
+/* Connector lines between layers */
+.connector {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  position: relative;
+}
+.connector::before {
+  content: '';
+  position: absolute;
+  left: 50%; top: 0; bottom: 0;
+  width: 1px;
+  background: linear-gradient(180deg, transparent, var(--border), transparent);
+}
+.connector-arrow {
+  width: 8px; height: 8px;
+  border-right: 1.5px solid var(--text-3);
+  border-bottom: 1.5px solid var(--text-3);
+  transform: rotate(45deg);
+  position: relative; z-index: 1;
+  margin-top: 8px;
+}
+
+/* ── Module cards ── */
+.module-card {
+  border-radius: 12px;
+  padding: 18px 22px;
+  border: 1px solid;
+  position: relative;
+  transition: all 0.25s;
+  cursor: default;
+}
+.module-card:hover { transform: translateY(-2px); }
+
+.module-card.entry    { background: rgba(62,255,160,0.05);  border-color: rgba(62,255,160,0.2); }
+.module-card.api      { background: rgba(96,165,250,0.05);  border-color: rgba(96,165,250,0.2); }
+.module-card.domain   { background: rgba(251,191,36,0.05);  border-color: rgba(251,191,36,0.2); }
+.module-card.infra    { background: rgba(167,139,250,0.05); border-color: rgba(167,139,250,0.2); }
+.module-card.external { background: rgba(45,212,191,0.05);  border-color: rgba(45,212,191,0.2); }
+
+.module-card:hover.entry    { box-shadow: 0 8px 32px rgba(62,255,160,0.1);  border-color: rgba(62,255,160,0.4); }
+.module-card:hover.api      { box-shadow: 0 8px 32px rgba(96,165,250,0.1);  border-color: rgba(96,165,250,0.4); }
+.module-card:hover.domain   { box-shadow: 0 8px 32px rgba(251,191,36,0.1);  border-color: rgba(251,191,36,0.4); }
+.module-card:hover.infra    { box-shadow: 0 8px 32px rgba(167,139,250,0.1); border-color: rgba(167,139,250,0.4); }
+.module-card:hover.external { box-shadow: 0 8px 32px rgba(45,212,191,0.1);  border-color: rgba(45,212,191,0.4); }
+
+.module-name {
+  font-family: var(--fm);
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 4px;
+  letter-spacing: 0.02em;
+}
+.entry    .module-name { color: var(--mint); }
+.api      .module-name { color: var(--blue); }
+.domain   .module-name { color: var(--amber); }
+.infra    .module-name { color: var(--purple); }
+.external .module-name { color: var(--teal); }
+
+.module-role {
+  font-size: 12px;
+  color: var(--text-2);
+  font-weight: 500;
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+
+.module-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.tag {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: var(--fm);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.tag-mint   { background: rgba(62,255,160,0.1);  color: var(--mint); }
+.tag-blue   { background: rgba(96,165,250,0.1);  color: var(--blue); }
+.tag-amber  { background: rgba(251,191,36,0.1);  color: var(--amber); }
+.tag-purple { background: rgba(167,139,250,0.1); color: var(--purple); }
+.tag-teal   { background: rgba(45,212,191,0.1);  color: var(--teal); }
+.tag-rose   { background: rgba(251,113,133,0.1); color: var(--rose); }
+.tag-gray   { background: rgba(148,163,184,0.08); color: var(--text-2); }
+
+/* ── SVG diagram for main module arch ── */
+.svg-wrap {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+/* ── Pipeline flow ── */
+.pipeline {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.pipe-step {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.pipe-box {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  min-width: 120px;
+  transition: all 0.2s;
+}
+.pipe-box:hover { border-color: rgba(62,255,160,0.3); background: rgba(62,255,160,0.04); }
+
+.pipe-num {
+  font-family: var(--fm);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-3);
+  margin-bottom: 6px;
+  letter-spacing: 0.1em;
+}
+
+.pipe-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 4px;
+  letter-spacing: 0.02em;
+}
+
+.pipe-detail {
+  font-family: var(--fm);
+  font-size: 10px;
+  color: var(--text-2);
+  line-height: 1.6;
+}
+
+.pipe-arrow {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  color: var(--text-3);
+  flex-shrink: 0;
+  padding-top: 22px;
+}
+
+/* ── Data model cards ── */
+.model-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.model-card {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  transition: all 0.2s;
+}
+.model-card:hover { border-color: rgba(255,255,255,0.12); background: rgba(255,255,255,0.03); }
+
+.model-name {
+  font-family: var(--fm);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--amber);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.model-field {
+  display: flex;
+  gap: 10px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  font-family: var(--fm);
+  font-size: 11px;
+  align-items: baseline;
+}
+.model-field:last-child { border-bottom: none; }
+
+.field-type { color: var(--blue); min-width: 80px; flex-shrink: 0; }
+.field-name { color: var(--text); }
+.field-note { color: var(--text-3); font-size: 10px; margin-left: auto; }
+
+/* ── REST API table ── */
+.api-table { width: 100%; border-collapse: collapse; }
+.api-table th {
+  font-family: var(--fm); font-size: 10px; font-weight: 700;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text-3);
+  padding: 8px 14px; text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+.api-table td {
+  padding: 9px 14px;
+  font-family: var(--fm);
+  font-size: 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  vertical-align: middle;
+}
+.api-table tr:last-child td { border-bottom: none; }
+.api-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+.method-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  min-width: 42px;
+  text-align: center;
+}
+.get  { background: rgba(62,255,160,0.12);  color: var(--mint); }
+.post { background: rgba(96,165,250,0.12);  color: var(--blue); }
+
+.api-path { color: var(--text); }
+.api-path em { color: var(--purple); font-style: normal; }
+.api-desc { color: var(--text-2); }
+
+/* ── Tech stack grid ── */
+.tech-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.tech-card {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  transition: all 0.2s;
+}
+.tech-card:hover { border-color: rgba(255,255,255,0.12); }
+
+.tech-icon {
+  width: 36px; height: 36px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.tech-info { flex: 1; }
+.tech-name { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 2px; }
+.tech-desc { font-family: var(--fm); font-size: 10px; color: var(--text-2); line-height: 1.5; }
+
+/* ── Config box ── */
+.config-block {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px 24px;
+  font-family: var(--fm);
+  font-size: 12px;
+  color: var(--text-2);
+  line-height: 2;
+}
+.config-block .key   { color: var(--blue); }
+.config-block .val   { color: var(--mint); }
+.config-block .cmt   { color: var(--text-3); }
+.config-block .group { color: var(--amber); font-weight: 700; display: block; margin-top: 10px; }
+.config-block .group:first-child { margin-top: 0; }
+
+/* ── Dep constraint table ── */
+.constraint-table { width: 100%; border-collapse: collapse; }
+.constraint-table td {
+  padding: 8px 14px;
+  font-family: var(--fm);
+  font-size: 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  vertical-align: middle;
+}
+.constraint-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+.c-rule { color: var(--text); }
+.c-why  { color: var(--text-2); }
+.c-icon { font-size: 14px; }
+
+/* scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- ── Page Header ── -->
+<div class="page-header">
+  <div>
+    <div style="font-family:var(--fm);font-size:11px;color:var(--text-3);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px">Technical Architecture</div>
+    <div class="page-title">Code<span>Vector</span>DB</div>
+  </div>
+  <div class="page-meta">
+    Java 22+ · Spring Boot 3.x · Gradle Multi-Module (Kotlin DSL)<br>
+    Qdrant · Ollama · SQLite · JavaParser · Tree-sitter FFM
+  </div>
+  <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <div class="version-chip">v0.1.0</div>
+    <div class="version-chip" style="color:var(--blue);background:rgba(96,165,250,0.08);border-color:rgba(96,165,250,0.2)">8 modules</div>
+    <div class="version-chip" style="color:var(--purple);background:rgba(167,139,250,0.08);border-color:rgba(167,139,250,0.2)">Java / C / Python</div>
+  </div>
+</div>
+
+<!-- ── Nav ── -->
+<div class="toc">
+  <a href="#module-arch" class="toc-item">模块架构</a>
+  <a href="#dep-graph"   class="toc-item">依赖图</a>
+  <a href="#pipeline"    class="toc-item">索引管道</a>
+  <a href="#domain"      class="toc-item">领域模型</a>
+  <a href="#api"         class="toc-item">REST API</a>
+  <a href="#config"      class="toc-item">运行配置</a>
+  <a href="#tech"        class="toc-item">技术栈</a>
+  <a href="#constraints" class="toc-item">架构约束</a>
+</div>
+
+<div class="content">
+
+<!-- ══════════════════════════════════════════════
+     §1  MODULE ARCHITECTURE
+════════════════════════════════════════════════ -->
+<section id="module-arch">
+  <div class="section-title">§1 模块架构 · Module Architecture</div>
+
+  <svg viewBox="0 0 960 560" xmlns="http://www.w3.org/2000/svg"
+    style="width:100%;background:#0c0d1a;border:1px solid rgba(255,255,255,0.07);border-radius:16px;display:block">
+
+    <defs>
+      <marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+        <path d="M0,0 L8,3 L0,6" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1"/>
+      </marker>
+      <marker id="arr-mint" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+        <path d="M0,0 L8,3 L0,6" fill="none" stroke="rgba(62,255,160,0.5)" stroke-width="1"/>
+      </marker>
+      <filter id="glow-g">
+        <feGaussianBlur stdDeviation="3" result="blur"/>
+        <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+
+      <!-- radial bg glow at center -->
+      <radialGradient id="bg-glow" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="rgba(62,255,160,0.04)"/>
+        <stop offset="100%" stop-color="transparent"/>
+      </radialGradient>
+    </defs>
+
+    <rect width="960" height="560" fill="url(#bg-glow)"/>
+
+    <!-- Layer background bands -->
+    <rect x="0" y="16"  width="960" height="88"  rx="0" fill="rgba(62,255,160,0.02)"/>
+    <rect x="0" y="144" width="960" height="88"  rx="0" fill="rgba(96,165,250,0.02)"/>
+    <rect x="0" y="272" width="960" height="120" rx="0" fill="rgba(167,139,250,0.02)"/>
+    <rect x="0" y="432" width="960" height="88"  rx="0" fill="rgba(251,191,36,0.02)"/>
+
+    <!-- Layer labels -->
+    <text x="18" y="48"  font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(62,255,160,0.4)"  font-weight="700" letter-spacing="2" text-anchor="start" transform="rotate(-90,18,48)">ENTRY</text>
+    <text x="18" y="176" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(96,165,250,0.4)"  font-weight="700" letter-spacing="2" text-anchor="start" transform="rotate(-90,18,176)">API</text>
+    <text x="18" y="310" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(167,139,250,0.4)" font-weight="700" letter-spacing="2" text-anchor="start" transform="rotate(-90,18,310)">INFRA</text>
+    <text x="18" y="470" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(251,191,36,0.4)"  font-weight="700" letter-spacing="2" text-anchor="start" transform="rotate(-90,18,470)">DOMAIN</text>
+
+    <!-- ── repograph-app ── -->
+    <rect x="100" y="24" width="760" height="72" rx="10"
+      fill="rgba(62,255,160,0.06)" stroke="rgba(62,255,160,0.3)" stroke-width="1.5"/>
+    <text x="480" y="52" font-family="JetBrains Mono,monospace" font-size="15" fill="#3EFFA0" font-weight="700" text-anchor="middle" filter="url(#glow-g)">repograph-app</text>
+    <text x="480" y="70" font-family="JetBrains Mono,monospace" font-size="10" fill="rgba(62,255,160,0.6)" text-anchor="middle">Spring Boot 3.x · Picocli CLI · SQLite MD5 cache · serve / index / search commands</text>
+    <text x="480" y="86" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(100,116,139,0.8)" text-anchor="middle">com.repograph.app</text>
+
+    <!-- ── repograph-api ── -->
+    <rect x="240" y="152" width="480" height="72" rx="10"
+      fill="rgba(96,165,250,0.06)" stroke="rgba(96,165,250,0.3)" stroke-width="1.5"/>
+    <text x="480" y="180" font-family="JetBrains Mono,monospace" font-size="15" fill="#60A5FA" font-weight="700" text-anchor="middle">repograph-api</text>
+    <text x="480" y="198" font-family="JetBrains Mono,monospace" font-size="10" fill="rgba(96,165,250,0.6)" text-anchor="middle">Spring MVC REST Controllers · 15 endpoints · index / search / graph / sbom / health</text>
+    <text x="480" y="214" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(100,116,139,0.8)" text-anchor="middle">com.repograph.api</text>
+
+    <!-- ── Infrastructure modules ── -->
+    <!-- repograph-parser -->
+    <rect x="44"  y="280" width="162" height="104" rx="10"
+      fill="rgba(167,139,250,0.06)" stroke="rgba(167,139,250,0.25)" stroke-width="1.2"/>
+    <text x="125" y="305" font-family="JetBrains Mono,monospace" font-size="12" fill="#A78BFA" font-weight="700" text-anchor="middle">repograph-parser</text>
+    <text x="125" y="322" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(167,139,250,0.6)" text-anchor="middle">Java · C · Python</text>
+    <text x="125" y="339" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(100,116,139,0.7)" text-anchor="middle">JavaParser AST</text>
+    <text x="125" y="353" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(100,116,139,0.7)" text-anchor="middle">Tree-sitter FFM</text>
+    <text x="125" y="367" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(100,116,139,0.7)" text-anchor="middle">Heuristic fallback</text>
+
+    <!-- repograph-graph -->
+    <rect x="224" y="280" width="162" height="104" rx="10"
+      fill="rgba(167,139,250,0.06)" stroke="rgba(167,139,250,0.25)" stroke-width="1.2"/>
+    <text x="305" y="305" font-family="JetBrains Mono,monospace" font-size="12" fill="#A78BFA" font-weight="700" text-anchor="middle">repograph-graph</text>
+    <text x="305" y="322" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(167,139,250,0.6)" text-anchor="middle">Code Graph</text>
+    <text x="305" y="339" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(100,116,139,0.7)" text-anchor="middle">Neo4j 5.x (Bolt)</text>
+    <text x="305" y="353" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(100,116,139,0.7)" text-anchor="middle">Cypher queries</text>
+    <text x="305" y="367" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(100,116,139,0.7)" text-anchor="middle">callers / impact</text>
+
+    <!-- repograph-vector -->
+    <rect x="404" y="280" width="162" height="104" rx="10"
+      fill="rgba(167,139,250,0.06)" stroke="rgba(167,139,250,0.25)" stroke-width="1.2"/>
+    <text x="485" y="305" font-family="JetBrains Mono,monospace" font-size="12" fill="#A78BFA" font-weight="700" text-anchor="middle">repograph-vector</text>
+    <text x="485" y="322" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(167,139,250,0.6)" text-anchor="middle">Embedding + Store</text>
+    <text x="485" y="339" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(100,116,139,0.7)" text-anchor="middle">Ollama HTTP REST</text>
+    <text x="485" y="353" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(100,116,139,0.7)" text-anchor="middle">Qdrant gRPC SDK</text>
+    <text x="485" y="367" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(100,116,139,0.7)" text-anchor="middle">dual-vector</text>
+
+    <!-- repograph-sbom -->
+    <rect x="584" y="280" width="162" height="104" rx="10"
+      fill="rgba(167,139,250,0.06)" stroke="rgba(167,139,250,0.25)" stroke-width="1.2"/>
+    <text x="665" y="305" font-family="JetBrains Mono,monospace" font-size="12" fill="#A78BFA" font-weight="700" text-anchor="middle">repograph-sbom</text>
+    <text x="665" y="322" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(167,139,250,0.6)" text-anchor="middle">SBOM Extraction</text>
+    <text x="665" y="339" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(100,116,139,0.7)" text-anchor="middle">Maven pom.xml</text>
+    <text x="665" y="353" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(100,116,139,0.7)" text-anchor="middle">CycloneDX JSON</text>
+    <text x="665" y="367" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(100,116,139,0.7)" text-anchor="middle">dependency graph</text>
+
+    <!-- repograph-framework -->
+    <rect x="764" y="280" width="152" height="104" rx="10"
+      fill="rgba(167,139,250,0.06)" stroke="rgba(167,139,250,0.25)" stroke-width="1.2"/>
+    <text x="840" y="305" font-family="JetBrains Mono,monospace" font-size="12" fill="#A78BFA" font-weight="700" text-anchor="middle">repograph-framework</text>
+    <text x="840" y="322" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(167,139,250,0.6)" text-anchor="middle">Framework Analysis</text>
+    <text x="840" y="339" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(100,116,139,0.7)" text-anchor="middle">Spring Boot</text>
+    <text x="840" y="353" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(100,116,139,0.7)" text-anchor="middle">JAX-RS · MyBatis</text>
+    <text x="840" y="367" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(100,116,139,0.7)" text-anchor="middle">annotation detect</text>
+
+    <!-- ── repograph-core ── -->
+    <rect x="100" y="440" width="760" height="72" rx="10"
+      fill="rgba(251,191,36,0.06)" stroke="rgba(251,191,36,0.3)" stroke-width="1.5"/>
+    <text x="480" y="468" font-family="JetBrains Mono,monospace" font-size="15" fill="#FBBF24" font-weight="700" text-anchor="middle" filter="url(#glow-g)">repograph-core</text>
+    <text x="480" y="486" font-family="JetBrains Mono,monospace" font-size="10" fill="rgba(251,191,36,0.6)" text-anchor="middle">Domain Models · Interfaces · Zero third-party dependencies</text>
+    <text x="480" y="502" font-family="JetBrains Mono,monospace" font-size="9" fill="rgba(100,116,139,0.8)" text-anchor="middle">CodeUnit · RelationEdge · CodeParser · VectorStore · GraphStore · IndexPipeline · CodeUnitIdUtil</text>
+
+    <!-- ── Dependency arrows ── -->
+    <!-- repograph-app → repograph-api -->
+    <line x1="480" y1="96" x2="480" y2="150" stroke="rgba(62,255,160,0.35)" stroke-width="1.5" marker-end="url(#arr-mint)" stroke-dasharray="4,3"/>
+
+    <!-- repograph-app → infra modules (fan out) -->
+    <line x1="220" y1="96" x2="125" y2="278" stroke="rgba(62,255,160,0.18)" stroke-width="1" marker-end="url(#arr)"/>
+    <line x1="350" y1="96" x2="305" y2="278" stroke="rgba(62,255,160,0.18)" stroke-width="1" marker-end="url(#arr)"/>
+    <line x1="480" y1="96" x2="485" y2="278" stroke="rgba(62,255,160,0.18)" stroke-width="1" marker-end="url(#arr)"/>
+    <line x1="610" y1="96" x2="665" y2="278" stroke="rgba(62,255,160,0.18)" stroke-width="1" marker-end="url(#arr)"/>
+    <line x1="740" y1="96" x2="840" y2="278" stroke="rgba(62,255,160,0.18)" stroke-width="1" marker-end="url(#arr)"/>
+
+    <!-- repograph-api → infra modules -->
+    <line x1="325" y1="224" x2="305" y2="278" stroke="rgba(96,165,250,0.3)" stroke-width="1.2" marker-end="url(#arr)"/>
+    <line x1="425" y1="224" x2="485" y2="278" stroke="rgba(96,165,250,0.3)" stroke-width="1.2" marker-end="url(#arr)"/>
+    <line x1="535" y1="224" x2="665" y2="278" stroke="rgba(96,165,250,0.3)" stroke-width="1.2" marker-end="url(#arr)"/>
+    <line x1="620" y1="224" x2="840" y2="278" stroke="rgba(96,165,250,0.3)" stroke-width="1.2" marker-end="url(#arr)"/>
+
+    <!-- all infra → repograph-core -->
+    <line x1="125" y1="384" x2="200" y2="438" stroke="rgba(167,139,250,0.3)" stroke-width="1.2" marker-end="url(#arr)"/>
+    <line x1="305" y1="384" x2="320" y2="438" stroke="rgba(167,139,250,0.3)" stroke-width="1.2" marker-end="url(#arr)"/>
+    <line x1="485" y1="384" x2="480" y2="438" stroke="rgba(167,139,250,0.3)" stroke-width="1.2" marker-end="url(#arr)"/>
+    <line x1="665" y1="384" x2="640" y2="438" stroke="rgba(167,139,250,0.3)" stroke-width="1.2" marker-end="url(#arr)"/>
+    <line x1="840" y1="384" x2="760" y2="438" stroke="rgba(167,139,250,0.3)" stroke-width="1.2" marker-end="url(#arr)"/>
+
+    <!-- repograph-api → repograph-core -->
+    <line x1="480" y1="224" x2="480" y2="438" stroke="rgba(96,165,250,0.2)" stroke-width="1" stroke-dasharray="3,4" marker-end="url(#arr)"/>
+
+    <!-- repograph-app → repograph-core -->
+    <line x1="130" y1="60"  x2="108" y2="438" stroke="rgba(62,255,160,0.12)" stroke-width="1" stroke-dasharray="2,5" marker-end="url(#arr)"/>
+  </svg>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     §2  DEPENDENCY GRAPH (detail)
+════════════════════════════════════════════════ -->
+<section id="dep-graph">
+  <div class="section-title">§2 模块依赖明细 · Dependency Graph</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+
+    <div>
+      <div style="font-size:11px;font-family:var(--fm);color:var(--text-3);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:12px">实际依赖关系</div>
+      <div style="background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:20px;font-family:var(--fm);font-size:12px;line-height:2.2;color:var(--text-2)">
+        <div><span style="color:#3EFFA0">repograph-app</span> <span style="color:var(--text-3)">──►</span> <span style="color:#60A5FA">repograph-api</span> <span style="color:#A78BFA">repograph-parser</span> <span style="color:#A78BFA">repograph-graph</span> <span style="color:#A78BFA">repograph-vector</span> <span style="color:#A78BFA">repograph-sbom</span> <span style="color:#A78BFA">repograph-framework</span> <span style="color:#FBBF24">repograph-core</span></div>
+        <div><span style="color:#60A5FA">repograph-api</span> <span style="color:var(--text-3)">──►</span> <span style="color:#FBBF24">repograph-core</span> <span style="color:#A78BFA">repograph-graph</span> <span style="color:#A78BFA">repograph-vector</span> <span style="color:#A78BFA">repograph-sbom</span> <span style="color:#A78BFA">repograph-framework</span></div>
+        <div><span style="color:#A78BFA">repograph-parser</span> <span style="color:var(--text-3)">──►</span> <span style="color:#FBBF24">repograph-core</span></div>
+        <div><span style="color:#A78BFA">repograph-graph</span> <span style="color:var(--text-3)">──►</span> <span style="color:#FBBF24">repograph-core</span></div>
+        <div><span style="color:#A78BFA">repograph-vector</span> <span style="color:var(--text-3)">──►</span> <span style="color:#FBBF24">repograph-core</span></div>
+        <div><span style="color:#A78BFA">repograph-sbom</span> <span style="color:var(--text-3)">──►</span> <span style="color:#FBBF24">repograph-core</span></div>
+        <div><span style="color:#A78BFA">repograph-framework</span> <span style="color:var(--text-3)">──►</span> <span style="color:#FBBF24">repograph-core</span></div>
+        <div style="margin-top:4px;padding-top:8px;border-top:1px solid var(--border)"><span style="color:#F87171">禁止：</span> repograph-graph ╳ repograph-vector（并列能力）</div>
+      </div>
+    </div>
+
+    <div>
+      <div style="font-size:11px;font-family:var(--fm);color:var(--text-3);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:12px">接口 vs 实现分层</div>
+      <div style="background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:20px;font-family:var(--fm);font-size:12px;line-height:1.9">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div>
+            <div style="color:var(--amber);font-weight:700;margin-bottom:8px">repograph-core 接口定义</div>
+            <div style="color:var(--text-2)">CodeParser</div>
+            <div style="color:var(--text-2)">EmbeddingService</div>
+            <div style="color:var(--text-2)">VectorStore</div>
+            <div style="color:var(--text-2)">GraphStore</div>
+            <div style="color:var(--text-2)">IndexPipeline</div>
+            <div style="color:var(--text-2)">IndexStore</div>
+          </div>
+          <div>
+            <div style="color:var(--purple);font-weight:700;margin-bottom:8px">子模块实现</div>
+            <div style="color:var(--text-2)">JavaCodeParser, CCodeParser…</div>
+            <div style="color:var(--text-2)">OllamaEmbeddingService</div>
+            <div style="color:var(--text-2)">QdrantVectorStore</div>
+            <div style="color:var(--text-2)">CodeGraph (Neo4j Driver)</div>
+            <div style="color:var(--text-2)">DefaultIndexPipeline</div>
+            <div style="color:var(--text-2)">DefaultIndexStore</div>
+          </div>
+        </div>
+        <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);color:var(--text-3);font-size:10px">
+          依赖方向：子模块 → repograph-core，禁止反向
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     §3  INDEXING PIPELINE
+════════════════════════════════════════════════ -->
+<section id="pipeline">
+  <div class="section-title">§3 索引管道 · Indexing Pipeline</div>
+
+  <div class="pipeline">
+    <div class="pipe-step">
+      <div class="pipe-box">
+        <div class="pipe-num">01</div>
+        <div class="pipe-title">文件扫描</div>
+        <div class="pipe-detail">.java → java<br>.c .h → c<br>.py → python<br>projectRoot 遍历</div>
+      </div>
+    </div>
+    <div class="pipe-arrow">
+      <svg width="20" height="12" viewBox="0 0 20 12" fill="none"><path d="M1 6h16M13 1l6 5-6 5" stroke="rgba(100,116,139,0.6)" stroke-width="1.5" stroke-linecap="round"/></svg>
+    </div>
+    <div class="pipe-step">
+      <div class="pipe-box" style="border-color:rgba(251,191,36,0.2);background:rgba(251,191,36,0.04)">
+        <div class="pipe-num">02</div>
+        <div class="pipe-title" style="color:var(--amber)">增量过滤</div>
+        <div class="pipe-detail">SQLite MD5 缓存<br>~/.repograph/index.db<br>跳过未变更文件<br>noIncremental=skip</div>
+      </div>
+    </div>
+    <div class="pipe-arrow">
+      <svg width="20" height="12" viewBox="0 0 20 12" fill="none"><path d="M1 6h16M13 1l6 5-6 5" stroke="rgba(100,116,139,0.6)" stroke-width="1.5" stroke-linecap="round"/></svg>
+    </div>
+    <div class="pipe-step">
+      <div class="pipe-box" style="border-color:rgba(167,139,250,0.2);background:rgba(167,139,250,0.04)">
+        <div class="pipe-num">03</div>
+        <div class="pipe-title" style="color:var(--purple)">并行解析</div>
+        <div class="pipe-detail">ForkJoinPool<br>strategy=AUTO<br>精确 → 降级启发式<br>→ CodeUnit + Edge</div>
+      </div>
+    </div>
+    <div class="pipe-arrow">
+      <svg width="20" height="12" viewBox="0 0 20 12" fill="none"><path d="M1 6h16M13 1l6 5-6 5" stroke="rgba(100,116,139,0.6)" stroke-width="1.5" stroke-linecap="round"/></svg>
+    </div>
+    <div class="pipe-step">
+      <div class="pipe-box">
+        <div class="pipe-num">04</div>
+        <div class="pipe-title">元数据增强</div>
+        <div class="pipe-detail">framework 标注<br>is_entry_point<br>is_test 标记<br>ann_* 属性</div>
+      </div>
+    </div>
+    <div class="pipe-arrow">
+      <svg width="20" height="12" viewBox="0 0 20 12" fill="none"><path d="M1 6h16M13 1l6 5-6 5" stroke="rgba(100,116,139,0.6)" stroke-width="1.5" stroke-linecap="round"/></svg>
+    </div>
+    <div class="pipe-step">
+      <div class="pipe-box" style="border-color:rgba(167,139,250,0.2);background:rgba(167,139,250,0.04)">
+        <div class="pipe-num">05</div>
+        <div class="pipe-title" style="color:var(--purple)">图构建</div>
+        <div class="pipe-detail">CodeUnit + RelationEdge<br>→ Neo4j Bolt<br>UNWIND MERGE<br>批量写入</div>
+      </div>
+    </div>
+    <div class="pipe-arrow">
+      <svg width="20" height="12" viewBox="0 0 20 12" fill="none"><path d="M1 6h16M13 1l6 5-6 5" stroke="rgba(100,116,139,0.6)" stroke-width="1.5" stroke-linecap="round"/></svg>
+    </div>
+    <div class="pipe-step">
+      <div class="pipe-box" style="border-color:rgba(45,212,191,0.2);background:rgba(45,212,191,0.04)">
+        <div class="pipe-num">06</div>
+        <div class="pipe-title" style="color:var(--teal)">Embedding</div>
+        <div class="pipe-detail">Ollama HTTP<br>batch=8<br>semantic_vec<br>code_vec</div>
+      </div>
+    </div>
+    <div class="pipe-arrow">
+      <svg width="20" height="12" viewBox="0 0 20 12" fill="none"><path d="M1 6h16M13 1l6 5-6 5" stroke="rgba(100,116,139,0.6)" stroke-width="1.5" stroke-linecap="round"/></svg>
+    </div>
+    <div class="pipe-step">
+      <div class="pipe-box" style="border-color:rgba(45,212,191,0.2);background:rgba(45,212,191,0.04)">
+        <div class="pipe-num">07</div>
+        <div class="pipe-title" style="color:var(--teal)">写入 Qdrant</div>
+        <div class="pipe-detail">gRPC upsert<br>batch=256<br>双向量 payload<br>collection=code_units</div>
+      </div>
+    </div>
+    <div class="pipe-arrow">
+      <svg width="20" height="12" viewBox="0 0 20 12" fill="none"><path d="M1 6h16M13 1l6 5-6 5" stroke="rgba(100,116,139,0.6)" stroke-width="1.5" stroke-linecap="round"/></svg>
+    </div>
+    <div class="pipe-step">
+      <div class="pipe-box" style="border-color:rgba(251,191,36,0.2);background:rgba(251,191,36,0.04)">
+        <div class="pipe-num">08</div>
+        <div class="pipe-title" style="color:var(--amber)">更新缓存</div>
+        <div class="pipe-detail">SQLite 写入<br>新 MD5 记录<br>下次增量跳过<br>异步完成</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top:16px;background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:16px 20px;display:flex;gap:24px;flex-wrap:wrap">
+    <div style="font-size:12px;color:var(--text-2)">
+      <span style="color:var(--mint);font-family:var(--fm);font-weight:700">异步执行</span> —
+      <span style="font-family:var(--fm)">POST /api/v1/index/project</span> 返回 202，
+      用 <span style="font-family:var(--fm)">GET .../status</span> 轮询进度
+    </div>
+    <div style="font-size:12px;color:var(--text-2)">
+      <span style="color:var(--amber);font-family:var(--fm);font-weight:700">降级策略</span> —
+      精确解析失败时自动切启发式，ParseResult 记录 degraded 标记
+    </div>
+    <div style="font-size:12px;color:var(--text-2)">
+      <span style="color:var(--purple);font-family:var(--fm);font-weight:700">双向量</span> —
+      semantic_vec = embed(signature+annotations)，code_vec = embed(rawSource)
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     §4  DOMAIN MODELS
+════════════════════════════════════════════════ -->
+<section id="domain">
+  <div class="section-title">§4 核心领域模型 · Domain Models</div>
+  <div class="model-grid">
+
+    <div class="model-card">
+      <div class="model-name">
+        <span style="background:rgba(251,191,36,0.12);color:var(--amber);padding:2px 6px;border-radius:4px;font-size:10px">record</span>
+        CodeUnit
+      </div>
+      <div class="model-field"><span class="field-type">String</span><span class="field-name">id</span><span class="field-note">SHA256[:12]</span></div>
+      <div class="model-field"><span class="field-type">CodeUnitKind</span><span class="field-name">kind</span></div>
+      <div class="model-field"><span class="field-type">String</span><span class="field-name">language</span><span class="field-note">java|c|python</span></div>
+      <div class="model-field"><span class="field-type">String</span><span class="field-name">qualifiedName</span></div>
+      <div class="model-field"><span class="field-type">String</span><span class="field-name">simpleName</span></div>
+      <div class="model-field"><span class="field-type">String</span><span class="field-name">filePath</span><span class="field-note">relative</span></div>
+      <div class="model-field"><span class="field-type">int</span><span class="field-name">startLine / endLine</span><span class="field-note">1-based</span></div>
+      <div class="model-field"><span class="field-type">String</span><span class="field-name">rawSource</span></div>
+      <div class="model-field"><span class="field-type">String</span><span class="field-name">signature</span></div>
+      <div class="model-field"><span class="field-type">List&lt;String&gt;</span><span class="field-name">annotations</span></div>
+      <div class="model-field"><span class="field-type">String</span><span class="field-name">parentQualifiedName</span></div>
+      <div class="model-field"><span class="field-type">Map&lt;String,String&gt;</span><span class="field-name">metadata</span></div>
+    </div>
+
+    <div class="model-card">
+      <div class="model-name">
+        <span style="background:rgba(251,191,36,0.12);color:var(--amber);padding:2px 6px;border-radius:4px;font-size:10px">record</span>
+        RelationEdge
+      </div>
+      <div class="model-field"><span class="field-type">String</span><span class="field-name">sourceId</span></div>
+      <div class="model-field"><span class="field-type">String</span><span class="field-name">targetId</span></div>
+      <div class="model-field"><span class="field-type">EdgeKind</span><span class="field-name">kind</span></div>
+      <div class="model-field"><span class="field-type">boolean</span><span class="field-name">resolved</span><span class="field-note">in-repo target?</span></div>
+      <div class="model-field"><span class="field-type">String</span><span class="field-name">filePath</span></div>
+      <div class="model-field"><span class="field-type">int</span><span class="field-name">sourceLine</span></div>
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+        <div style="font-family:var(--fm);font-size:10px;color:var(--text-3);margin-bottom:6px;letter-spacing:0.06em">EDGE KINDS</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px">
+          <span class="tag tag-purple">CONTAINS</span>
+          <span class="tag tag-mint">CALLS</span>
+          <span class="tag tag-blue">IMPORTS</span>
+          <span class="tag tag-amber">EXTENDS</span>
+          <span class="tag tag-teal">IMPLEMENTS</span>
+          <span class="tag tag-rose">DEFINES_TYPE</span>
+          <span class="tag tag-gray">OVERRIDES</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="model-card">
+      <div class="model-name" style="color:var(--purple)">CodeUnitKind</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-family:var(--fm);font-size:11px">
+        <div style="color:var(--mint)">CLASS</div><div style="color:var(--text-3)">Java / C struct</div>
+        <div style="color:var(--mint)">INTERFACE</div><div style="color:var(--text-3)">Java</div>
+        <div style="color:var(--mint)">ENUM</div><div style="color:var(--text-3)">Java</div>
+        <div style="color:var(--mint)">ANNOTATION</div><div style="color:var(--text-3)">Java @interface</div>
+        <div style="color:var(--blue)">METHOD</div><div style="color:var(--text-3)">Java / Python</div>
+        <div style="color:var(--blue)">CONSTRUCTOR</div><div style="color:var(--text-3)">Java</div>
+        <div style="color:var(--amber)">FUNCTION</div><div style="color:var(--text-3)">C top-level</div>
+        <div style="color:var(--text-2)">FIELD</div><div style="color:var(--text-3)">member var</div>
+        <div style="color:var(--text-2)">STRUCT / UNION</div><div style="color:var(--text-3)">C only</div>
+        <div style="color:var(--text-2)">TYPEDEF / MACRO</div><div style="color:var(--text-3)">C only</div>
+      </div>
+    </div>
+
+    <div class="model-card">
+      <div class="model-name" style="color:var(--teal)">metadata 标准 key</div>
+      <div style="font-family:var(--fm);font-size:11px;line-height:2">
+        <div><span style="color:var(--blue)">visibility</span> <span style="color:var(--text-3)">→</span> <span style="color:var(--text-2)">public|private|protected|package|file-local</span></div>
+        <div><span style="color:var(--blue)">is_static / is_final / is_abstract</span> <span style="color:var(--text-3)">→</span> <span style="color:var(--mint)">"true"</span></div>
+        <div><span style="color:var(--blue)">is_record / is_declaration / is_builtin</span> <span style="color:var(--text-3)">→</span> <span style="color:var(--mint)">"true"</span></div>
+        <div><span style="color:var(--blue)">is_entry_point</span> <span style="color:var(--text-3)">→</span> <span style="color:var(--mint)">"true"</span> <span style="color:var(--text-3)">(框架注解入口)</span></div>
+        <div><span style="color:var(--blue)">is_test</span> <span style="color:var(--text-3)">→</span> <span style="color:var(--mint)">"true"</span> <span style="color:var(--text-3)">(@Test 或 *Test.java)</span></div>
+        <div><span style="color:var(--blue)">return_type</span> <span style="color:var(--text-3)">→</span> <span style="color:var(--text-2)">返回类型字符串</span></div>
+        <div><span style="color:var(--blue)">param_types</span> <span style="color:var(--text-3)">→</span> <span style="color:var(--text-2)">"String,int" 逗号分隔</span></div>
+        <div><span style="color:var(--blue)">framework</span> <span style="color:var(--text-3)">→</span> <span style="color:var(--text-2)">spring|jaxrs|mybatis</span></div>
+        <div><span style="color:var(--blue)">ann_&lt;AnnotationName&gt;</span> <span style="color:var(--text-3)">→</span> <span style="color:var(--text-2)">value/path 属性</span></div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     §5  REST API
+════════════════════════════════════════════════ -->
+<section id="api">
+  <div class="section-title">§5 REST API</div>
+  <div style="background:var(--bg-2);border:1px solid var(--border);border-radius:12px;overflow:hidden">
+    <table class="api-table">
+      <thead>
+        <tr>
+          <th>Method</th>
+          <th>Path</th>
+          <th>描述</th>
+          <th>关键参数</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><span class="method-badge post">POST</span></td><td class="api-path">/api/v1/index/<em>project</em></td><td class="api-desc">触发异步索引（202）</td><td class="api-desc" style="font-family:var(--fm);font-size:10px">projectRoot, lang, strategy, noIncremental</td></tr>
+        <tr><td><span class="method-badge get">GET</span></td><td class="api-path">/api/v1/index/<em>project</em>/status</td><td class="api-desc">轮询索引进度</td><td class="api-desc" style="font-family:var(--fm);font-size:10px">projectRoot</td></tr>
+        <tr><td><span class="method-badge post">POST</span></td><td class="api-path">/api/v1/index/<em>file</em></td><td class="api-desc">单文件索引</td><td class="api-desc" style="font-family:var(--fm);font-size:10px">file, projectRoot, strategy</td></tr>
+        <tr><td><span class="method-badge get">GET</span></td><td class="api-path">/api/v1/search/<em>semantic</em></td><td class="api-desc">自然语言语义检索</td><td class="api-desc" style="font-family:var(--fm);font-size:10px">q, lang, kind, limit, projectId, entryOnly, noTest</td></tr>
+        <tr><td><span class="method-badge get">GET</span></td><td class="api-path">/api/v1/search/<em>code</em></td><td class="api-desc">代码片段相似检索</td><td class="api-desc" style="font-family:var(--fm);font-size:10px">snippet, lang, kind, limit</td></tr>
+        <tr><td><span class="method-badge get">GET</span></td><td class="api-path">/api/v1/symbol/<em>{qualifiedName}</em></td><td class="api-desc">按全限定名查找符号</td><td class="api-desc" style="font-family:var(--fm);font-size:10px">—</td></tr>
+        <tr><td><span class="method-badge get">GET</span></td><td class="api-path">/api/v1/locate</td><td class="api-desc">按文件+行号定位</td><td class="api-desc" style="font-family:var(--fm);font-size:10px">file, line</td></tr>
+        <tr><td><span class="method-badge get">GET</span></td><td class="api-path">/api/v1/graph/<em>callers</em></td><td class="api-desc">调用方查询</td><td class="api-desc" style="font-family:var(--fm);font-size:10px">target, depth</td></tr>
+        <tr><td><span class="method-badge get">GET</span></td><td class="api-path">/api/v1/graph/<em>impact</em></td><td class="api-desc">影响面分析</td><td class="api-desc" style="font-family:var(--fm);font-size:10px">target</td></tr>
+        <tr><td><span class="method-badge get">GET</span></td><td class="api-path">/api/v1/graph/<em>subtypes</em></td><td class="api-desc">子类型/实现类查询</td><td class="api-desc" style="font-family:var(--fm);font-size:10px">target</td></tr>
+        <tr><td><span class="method-badge get">GET</span></td><td class="api-path">/api/v1/sbom/<em>{projectId}</em></td><td class="api-desc">CycloneDX SBOM 导出</td><td class="api-desc" style="font-family:var(--fm);font-size:10px">format=cyclonedx</td></tr>
+        <tr><td><span class="method-badge get">GET</span></td><td class="api-path">/api/v1/frameworks/<em>{projectId}</em></td><td class="api-desc">框架注解统计</td><td class="api-desc" style="font-family:var(--fm);font-size:10px">—</td></tr>
+        <tr><td><span class="method-badge get">GET</span></td><td class="api-path">/api/v1/health</td><td class="api-desc">外部服务健康检查</td><td class="api-desc" style="font-family:var(--fm);font-size:10px">→ {status, qdrant, ollama}</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     §6  RUNTIME CONFIG
+════════════════════════════════════════════════ -->
+<section id="config">
+  <div class="section-title">§6 运行时配置 · Runtime Configuration</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+
+    <div class="config-block">
+      <span class="group"># Qdrant (gRPC)</span>
+      <span class="key">repograph.qdrant.host</span>              = <span class="val">localhost</span><br>
+      <span class="key">repograph.qdrant.port</span>              = <span class="val">16334</span>   <span class="cmt"># gRPC</span><br>
+      <span class="key">repograph.qdrant.collection</span>        = <span class="val">code_units</span><br>
+      <span class="key">repograph.qdrant.vector-size</span>       = <span class="val">3584</span>    <span class="cmt"># nomic-embed-code</span>
+      <span class="group"># Ollama (远程)</span>
+      <span class="key">repograph.ollama.base-url</span>          = <span class="val">http://192.168.4.113:11434</span><br>
+      <span class="key">repograph.ollama.model</span>             = <span class="val">manutic/nomic-embed-code</span><br>
+      <span class="key">repograph.ollama.timeout-seconds</span>   = <span class="val">300</span>     <span class="cmt"># 7.5GB 模型</span>
+      <span class="group"># 索引批次</span>
+      <span class="key">repograph.index.batch-size.embed</span>   = <span class="val">8</span>       <span class="cmt"># 大模型减小批次</span><br>
+      <span class="key">repograph.index.batch-size.upsert</span>  = <span class="val">256</span><br>
+      <span class="key">repograph.index.default-strategy</span>   = <span class="val">AUTO</span>
+    </div>
+
+    <div>
+      <div style="background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:16px 20px;margin-bottom:12px">
+        <div style="font-size:11px;font-family:var(--fm);color:var(--text-3);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:12px">Docker 端口映射</div>
+        <div style="font-family:var(--fm);font-size:12px;line-height:2;color:var(--text-2)">
+          <span style="color:var(--teal)">-p 16333:6333</span> — Qdrant HTTP REST<br>
+          <span style="color:var(--teal)">-p 16334:6334</span> — Qdrant gRPC<br>
+          <span style="color:var(--teal)">-p 7687:7687</span> — Neo4j Bolt<br>
+          <span style="color:var(--text-3)">SQLite: ~/.repograph/index.db</span> (增量缓存)
+        </div>
+      </div>
+      <div style="background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:16px 20px">
+        <div style="font-size:11px;font-family:var(--fm);color:var(--text-3);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:12px">projectId / filePath 规范</div>
+        <div style="font-family:var(--fm);font-size:11px;line-height:1.9;color:var(--text-2)">
+          <span style="color:var(--blue)">projectId</span> = SHA256(projectRoot.normalize())[:12]<br>
+          <span style="color:var(--blue)">filePath</span>  = projectRoot.relativize(file), '/' sep<br>
+          <span style="color:var(--blue)">unitId</span>    = SHA256(filePath + kind + qn)[:12]
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     §7  TECH STACK
+════════════════════════════════════════════════ -->
+<section id="tech">
+  <div class="section-title">§7 技术栈 · Technology Stack</div>
+  <div class="tech-grid">
+    <div class="tech-card">
+      <div class="tech-icon" style="background:rgba(62,255,160,0.08);color:var(--mint)">☕</div>
+      <div class="tech-info">
+        <div class="tech-name">Java 22+</div>
+        <div class="tech-desc">--enable-preview<br>Records · Pattern Match<br>FFM (Foreign Memory)</div>
+      </div>
+    </div>
+    <div class="tech-card">
+      <div class="tech-icon" style="background:rgba(96,165,250,0.08);color:var(--blue)">🌱</div>
+      <div class="tech-info">
+        <div class="tech-name">Spring Boot 3.x</div>
+        <div class="tech-desc">Spring MVC REST<br>Constructor injection<br>SLF4J logging</div>
+      </div>
+    </div>
+    <div class="tech-card">
+      <div class="tech-icon" style="background:rgba(251,191,36,0.08);color:var(--amber)">⚙️</div>
+      <div class="tech-info">
+        <div class="tech-name">Gradle 9.x (Kotlin DSL)</div>
+        <div class="tech-desc">Multi-module build<br>Version Catalog (TOML)<br>GraalVM Native (future)</div>
+      </div>
+    </div>
+    <div class="tech-card">
+      <div class="tech-icon" style="background:rgba(167,139,250,0.08);color:var(--purple)">🌳</div>
+      <div class="tech-info">
+        <div class="tech-name">JavaParser</div>
+        <div class="tech-desc">Java 21 AST<br>Two-pass visitor<br>Full signature extraction</div>
+      </div>
+    </div>
+    <div class="tech-card">
+      <div class="tech-icon" style="background:rgba(167,139,250,0.08);color:var(--purple)">🔠</div>
+      <div class="tech-info">
+        <div class="tech-name">Tree-sitter FFM</div>
+        <div class="tech-desc">C / Python parsing<br>Fault-tolerant<br>No JNI complexity</div>
+      </div>
+    </div>
+    <div class="tech-card">
+      <div class="tech-icon" style="background:rgba(45,212,191,0.08);color:var(--teal)">🔷</div>
+      <div class="tech-info">
+        <div class="tech-name">Qdrant</div>
+        <div class="tech-desc">Java gRPC SDK<br>Dual-vector per unit<br>Filter: kind/lang/project</div>
+      </div>
+    </div>
+    <div class="tech-card">
+      <div class="tech-icon" style="background:rgba(45,212,191,0.08);color:var(--teal)">🦙</div>
+      <div class="tech-info">
+        <div class="tech-name">Ollama</div>
+        <div class="tech-desc">HTTP REST embedding<br>nomic-embed-code 7.5GB<br>dim=3584</div>
+      </div>
+    </div>
+    <div class="tech-card">
+      <div class="tech-icon" style="background:rgba(251,191,36,0.08);color:var(--amber)">🗃️</div>
+      <div class="tech-info">
+        <div class="tech-name">SQLite (JDBC)</div>
+        <div class="tech-desc">MD5 incremental cache<br>~/.repograph/index.db<br>No extra service dep</div>
+      </div>
+    </div>
+    <div class="tech-card">
+      <div class="tech-icon" style="background:rgba(167,139,250,0.08);color:var(--purple)">📊</div>
+      <div class="tech-info">
+        <div class="tech-name">Neo4j 5.x</div>
+        <div class="tech-desc">Bolt 协议 + Cypher<br>变长路径遍历<br>callers/impact/subtypes</div>
+      </div>
+    </div>
+    <div class="tech-card">
+      <div class="tech-icon" style="background:rgba(251,113,133,0.08);color:var(--rose)">📦</div>
+      <div class="tech-info">
+        <div class="tech-name">CycloneDX</div>
+        <div class="tech-desc">SBOM JSON output<br>Maven pom.xml parse<br>Dependency graph</div>
+      </div>
+    </div>
+    <div class="tech-card">
+      <div class="tech-icon" style="background:rgba(62,255,160,0.08);color:var(--mint)">⌨️</div>
+      <div class="tech-info">
+        <div class="tech-name">Picocli</div>
+        <div class="tech-desc">Spring Boot starter<br>serve / index / search<br>CLI subcommands</div>
+      </div>
+    </div>
+    <div class="tech-card">
+      <div class="tech-icon" style="background:rgba(96,165,250,0.08);color:var(--blue)">🧪</div>
+      <div class="tech-info">
+        <div class="tech-name">JUnit 5</div>
+        <div class="tech-desc">Unit tests per module<br>IT suffix integration tests<br>TempDir fixtures</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     §8  ARCHITECTURE CONSTRAINTS
+════════════════════════════════════════════════ -->
+<section id="constraints">
+  <div class="section-title">§8 架构约束 · Architecture Constraints</div>
+  <div style="background:var(--bg-2);border:1px solid var(--border);border-radius:12px;overflow:hidden">
+    <table class="constraint-table">
+      <tbody>
+        <tr>
+          <td style="width:32px;text-align:center" class="c-icon">🔒</td>
+          <td class="c-rule" style="width:340px"><span style="font-family:var(--fm);color:var(--red)">repograph-core</span> 禁止引入任何第三方依赖</td>
+          <td class="c-why">领域模型层必须无外部耦合，保证可移植性</td>
+        </tr>
+        <tr>
+          <td class="c-icon" style="text-align:center">🔒</td>
+          <td class="c-rule">接口定义在 <span style="font-family:var(--fm);color:var(--amber)">repograph-core</span>，实现在子模块，禁止反向依赖</td>
+          <td class="c-why">依赖方向单向，保持架构稳定</td>
+        </tr>
+        <tr>
+          <td class="c-icon" style="text-align:center">⛔</td>
+          <td class="c-rule"><span style="font-family:var(--fm);color:var(--purple)">repograph-graph</span> 不依赖 <span style="font-family:var(--fm);color:var(--purple)">repograph-vector</span></td>
+          <td class="c-why">图与向量是并列能力，互不知晓，防止意外耦合</td>
+        </tr>
+        <tr>
+          <td class="c-icon" style="text-align:center">🔒</td>
+          <td class="c-rule"><span style="font-family:var(--fm);color:var(--amber)">CodeUnit</span> 字段不可随意增删</td>
+          <td class="c-why">影响 Qdrant payload、SQLite 缓存、图序列化的兼容性</td>
+        </tr>
+        <tr>
+          <td class="c-icon" style="text-align:center">📝</td>
+          <td class="c-rule"><span style="font-family:var(--fm);color:var(--blue)">metadata</span> 新 key 必须在 CONTEXT.md 注释说明</td>
+          <td class="c-why">防止各模块各自为政，保持 payload 文档化</td>
+        </tr>
+        <tr>
+          <td class="c-icon" style="text-align:center">🔒</td>
+          <td class="c-rule">EXTENDS 和 IMPLEMENTS 必须分开存储</td>
+          <td class="c-why">影响分析时语义不同，不可混用</td>
+        </tr>
+        <tr>
+          <td class="c-icon" style="text-align:center">🔒</td>
+          <td class="c-rule">禁止在 Java 类中硬编码连接地址或端口</td>
+          <td class="c-why">统一从 application.properties 读取</td>
+        </tr>
+        <tr>
+          <td class="c-icon" style="text-align:center">🔒</td>
+          <td class="c-rule">禁止 <span style="font-family:var(--fm);color:var(--red)">@Autowired</span> 字段注入，统一构造器注入</td>
+          <td class="c-why">Spring 规范，便于测试，消除 Spring AOT 歧义</td>
+        </tr>
+        <tr>
+          <td class="c-icon" style="text-align:center">🔒</td>
+          <td class="c-rule">禁止 <span style="font-family:var(--fm);color:var(--red)">System.out.println</span>，统一用 SLF4J</td>
+          <td class="c-why">日志规范，生产可观测性</td>
+        </tr>
+        <tr>
+          <td class="c-icon" style="text-align:center">📦</td>
+          <td class="c-rule">所有依赖版本只在 <span style="font-family:var(--fm);color:var(--teal)">gradle/libs.versions.toml</span> 中定义</td>
+          <td class="c-why">Version Catalog 统一管理，禁止在 build.gradle.kts 写裸版本号</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+</div><!-- /content -->
+
+</body>
+</html>

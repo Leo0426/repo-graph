@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="panel" id="panel-vulns" class="panel"
+     :class="{ active: $store.repograph.panel === 'vulns' }">
+  <div class="panel-header">
+    <div class="panel-title" data-i18n="vulns.title">代码漏洞</div>
+    <div class="panel-subtitle" data-i18n="vulns.subtitle">静态规则扫描 · 结果需人工确认</div>
+  </div>
+  <div class="panel-body">
+
+    <!-- Scan bar -->
+    <div class="card" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <select id="vuln-project-select" style="flex:1;min-width:160px" onchange="onVulnProjectChange()">
+        <option value="" data-i18n="ph.selectProject">— 选择项目 —</option>
+      </select>
+      <button class="btn btn-primary" onclick="triggerVulnScan()" id="vuln-scan-btn" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <span data-i18n="btn.scanVulns">代码扫描</span>
+      </button>
+      <button class="btn btn-secondary" onclick="triggerDepsScan()" id="vuln-deps-btn" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        <span data-i18n="btn.scanDeps">依赖扫描</span>
+      </button>
+      <div id="vuln-scan-status" style="font-size:12px;color:var(--text-3)"></div>
+    </div>
+
+    <!-- Report button -->
+    <div style="display:flex;justify-content:flex-end;margin-top:8px">
+      <button class="btn btn-ghost" onclick="showVulnReport()" id="vuln-report-btn" disabled style="font-size:12px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        <span data-i18n="btn.vulnReport">生成报告</span>
+      </button>
+    </div>
+
+    <!-- Filters -->
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+      <select id="vuln-filter-severity" onchange="loadVulns()" style="width:130px">
+        <option value="" data-i18n="vuln.allSeverity">全部严重程度</option>
+        <option value="CRITICAL" data-i18n="vuln.critical">CRITICAL</option>
+        <option value="HIGH" data-i18n="vuln.high">HIGH</option>
+        <option value="MEDIUM" data-i18n="vuln.medium">MEDIUM</option>
+        <option value="LOW" data-i18n="vuln.low">LOW</option>
+      </select>
+      <select id="vuln-filter-status" onchange="loadVulns()" style="width:130px">
+        <option value="" data-i18n="vuln.allStatus">全部状态</option>
+        <option value="SUSPECTED" data-i18n="vuln.suspected">SUSPECTED</option>
+        <option value="CONFIRMED" data-i18n="vuln.confirmed">CONFIRMED</option>
+        <option value="FIXED" data-i18n="vuln.fixed">FIXED</option>
+        <option value="DISMISSED" data-i18n="vuln.dismissed">DISMISSED</option>
+      </select>
+    </div>
+
+    <!-- Findings list -->
+    <div id="vuln-list" style="margin-top:12px">
+      <div class="empty-state" data-i18n="vulns.empty">选择项目并运行扫描以发现漏洞</div>
+    </div>
+
+    <!-- Report modal -->
+    <div id="vuln-report-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);
+         z-index:9999;align-items:center;justify-content:center">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;
+                  padding:24px;width:min(700px,90vw);max-height:80vh;display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div style="font-weight:700;font-size:16px" data-i18n="vuln.reportTitle">漏洞报告</div>
+          <button class="btn btn-ghost" style="padding:4px 10px" onclick="closeVulnReport()">✕</button>
+        </div>
+        <textarea id="vuln-report-text" readonly
+          style="flex:1;min-height:400px;font-family:var(--fm);font-size:12px;
+                 background:var(--bg);border:1px solid var(--border);border-radius:6px;
+                 padding:12px;resize:none;color:var(--text)"></textarea>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn btn-ghost" onclick="copyVulnReport()" data-i18n="btn.copy">复制</button>
+          <button class="btn btn-ghost" onclick="closeVulnReport()" data-i18n="btn.close">关闭</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

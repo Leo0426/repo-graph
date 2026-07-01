@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MCP stdio 服务端日志配置。
+  stdout 只允许有 MCP JSON-RPC 内容，所有 Spring/应用日志写入文件。
+-->
+<configuration>
+    <property name="LOG_FILE" value="${user.home}/.repograph/mcp.log"/>
+
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_FILE}</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_FILE}.%d{yyyy-MM-dd}</fileNamePattern>
+            <maxHistory>7</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <charset>UTF-8</charset>
+            <pattern>%d{HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Root: WARN 及以上写入文件，不写 console -->
+    <root level="WARN">
+        <appender-ref ref="FILE"/>
+    </root>
+
+    <!-- RepoGraph MCP 自身日志 INFO 及以上写文件 -->
+    <logger name="com.repograph.mcp" level="INFO" additivity="false">
+        <appender-ref ref="FILE"/>
+    </logger>
+</configuration>

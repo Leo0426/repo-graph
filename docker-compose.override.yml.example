@@ -1,0 +1,45 @@
+# docker-compose.override.yml.example
+#
+# Copy this file to docker-compose.override.yml and edit as needed.
+# docker-compose.override.yml is gitignored so your local settings stay local.
+#
+# Common use case: tell repograph-app where to find your Ollama instance.
+# Ollama is NOT included in docker-compose.yml because the embedding model
+# (manutic/nomic-embed-code, ~7.5 GB) is GPU-dependent and users run it
+# on their own host or remote machine.
+
+# ── Option A: Ollama running natively on your host ──────────────────────────
+#
+# On macOS / Windows (Docker Desktop):
+#   REPOGRAPH_OLLAMA_BASE_URL=http://host.docker.internal:11434
+#
+# On Linux (Docker bridge network default):
+#   REPOGRAPH_OLLAMA_BASE_URL=http://172.17.0.1:11434
+#
+# Or just leave the default (http://localhost:11434) if you run repograph-app
+# directly via `java -jar`, not inside Docker.
+
+# ── Option B: Self-managed Ollama container (advanced) ──────────────────────
+#
+# Uncomment the block below only if you want Docker to manage Ollama too.
+# Requires an NVIDIA GPU and the nvidia-container-toolkit installed.
+# The first `docker compose up` will pull ~7.5 GB of model weights.
+#
+# services:
+#   ollama:
+#     image: ollama/ollama:latest
+#     ports:
+#       - "11434:11434"
+#     volumes:
+#       - ollama_models:/root/.ollama
+#     deploy:
+#       resources:
+#         reservations:
+#           devices:
+#             - driver: nvidia
+#               count: 1
+#               capabilities: [gpu]
+#     restart: unless-stopped
+#
+# volumes:
+#   ollama_models:

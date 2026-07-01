@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="panel" id="panel-benchmark" class="panel"
+     :class="{ active: $store.repograph.panel === 'benchmark' }">
+  <div class="panel-header">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+      <div>
+        <div class="panel-title" data-i18n="benchmark.title">检索效果评估</div>
+        <div class="bm-run-meta" id="bm-run-meta" data-i18n="benchmark.subtitle">语义检索 &amp; 代码相似检索 · Hit@K · MRR</div>
+      </div>
+      <button class="btn btn-ghost" style="flex-shrink:0;margin-top:2px" onclick="loadBenchmark()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+        <span data-i18n="btn.refresh">刷新</span>
+      </button>
+    </div>
+  </div>
+  <div class="panel-body" id="bm-body">
+    <div class="loading-row"><div class="spinner"></div><span data-i18n="benchmark.loading">加载评估结果…</span></div>
+  </div>
+</div>
+</body>
+</html>

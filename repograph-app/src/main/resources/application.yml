@@ -1,0 +1,24 @@
+repograph:
+  qdrant:
+    host: localhost
+    port: 16334
+    collection: code_units
+    vector-size: 3584
+  ollama:
+    base-url: http://localhost:11434
+    model: manutic/nomic-embed-code
+    timeout-seconds: 300
+  neo4j:
+    uri: bolt://localhost:7687
+    user: neo4j
+    password: neo4jneo4j
+  index:
+    db-path: ${user.home}/.repograph/index.db
+    batch-size:
+      embed: 8
+      upsert: 256
+      parallelism: 4   # concurrent embed batches; pool size = 2 × parallelism
+    default-strategy: AUTO
+
+server:
+  port: 8080

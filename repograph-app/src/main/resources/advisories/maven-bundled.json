@@ -1,0 +1,802 @@
+[
+  {
+    "id": "CVE-2021-44228",
+    "summary": "Apache Log4j2 JNDI 远程代码执行（Log4Shell）",
+    "severity": "CRITICAL",
+    "cwe": "CWE-502",
+    "groupId": "org.apache.logging.log4j",
+    "artifactId": "log4j-core",
+    "introduced": "2.0-beta9",
+    "fixed": "2.15.0"
+  },
+  {
+    "id": "CVE-2021-45046",
+    "summary": "Apache Log4j2 JNDI 二次 RCE（CVE-2021-44228 修复不完整）",
+    "severity": "CRITICAL",
+    "cwe": "CWE-502",
+    "groupId": "org.apache.logging.log4j",
+    "artifactId": "log4j-core",
+    "introduced": "2.0-beta9",
+    "fixed": "2.16.0"
+  },
+  {
+    "id": "CVE-2021-45105",
+    "summary": "Apache Log4j2 StackOverflow DoS",
+    "severity": "HIGH",
+    "cwe": "CWE-674",
+    "groupId": "org.apache.logging.log4j",
+    "artifactId": "log4j-core",
+    "introduced": "2.0-alpha1",
+    "fixed": "2.17.0"
+  },
+  {
+    "id": "CVE-2021-44832",
+    "summary": "Apache Log4j2 JDBC Appender RCE",
+    "severity": "HIGH",
+    "cwe": "CWE-502",
+    "groupId": "org.apache.logging.log4j",
+    "artifactId": "log4j-core",
+    "introduced": "2.0-alpha7",
+    "fixed": "2.17.1"
+  },
+  {
+    "id": "CVE-2019-17571",
+    "summary": "Apache Log4j 1.x SocketServer 反序列化 RCE（EOL，无修复版本）",
+    "severity": "CRITICAL",
+    "cwe": "CWE-502",
+    "groupId": "log4j",
+    "artifactId": "log4j",
+    "introduced": "1.0.0",
+    "fixed": ""
+  },
+  {
+    "id": "CVE-2022-22965",
+    "summary": "Spring Framework RCE via Data Binding（Spring4Shell）",
+    "severity": "CRITICAL",
+    "cwe": "CWE-94",
+    "groupId": "org.springframework",
+    "artifactId": "spring-webmvc",
+    "introduced": "5.3.0",
+    "fixed": "5.3.18"
+  },
+  {
+    "id": "CVE-2022-22965",
+    "summary": "Spring Framework RCE via Data Binding（Spring4Shell）",
+    "severity": "CRITICAL",
+    "cwe": "CWE-94",
+    "groupId": "org.springframework",
+    "artifactId": "spring-beans",
+    "introduced": "5.3.0",
+    "fixed": "5.3.18"
+  },
+  {
+    "id": "CVE-2022-22963",
+    "summary": "Spring Cloud Function SpEL 表达式注入 RCE",
+    "severity": "CRITICAL",
+    "cwe": "CWE-917",
+    "groupId": "org.springframework.cloud",
+    "artifactId": "spring-cloud-function-context",
+    "introduced": "3.1.0",
+    "fixed": "3.1.7"
+  },
+  {
+    "id": "CVE-2022-22950",
+    "summary": "Spring Framework SpEL DoS",
+    "severity": "MEDIUM",
+    "cwe": "CWE-400",
+    "groupId": "org.springframework",
+    "artifactId": "spring-expression",
+    "introduced": "5.3.0",
+    "fixed": "5.3.17"
+  },
+  {
+    "id": "CVE-2023-20860",
+    "summary": "Spring Framework 双通配符安全绕过",
+    "severity": "HIGH",
+    "cwe": "CWE-863",
+    "groupId": "org.springframework",
+    "artifactId": "spring-webmvc",
+    "introduced": "6.0.0",
+    "fixed": "6.0.7"
+  },
+  {
+    "id": "CVE-2018-1270",
+    "summary": "Spring Messaging WebSocket STOMP SpEL 注入 RCE",
+    "severity": "CRITICAL",
+    "cwe": "CWE-94",
+    "groupId": "org.springframework",
+    "artifactId": "spring-messaging",
+    "introduced": "4.3.0",
+    "fixed": "5.0.5"
+  },
+  {
+    "id": "CVE-2022-22970",
+    "summary": "Spring Framework multipart 文件上传 DoS",
+    "severity": "MEDIUM",
+    "cwe": "CWE-400",
+    "groupId": "org.springframework",
+    "artifactId": "spring-web",
+    "introduced": "5.3.0",
+    "fixed": "5.3.20"
+  },
+  {
+    "id": "CVE-2023-34035",
+    "summary": "Spring Security 授权规则绕过",
+    "severity": "HIGH",
+    "cwe": "CWE-863",
+    "groupId": "org.springframework.security",
+    "artifactId": "spring-security-config",
+    "introduced": "5.8.0",
+    "fixed": "5.8.5"
+  },
+  {
+    "id": "CVE-2022-22978",
+    "summary": "Spring Security AuthorizationFilter 授权绕过",
+    "severity": "HIGH",
+    "cwe": "CWE-284",
+    "groupId": "org.springframework.security",
+    "artifactId": "spring-security-core",
+    "introduced": "5.5.0",
+    "fixed": "5.6.4"
+  },
+  {
+    "id": "CVE-2023-34034",
+    "summary": "Spring Security WebFlux 路径匹配绕过",
+    "severity": "CRITICAL",
+    "cwe": "CWE-863",
+    "groupId": "org.springframework.security",
+    "artifactId": "spring-security-web",
+    "introduced": "6.0.0",
+    "fixed": "6.1.2"
+  },
+  {
+    "id": "CVE-2023-20883",
+    "summary": "Spring Boot Actuator Endpoint DoS",
+    "severity": "HIGH",
+    "cwe": "CWE-400",
+    "groupId": "org.springframework.boot",
+    "artifactId": "spring-boot-autoconfigure",
+    "introduced": "2.7.0",
+    "fixed": "2.7.12"
+  },
+  {
+    "id": "CVE-2019-17531",
+    "summary": "Jackson Databind 多态反序列化 RCE",
+    "severity": "CRITICAL",
+    "cwe": "CWE-502",
+    "groupId": "com.fasterxml.jackson.core",
+    "artifactId": "jackson-databind",
+    "introduced": "2.0.0",
+    "fixed": "2.9.10.6"
+  },
+  {
+    "id": "CVE-2020-8840",
+    "summary": "Jackson Databind JNDI 注入 RCE",
+    "severity": "CRITICAL",
+    "cwe": "CWE-502",
+    "groupId": "com.fasterxml.jackson.core",
+    "artifactId": "jackson-databind",
+    "introduced": "2.0.0",
+    "fixed": "2.9.10.3"
+  },
+  {
+    "id": "CVE-2017-7525",
+    "summary": "Jackson Databind 反序列化 RCE（Commons Collections）",
+    "severity": "CRITICAL",
+    "cwe": "CWE-502",
+    "groupId": "com.fasterxml.jackson.core",
+    "artifactId": "jackson-databind",
+    "introduced": "2.0.0",
+    "fixed": "2.6.7.2"
+  },
+  {
+    "id": "CVE-2022-42003",
+    "summary": "Jackson Databind 深度嵌套对象 StackOverflow DoS",
+    "severity": "HIGH",
+    "cwe": "CWE-400",
+    "groupId": "com.fasterxml.jackson.core",
+    "artifactId": "jackson-databind",
+    "introduced": "2.0.0",
+    "fixed": "2.14.0"
+  },
+  {
+    "id": "CVE-2022-42004",
+    "summary": "Jackson Databind `_deserializeFromArray` StackOverflow DoS",
+    "severity": "HIGH",
+    "cwe": "CWE-400",
+    "groupId": "com.fasterxml.jackson.core",
+    "artifactId": "jackson-databind",
+    "introduced": "2.0.0",
+    "fixed": "2.14.0"
+  },
+  {
+    "id": "CVE-2015-7501",
+    "summary": "Apache Commons Collections 反序列化 RCE",
+    "severity": "CRITICAL",
+    "cwe": "CWE-502",
+    "groupId": "commons-collections",
+    "artifactId": "commons-collections",
+    "introduced": "3.0",
+    "fixed": "3.2.2"
+  },
+  {
+    "id": "CVE-2015-6420",
+    "summary": "Apache Commons Collections 4.x 反序列化 RCE",
+    "severity": "CRITICAL",
+    "cwe": "CWE-502",
+    "groupId": "org.apache.commons",
+    "artifactId": "commons-collections4",
+    "introduced": "4.0",
+    "fixed": "4.1"
+  },
+  {
+    "id": "CVE-2022-42889",
+    "summary": "Apache Commons Text StringSubstitutor RCE（Text4Shell）",
+    "severity": "CRITICAL",
+    "cwe": "CWE-94",
+    "groupId": "org.apache.commons",
+    "artifactId": "commons-text",
+    "introduced": "1.5",
+    "fixed": "1.10.0"
+  },
+  {
+    "id": "CVE-2016-1000031",
+    "summary": "Apache Commons FileUpload DiskFileItem 反序列化 RCE",
+    "severity": "CRITICAL",
+    "cwe": "CWE-502",
+    "groupId": "commons-fileupload",
+    "artifactId": "commons-fileupload",
+    "introduced": "1.0",
+    "fixed": "1.3.3"
+  },
+  {
+    "id": "CVE-2023-24998",
+    "summary": "Apache Commons FileUpload 无限上传大小 DoS",
+    "severity": "HIGH",
+    "cwe": "CWE-400",
+    "groupId": "commons-fileupload",
+    "artifactId": "commons-fileupload",
+    "introduced": "1.0",
+    "fixed": "1.5"
+  },
+  {
+    "id": "CVE-2022-33980",
+    "summary": "Apache Commons Configuration 脚本表达式 RCE",
+    "severity": "CRITICAL",
+    "cwe": "CWE-94",
+    "groupId": "org.apache.commons",
+    "artifactId": "commons-configuration2",
+    "introduced": "2.0",
+    "fixed": "2.9.0"
+  },
+  {
+    "id": "CVE-2021-29425",
+    "summary": "Apache Commons IO 目录遍历路径穿越",
+    "severity": "MEDIUM",
+    "cwe": "CWE-22",
+    "groupId": "commons-io",
+    "artifactId": "commons-io",
+    "introduced": "2.2",
+    "fixed": "2.7"
+  },
+  {
+    "id": "CVE-2017-5638",
+    "summary": "Apache Struts2 Content-Type 解析 RCE",
+    "severity": "CRITICAL",
+    "cwe": "CWE-20",
+    "groupId": "org.apache.struts",
+    "artifactId": "struts2-core",
+    "introduced": "2.3.0",
+    "fixed": "2.3.32"
+  },
+  {
+    "id": "CVE-2018-11776",
+    "summary": "Apache Struts2 namespace 解析 RCE",
+    "severity": "CRITICAL",
+    "cwe": "CWE-20",
+    "groupId": "org.apache.struts",
+    "artifactId": "struts2-core",
+    "introduced": "2.3.0",
+    "fixed": "2.3.35"
+  },
+  {
+    "id": "CVE-2016-3081",
+    "summary": "Apache Struts2 REST 插件 OGNL 注入 RCE",
+    "severity": "CRITICAL",
+    "cwe": "CWE-94",
+    "groupId": "org.apache.struts",
+    "artifactId": "struts2-core",
+    "introduced": "2.3.18",
+    "fixed": "2.3.28.1"
+  },
+  {
+    "id": "CVE-2020-17530",
+    "summary": "Apache Struts2 强制 OGNL 二次求值 RCE",
+    "severity": "CRITICAL",
+    "cwe": "CWE-94",
+    "groupId": "org.apache.struts",
+    "artifactId": "struts2-core",
+    "introduced": "2.0.0",
+    "fixed": "2.5.26"
+  },
+  {
+    "id": "CVE-2016-4437",
+    "summary": "Apache Shiro RememberMe Cookie 反序列化 RCE",
+    "severity": "CRITICAL",
+    "cwe": "CWE-502",
+    "groupId": "org.apache.shiro",
+    "artifactId": "shiro-core",
+    "introduced": "1.0.0",
+    "fixed": "1.2.5"
+  },
+  {
+    "id": "CVE-2019-12422",
+    "summary": "Apache Shiro RememberMe Cookie 填充预言攻击",
+    "severity": "MEDIUM",
+    "cwe": "CWE-310",
+    "groupId": "org.apache.shiro",
+    "artifactId": "shiro-core",
+    "introduced": "1.0.0",
+    "fixed": "1.4.2"
+  },
+  {
+    "id": "CVE-2020-11989",
+    "summary": "Apache Shiro URL 编码绕过身份验证",
+    "severity": "HIGH",
+    "cwe": "CWE-863",
+    "groupId": "org.apache.shiro",
+    "artifactId": "shiro-core",
+    "introduced": "1.0.0",
+    "fixed": "1.5.3"
+  },
+  {
+    "id": "CVE-2020-13933",
+    "summary": "Apache Shiro 特殊字符路径绕过身份验证",
+    "severity": "HIGH",
+    "cwe": "CWE-863",
+    "groupId": "org.apache.shiro",
+    "artifactId": "shiro-core",
+    "introduced": "1.0.0",
+    "fixed": "1.6.0"
+  },
+  {
+    "id": "CVE-2023-46604",
+    "summary": "Apache ActiveMQ ClassInfo RCE",
+    "severity": "CRITICAL",
+    "cwe": "CWE-502",
+    "groupId": "org.apache.activemq",
+    "artifactId": "activemq-all",
+    "introduced": "5.0.0",
+    "fixed": "5.15.16"
+  },
+  {
+    "id": "CVE-2015-5254",
+    "summary": "Apache ActiveMQ 对象反序列化 RCE",
+    "severity": "CRITICAL",
+    "cwe": "CWE-502",
+    "groupId": "org.apache.activemq",
+    "artifactId": "activemq-all",
+    "introduced": "5.0.0",
+    "fixed": "5.13.0"
+  },
+  {
+    "id": "CVE-2022-41678",
+    "summary": "Apache ActiveMQ Web Console Jolokia RCE",
+    "severity": "HIGH",
+    "cwe": "CWE-94",
+    "groupId": "org.apache.activemq",
+    "artifactId": "activemq-all",
+    "introduced": "5.0.0",
+    "fixed": "5.17.6"
+  },
+  {
+    "id": "CVE-2021-26291",
+    "summary": "Apache Maven 依赖混淆攻击",
+    "severity": "HIGH",
+    "cwe": "CWE-494",
+    "groupId": "org.apache.maven",
+    "artifactId": "maven-core",
+    "introduced": "3.0.0",
+    "fixed": "3.8.1"
+  },
+  {
+    "id": "CVE-2021-21295",
+    "summary": "Netty HTTP/2 头部解压炸弹 OOM DoS",
+    "severity": "HIGH",
+    "cwe": "CWE-400",
+    "groupId": "io.netty",
+    "artifactId": "netty-codec-http2",
+    "introduced": "4.1.0.Final",
+    "fixed": "4.1.60.Final"
+  },
+  {
+    "id": "CVE-2021-21409",
+    "summary": "Netty HTTP/2 请求走私",
+    "severity": "HIGH",
+    "cwe": "CWE-444",
+    "groupId": "io.netty",
+    "artifactId": "netty-codec-http2",
+    "introduced": "4.1.0.Final",
+    "fixed": "4.1.61.Final"
+  },
+  {
+    "id": "CVE-2021-37136",
+    "summary": "Netty Bzip2 解压器内存耗尽 DoS",
+    "severity": "HIGH",
+    "cwe": "CWE-400",
+    "groupId": "io.netty",
+    "artifactId": "netty-codec",
+    "introduced": "4.1.0.Final",
+    "fixed": "4.1.68.Final"
+  },
+  {
+    "id": "CVE-2021-37137",
+    "summary": "Netty Snappy 帧解压器内存耗尽 DoS",
+    "severity": "HIGH",
+    "cwe": "CWE-400",
+    "groupId": "io.netty",
+    "artifactId": "netty-codec",
+    "introduced": "4.1.0.Final",
+    "fixed": "4.1.68.Final"
+  },
+  {
+    "id": "CVE-2022-24823",
+    "summary": "Netty Unix 套接字临时目录信息泄露",
+    "severity": "MEDIUM",
+    "cwe": "CWE-200",
+    "groupId": "io.netty",
+    "artifactId": "netty-common",
+    "introduced": "4.1.0.Final",
+    "fixed": "4.1.77.Final"
+  },
+  {
+    "id": "CVE-2022-41881",
+    "summary": "Netty HAProxyMessageDecoder 栈溢出 DoS",
+    "severity": "HIGH",
+    "cwe": "CWE-121",
+    "groupId": "io.netty",
+    "artifactId": "netty-codec-haproxy",
+    "introduced": "4.1.0.Final",
+    "fixed": "4.1.86.Final"
+  },
+  {
+    "id": "CVE-2022-41915",
+    "summary": "Netty HTTP 响应拆分",
+    "severity": "MEDIUM",
+    "cwe": "CWE-113",
+    "groupId": "io.netty",
+    "artifactId": "netty-codec-http",
+    "introduced": "4.1.0.Final",
+    "fixed": "4.1.86.Final"
+  },
+  {
+    "id": "CVE-2023-44487",
+    "summary": "Netty HTTP/2 Rapid Reset DoS（CVSS 7.5）",
+    "severity": "HIGH",
+    "cwe": "CWE-400",
+    "groupId": "io.netty",
+    "artifactId": "netty-codec-http2",
+    "introduced": "4.1.0.Final",
+    "fixed": "4.1.100.Final"
+  },
+  {
+    "id": "CVE-2022-25857",
+    "summary": "SnakeYAML 亿笑攻击 DoS",
+    "severity": "HIGH",
+    "cwe": "CWE-400",
+    "groupId": "org.yaml",
+    "artifactId": "snakeyaml",
+    "introduced": "1.0",
+    "fixed": "1.31"
+  },
+  {
+    "id": "CVE-2022-38749",
+    "summary": "SnakeYAML 栈溢出 DoS（compose 阶段）",
+    "severity": "MEDIUM",
+    "cwe": "CWE-787",
+    "groupId": "org.yaml",
+    "artifactId": "snakeyaml",
+    "introduced": "1.0",
+    "fixed": "1.31"
+  },
+  {
+    "id": "CVE-2022-38750",
+    "summary": "SnakeYAML 栈溢出 DoS（constructor 阶段）",
+    "severity": "MEDIUM",
+    "cwe": "CWE-787",
+    "groupId": "org.yaml",
+    "artifactId": "snakeyaml",
+    "introduced": "1.0",
+    "fixed": "1.31"
+  },
+  {
+    "id": "CVE-2022-38751",
+    "summary": "SnakeYAML 栈溢出 DoS（representer 阶段）",
+    "severity": "MEDIUM",
+    "cwe": "CWE-787",
+    "groupId": "org.yaml",
+    "artifactId": "snakeyaml",
+    "introduced": "1.0",
+    "fixed": "1.31"
+  },
+  {
+    "id": "CVE-2022-1471",
+    "summary": "SnakeYAML Constructor 反序列化 RCE",
+    "severity": "CRITICAL",
+    "cwe": "CWE-502",
+    "groupId": "org.yaml",
+    "artifactId": "snakeyaml",
+    "introduced": "1.0",
+    "fixed": "2.0"
+  },
+  {
+    "id": "CVE-2021-42550",
+    "summary": "Logback JMSAppender JNDI 注入 RCE",
+    "severity": "HIGH",
+    "cwe": "CWE-502",
+    "groupId": "ch.qos.logback",
+    "artifactId": "logback-core",
+    "introduced": "1.2.0",
+    "fixed": "1.2.9"
+  },
+  {
+    "id": "CVE-2023-6378",
+    "summary": "Logback 反序列化 DoS",
+    "severity": "HIGH",
+    "cwe": "CWE-502",
+    "groupId": "ch.qos.logback",
+    "artifactId": "logback-core",
+    "introduced": "1.3.0",
+    "fixed": "1.3.12"
+  },
+  {
+    "id": "CVE-2021-39144",
+    "summary": "XStream 精心构造 XML RCE",
+    "severity": "CRITICAL",
+    "cwe": "CWE-502",
+    "groupId": "com.thoughtworks.xstream",
+    "artifactId": "xstream",
+    "introduced": "1.0",
+    "fixed": "1.4.18"
+  },
+  {
+    "id": "CVE-2022-40151",
+    "summary": "XStream 栈溢出 DoS",
+    "severity": "HIGH",
+    "cwe": "CWE-121",
+    "groupId": "com.thoughtworks.xstream",
+    "artifactId": "xstream",
+    "introduced": "1.0",
+    "fixed": "1.4.20"
+  },
+  {
+    "id": "CVE-2022-41966",
+    "summary": "XStream 递归深度栈溢出 DoS",
+    "severity": "HIGH",
+    "cwe": "CWE-121",
+    "groupId": "com.thoughtworks.xstream",
+    "artifactId": "xstream",
+    "introduced": "1.0",
+    "fixed": "1.4.20"
+  },
+  {
+    "id": "CVE-2022-25845",
+    "summary": "Fastjson AutoType 反序列化 RCE",
+    "severity": "HIGH",
+    "cwe": "CWE-502",
+    "groupId": "com.alibaba",
+    "artifactId": "fastjson",
+    "introduced": "1.2.3",
+    "fixed": "1.2.83"
+  },
+  {
+    "id": "CVE-2020-1938",
+    "summary": "Apache Tomcat Ghostcat AJP 文件包含（Ghostcat）",
+    "severity": "CRITICAL",
+    "cwe": "CWE-134",
+    "groupId": "org.apache.tomcat.embed",
+    "artifactId": "tomcat-embed-core",
+    "introduced": "9.0.0.M1",
+    "fixed": "9.0.31"
+  },
+  {
+    "id": "CVE-2021-41079",
+    "summary": "Apache Tomcat HTTP/1.1 请求解析 DoS",
+    "severity": "HIGH",
+    "cwe": "CWE-400",
+    "groupId": "org.apache.tomcat.embed",
+    "artifactId": "tomcat-embed-core",
+    "introduced": "8.5.0",
+    "fixed": "8.5.71"
+  },
+  {
+    "id": "CVE-2022-29885",
+    "summary": "Apache Tomcat EncryptInterceptor 缓冲区大小 DoS",
+    "severity": "LOW",
+    "cwe": "CWE-400",
+    "groupId": "org.apache.tomcat.embed",
+    "artifactId": "tomcat-embed-core",
+    "introduced": "10.0.0-M1",
+    "fixed": "10.0.20"
+  },
+  {
+    "id": "CVE-2023-28708",
+    "summary": "Apache Tomcat Session 属性通过 RemoteIpFilter 泄露",
+    "severity": "MEDIUM",
+    "cwe": "CWE-311",
+    "groupId": "org.apache.tomcat.embed",
+    "artifactId": "tomcat-embed-core",
+    "introduced": "8.5.0",
+    "fixed": "8.5.87"
+  },
+  {
+    "id": "CVE-2023-41080",
+    "summary": "Apache Tomcat 开放重定向",
+    "severity": "LOW",
+    "cwe": "CWE-601",
+    "groupId": "org.apache.tomcat.embed",
+    "artifactId": "tomcat-embed-core",
+    "introduced": "8.5.0",
+    "fixed": "8.5.94"
+  },
+  {
+    "id": "CVE-2023-46589",
+    "summary": "Apache Tomcat HTTP 请求走私",
+    "severity": "MEDIUM",
+    "cwe": "CWE-444",
+    "groupId": "org.apache.tomcat.embed",
+    "artifactId": "tomcat-embed-core",
+    "introduced": "8.5.0",
+    "fixed": "8.5.96"
+  },
+  {
+    "id": "CVE-2025-24813",
+    "summary": "Apache Tomcat Partial PUT 反序列化 RCE",
+    "severity": "CRITICAL",
+    "cwe": "CWE-502",
+    "groupId": "org.apache.tomcat.embed",
+    "artifactId": "tomcat-embed-core",
+    "introduced": "9.0.0.M1",
+    "fixed": "9.0.99"
+  },
+  {
+    "id": "CVE-2021-34428",
+    "summary": "Eclipse Jetty Session 固定攻击",
+    "severity": "LOW",
+    "cwe": "CWE-613",
+    "groupId": "org.eclipse.jetty",
+    "artifactId": "jetty-server",
+    "introduced": "9.4.0.v20161208",
+    "fixed": "9.4.41.v20210516"
+  },
+  {
+    "id": "CVE-2022-2047",
+    "summary": "Eclipse Jetty HTTP 请求走私",
+    "severity": "LOW",
+    "cwe": "CWE-444",
+    "groupId": "org.eclipse.jetty",
+    "artifactId": "jetty-server",
+    "introduced": "9.0.0",
+    "fixed": "9.4.47.v20220610"
+  },
+  {
+    "id": "CVE-2023-26048",
+    "summary": "Eclipse Jetty 大型 multipart 请求 DoS",
+    "severity": "MEDIUM",
+    "cwe": "CWE-400",
+    "groupId": "org.eclipse.jetty",
+    "artifactId": "jetty-server",
+    "introduced": "9.0.0",
+    "fixed": "9.4.51.v20230217"
+  },
+  {
+    "id": "CVE-2023-26049",
+    "summary": "Eclipse Jetty Cookie 解析信息泄露",
+    "severity": "LOW",
+    "cwe": "CWE-200",
+    "groupId": "org.eclipse.jetty",
+    "artifactId": "jetty-server",
+    "introduced": "9.0.0",
+    "fixed": "9.4.51.v20230217"
+  },
+  {
+    "id": "CVE-2021-42392",
+    "summary": "H2 Database 控制台 JNDI 注入 RCE",
+    "severity": "CRITICAL",
+    "cwe": "CWE-94",
+    "groupId": "com.h2database",
+    "artifactId": "h2",
+    "introduced": "1.0.0",
+    "fixed": "2.0.206"
+  },
+  {
+    "id": "CVE-2022-45868",
+    "summary": "H2 Database JDBC URL 本地 RCE",
+    "severity": "HIGH",
+    "cwe": "CWE-94",
+    "groupId": "com.h2database",
+    "artifactId": "h2",
+    "introduced": "1.0.0",
+    "fixed": "2.1.214"
+  },
+  {
+    "id": "CVE-2020-10693",
+    "summary": "Hibernate Validator 约束消息 EL 表达式注入",
+    "severity": "MEDIUM",
+    "cwe": "CWE-20",
+    "groupId": "org.hibernate.validator",
+    "artifactId": "hibernate-validator",
+    "introduced": "6.0.0.Final",
+    "fixed": "6.0.20.Final"
+  },
+  {
+    "id": "CVE-2020-8908",
+    "summary": "Google Guava 临时目录可预测路径信息泄露",
+    "severity": "LOW",
+    "cwe": "CWE-200",
+    "groupId": "com.google.guava",
+    "artifactId": "guava",
+    "introduced": "1.0",
+    "fixed": "32.0.0-jre"
+  },
+  {
+    "id": "CVE-2023-2976",
+    "summary": "Google Guava 临时文件创建竞争条件",
+    "severity": "MEDIUM",
+    "cwe": "CWE-200",
+    "groupId": "com.google.guava",
+    "artifactId": "guava",
+    "introduced": "1.0",
+    "fixed": "32.0.1-jre"
+  },
+  {
+    "id": "CVE-2023-3635",
+    "summary": "OkHttp GZIP InputStream DoS",
+    "severity": "MEDIUM",
+    "cwe": "CWE-400",
+    "groupId": "com.squareup.okhttp3",
+    "artifactId": "okhttp",
+    "introduced": "3.8.0",
+    "fixed": "4.12.0"
+  },
+  {
+    "id": "CVE-2023-33201",
+    "summary": "Bouncy Castle LDAP DN 注入",
+    "severity": "MEDIUM",
+    "cwe": "CWE-20",
+    "groupId": "org.bouncycastle",
+    "artifactId": "bcprov-jdk15on",
+    "introduced": "1.0",
+    "fixed": "1.74"
+  },
+  {
+    "id": "CVE-2023-25194",
+    "summary": "Apache Kafka SASL 认证 JNDI 注入",
+    "severity": "HIGH",
+    "cwe": "CWE-20",
+    "groupId": "org.apache.kafka",
+    "artifactId": "kafka-clients",
+    "introduced": "2.3.0",
+    "fixed": "3.4.0"
+  },
+  {
+    "id": "CVE-2021-25641",
+    "summary": "Apache Dubbo 反序列化 RCE",
+    "severity": "CRITICAL",
+    "cwe": "CWE-502",
+    "groupId": "org.apache.dubbo",
+    "artifactId": "dubbo",
+    "introduced": "2.7.0",
+    "fixed": "2.7.9"
+  },
+  {
+    "id": "CVE-2021-43297",
+    "summary": "Apache Dubbo Hessian2 反序列化 RCE",
+    "severity": "CRITICAL",
+    "cwe": "CWE-94",
+    "groupId": "org.apache.dubbo",
+    "artifactId": "dubbo",
+    "introduced": "2.7.0",
+    "fixed": "2.7.15"
+  }
+]

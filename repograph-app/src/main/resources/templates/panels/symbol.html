@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="panel" id="panel-symbol" class="panel"
+     :class="{ active: $store.repograph.panel === 'symbol' }">
+  <div class="panel-header">
+    <div class="panel-title" data-i18n="symbol.title">符号查询</div>
+    <div class="panel-subtitle" data-i18n="symbol.subtitle">按全限定名精确查找符号，或按文件行号定位</div>
+  </div>
+  <div class="panel-body">
+    <div class="tab-row" id="symbol-tab-row" style="margin-bottom:18px">
+      <button class="tab active" onclick="setSymbolMode('lookup',this)" data-i18n="symbol.tab.lookup">符号查询</button>
+      <button class="tab" onclick="setSymbolMode('locate',this)" data-i18n="symbol.tab.locate">文件定位</button>
+    </div>
+
+    <!-- Lookup -->
+    <div id="symbol-lookup-section">
+      <div class="input-row" style="margin-bottom:14px">
+        <input type="text" id="symbol-qn-input" placeholder="com.example.Foo#bar(String)"
+          autocomplete="off" data-i18n-ph="ph.symbolQn"
+          onkeydown="if(event.key==='Enter')doSymbolLookup()">
+        <button class="btn btn-primary" onclick="doSymbolLookup()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <span data-i18n="btn.lookup">查找</span>
+        </button>
+      </div>
+      <div id="symbol-result"></div>
+    </div>
+
+    <!-- Locate -->
+    <div id="symbol-locate-section" style="display:none">
+      <div style="display:flex;gap:10px;margin-bottom:14px">
+        <input type="text" id="locate-file-input" placeholder="src/main/java/com/example/Foo.java"
+          autocomplete="off" data-i18n-ph="ph.locateFile" style="flex:3">
+        <input type="number" id="locate-line-input" placeholder="42"
+          min="1" style="flex:1" data-i18n-ph="ph.locateLine"
+          onkeydown="if(event.key==='Enter')doLocate()">
+        <button class="btn btn-primary" onclick="doLocate()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <span data-i18n="btn.locate">定位</span>
+        </button>
+      </div>
+      <div id="locate-result"></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

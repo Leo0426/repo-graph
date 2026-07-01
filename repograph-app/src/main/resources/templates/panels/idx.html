@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="panel" id="panel-index" class="panel"
+     :class="{ active: $store.repograph.panel === 'index' }">
+  <div class="panel-header">
+    <div class="panel-title" data-i18n="index.title">索引项目</div>
+    <div class="panel-subtitle" data-i18n="index.subtitle">触发并监控索引管道执行过程</div>
+  </div>
+  <div class="panel-body">
+    <div class="index-layout">
+      <!-- Form -->
+      <div class="index-form-col">
+        <div class="card">
+          <div class="field-label" data-i18n="index.root">项目根目录</div>
+          <input type="text" id="index-root" placeholder="/path/to/project" autocomplete="off"
+            style="margin-top:6px" data-i18n-ph="ph.root"
+            oninput="localStorage.setItem('repograph_index_root', this.value)">
+        </div>
+
+        <div class="card">
+          <div class="field-label" data-i18n="index.languages">解析语言</div>
+          <div class="checkbox-row" style="margin-top:8px">
+            <label class="check-item"><input type="checkbox" value="java" checked id="lang-java"> Java</label>
+            <label class="check-item"><input type="checkbox" value="c" id="lang-c"> C</label>
+            <label class="check-item"><input type="checkbox" value="python" id="lang-py"> Python</label>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="field-label" data-i18n="index.strategy">解析策略</div>
+          <select id="index-strategy" style="margin-top:8px">
+            <option value="auto" data-i18n="strategy.auto">自动（精确 → 启发式降级）</option>
+            <option value="precise" data-i18n="strategy.precise">仅精确解析</option>
+            <option value="heuristic" data-i18n="strategy.heuristic">仅启发式解析</option>
+          </select>
+        </div>
+
+        <div class="card" style="display:flex;align-items:center;justify-content:space-between">
+          <div>
+            <div style="font-size:14px;font-weight:600" data-i18n="index.forceReindex">强制重建索引</div>
+            <div style="font-size:12px;color:var(--text-2);margin-top:2px" data-i18n="index.skipCache">忽略 MD5 缓存</div>
+          </div>
+          <label style="position:relative;display:inline-block;width:42px;height:24px">
+            <input type="checkbox" id="no-incremental" style="opacity:0;width:0;height:0">
+            <span id="toggle-track" onclick="toggleSwitch()" style="
+              position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;
+              background:var(--border);border-radius:24px;transition:0.3s;">
+              <span id="toggle-thumb" style="
+                position:absolute;top:3px;left:3px;width:18px;height:18px;
+                background:var(--text-2);border-radius:50%;transition:0.3s;
+              "></span>
+            </span>
+          </label>
+        </div>
+
+        <button class="btn btn-primary" style="width:100%;justify-content:center;padding:12px" onclick="triggerIndex()" id="index-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/></svg>
+          <span data-i18n="btn.startIndex">开始索引</span>
+        </button>
+
+        <button class="btn btn-ghost" style="width:100%;justify-content:center" onclick="checkIndexStatus()" id="status-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <span data-i18n="btn.checkStatus">查询状态</span>
+        </button>
+      </div>
+
+      <!-- Status -->
+      <div class="status-col">
+        <div class="progress-ring-wrap">
+          <svg class="progress-ring" width="120" height="120">
+            <circle class="progress-ring-bg" cx="60" cy="60" r="50" stroke-width="8"/>
+            <circle class="progress-ring-fill" id="ring-fill" cx="60" cy="60" r="50" stroke-width="8"
+              stroke-dasharray="314" stroke-dashoffset="314"/>
+          </svg>
+          <div class="ring-label">
+            <div class="ring-pct" id="ring-pct">—</div>
+            <div class="ring-status" id="ring-status">idle</div>
+          </div>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-val" id="stat-files">—</div><div class="stat-lbl" data-i18n="stat.files">文件</div></div>
+          <div class="stat-card"><div class="stat-val" id="stat-units">—</div><div class="stat-lbl" data-i18n="stat.units">单元</div></div>
+          <div class="stat-card"><div class="stat-val" id="stat-edges">—</div><div class="stat-lbl" data-i18n="stat.edges">边</div></div>
+          <div class="stat-card"><div class="stat-val" id="stat-degraded" style="color:var(--amber)">—</div><div class="stat-lbl" data-i18n="stat.degraded">降级</div></div>
+          <div class="stat-card"><div class="stat-val" id="stat-errors" style="color:var(--red)">—</div><div class="stat-lbl" data-i18n="stat.errors">错误</div></div>
+          <div class="stat-card"><div class="stat-val" id="stat-dur">—</div><div class="stat-lbl" data-i18n="stat.duration">耗时</div></div>
+        </div>
+        <div id="stat-indexed-at-row" style="display:none;margin-top:8px;font-size:12px;color:var(--text-3);text-align:center">
+          <span data-i18n="stat.lastIndexed">上次索引：</span><span id="stat-indexed-at"></span>
+        </div>
+
+        <div class="index-log" id="index-log">
+          <span class="log-info" data-i18n="log.waiting">— 等待索引任务 —</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,17 @@
+# MCP stdio server: all Spring output must NOT touch stdout (corrupts JSON-RPC)
+spring:
+  main:
+    banner-mode: off
+    web-application-type: none
+
+logging:
+  file:
+    name: ${user.home}/.repograph/mcp.log
+  level:
+    root: WARN
+    com.repograph.mcp: INFO
+
+# Default RepoGraph REST API target (override with --base-url or REPOGRAPH_BASE_URL env var)
+repograph:
+  base-url: http://localhost:8080
+  timeout-seconds: 30

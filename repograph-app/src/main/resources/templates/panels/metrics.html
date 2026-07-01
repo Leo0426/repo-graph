@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="panel" id="panel-metrics" class="panel"
+     :class="{ active: $store.repograph.panel === 'metrics' }">
+  <div class="panel-header">
+    <div class="panel-title" data-i18n="metrics.title">代码质量</div>
+    <div class="panel-subtitle" data-i18n="metrics.subtitle">复杂度 · 耦合度 · 循环依赖 · 热点</div>
+  </div>
+  <div class="panel-body">
+
+    <!-- Project bar -->
+    <div class="card" style="display:flex;align-items:center;gap:12px">
+      <select id="metrics-project-select" style="flex:1;min-width:160px" onchange="onMetricsProjectChange()">
+        <option value="" data-i18n="ph.selectProject">— 选择项目 —</option>
+      </select>
+    </div>
+
+    <!-- Health dashboard -->
+    <div id="metrics-health" style="margin-top:12px">
+      <div class="empty-state" data-i18n="metrics.empty">选择项目以查看指标</div>
+    </div>
+
+    <!-- Tabs + per-tab controls -->
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:16px">
+      <div class="tab-row" style="margin:0;flex:none">
+        <button class="tab metrics-tab active" data-tab="complexity"
+                onclick="switchMetricsTab('complexity')" data-i18n="metrics.tab.complexity">复杂度</button>
+        <button class="tab metrics-tab" data-tab="coupling"
+                onclick="switchMetricsTab('coupling')" data-i18n="metrics.tab.coupling">耦合度</button>
+        <button class="tab metrics-tab" data-tab="cycles"
+                onclick="switchMetricsTab('cycles')" data-i18n="metrics.tab.cycles">循环依赖</button>
+        <button class="tab metrics-tab" data-tab="hotspots"
+                onclick="switchMetricsTab('hotspots')" data-i18n="metrics.tab.hotspots">热点</button>
+      </div>
+      <div id="ctrl-complexity" style="display:flex;gap:6px;align-items:center">
+        <select id="complexity-limit" style="width:88px"
+                onchange="if(_metricsPid)loadMetricsComplexity(_metricsPid)">
+          <option value="10">Top 10</option>
+          <option value="20" selected>Top 20</option>
+          <option value="50">Top 50</option>
+        </select>
+      </div>
+      <div id="ctrl-coupling" style="display:none;gap:6px;align-items:center">
+        <select id="coupling-sort" style="width:130px"
+                onchange="if(_metricsPid)loadMetricsCoupling(_metricsPid)">
+          <option value="fanout" data-i18n="metrics.sort.fanout">传出耦合 (Ce)</option>
+          <option value="fanin"  data-i18n="metrics.sort.fanin">传入耦合 (Ca)</option>
+        </select>
+        <select id="coupling-limit" style="width:88px"
+                onchange="if(_metricsPid)loadMetricsCoupling(_metricsPid)">
+          <option value="10">Top 10</option>
+          <option value="20" selected>Top 20</option>
+          <option value="50">Top 50</option>
+        </select>
+      </div>
+      <div id="ctrl-hotspots" style="display:none;gap:6px;align-items:center">
+        <select id="hotspots-limit" style="width:88px"
+                onchange="if(_metricsPid)loadMetricsHotspots(_metricsPid)">
+          <option value="5">Top 5</option>
+          <option value="10" selected>Top 10</option>
+          <option value="20">Top 20</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Tab content -->
+    <div id="metrics-tab-content" style="margin-top:8px"></div>
+
+  </div>
+</div>
+</body>
+</html>

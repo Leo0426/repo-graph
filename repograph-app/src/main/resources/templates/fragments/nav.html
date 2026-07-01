@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<nav th:fragment="nav">
+  <div class="nav-group-label" data-i18n="nav.group.explore">Explore</div>
+  <button class="nav-btn" data-panel="search"
+          :class="{ active: $store.repograph.panel === 'search' }"
+          @click="$store.repograph.showPanel('search')" title="Search">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <span class="nav-label" data-i18n="nav.search">搜索</span>
+  </button>
+  <button class="nav-btn" data-panel="graph"
+          :class="{ active: $store.repograph.panel === 'graph' }"
+          @click="$store.repograph.showPanel('graph')" title="Graph">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51 15.42 17.49M15.41 6.51 8.59 10.49"/></svg>
+    <span class="nav-label" data-i18n="nav.graph">图谱</span>
+  </button>
+  <button class="nav-btn" data-panel="symbol"
+          :class="{ active: $store.repograph.panel === 'symbol' }"
+          @click="$store.repograph.showPanel('symbol')" title="Symbol">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M10 2H6a2 2 0 0 0-2 2v16c0 1.1.9 2 2 2h12a2 2 0 0 0 2-2V8l-6-6z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg>
+    <span class="nav-label" data-i18n="nav.symbol">符号</span>
+  </button>
+
+  <div class="nav-group-label" data-i18n="nav.group.project">Project</div>
+  <button class="nav-btn" data-panel="stats"
+          :class="{ active: $store.repograph.panel === 'stats' }"
+          @click="$store.repograph.showPanel('stats')" title="Stats">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+    <span class="nav-label" data-i18n="nav.stats">统计</span>
+  </button>
+  <button class="nav-btn" data-panel="index"
+          :class="{ active: $store.repograph.panel === 'index' }"
+          @click="$store.repograph.showPanel('index')" title="Index">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/></svg>
+    <span class="nav-label" data-i18n="nav.index">索引</span>
+  </button>
+  <button class="nav-btn" data-panel="tools"
+          :class="{ active: $store.repograph.panel === 'tools' }"
+          @click="$store.repograph.showPanel('tools')" title="Tools">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+    <span class="nav-label" data-i18n="nav.tools">工具</span>
+  </button>
+  <button class="nav-btn" data-panel="sbom"
+          :class="{ active: $store.repograph.panel === 'sbom' }"
+          @click="$store.repograph.showPanel('sbom')" title="SBOM">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+    <span class="nav-label" data-i18n="nav.sbom">SBOM</span>
+  </button>
+
+  <button class="nav-btn" data-panel="vulns"
+          :class="{ active: $store.repograph.panel === 'vulns' }"
+          @click="$store.repograph.showPanel('vulns')" title="Vulnerabilities">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    <span class="nav-label" data-i18n="nav.vulns">漏洞</span>
+  </button>
+  <button class="nav-btn" data-panel="metrics"
+          :class="{ active: $store.repograph.panel === 'metrics' }"
+          @click="$store.repograph.showPanel('metrics')" title="Code Quality">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="8 12 11 15 16 9"/></svg>
+    <span class="nav-label" data-i18n="nav.metrics">质量</span>
+  </button>
+
+  <div class="nav-group-label" data-i18n="nav.group.system">System</div>
+  <button class="nav-btn" data-panel="health"
+          :class="{ active: $store.repograph.panel === 'health' }"
+          @click="$store.repograph.showPanel('health')" title="Health">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+    <span class="nav-label" data-i18n="nav.health">健康</span>
+  </button>
+  <button class="nav-btn" data-panel="benchmark"
+          :class="{ active: $store.repograph.panel === 'benchmark' }"
+          @click="$store.repograph.showPanel('benchmark')" title="Benchmark">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2a10 10 0 1 0 10 10"/><polyline points="12 6 12 12 16 14"/><path d="M18 2v4l3 2"/></svg>
+    <span class="nav-label" data-i18n="nav.benchmark">测评</span>
+  </button>
+</nav>
+</html>
