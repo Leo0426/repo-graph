@@ -35,7 +35,9 @@ public class ParserDispatcher {
             "c", "c",
             "h", "c",
             "py", "python",
-            "class", "class"   // 字节码 — 路由到 JavaBytecodeParser
+            "class", "class",   // 字节码 — 路由到 JavaBytecodeParser
+            "md", "doc",
+            "markdown", "doc"
     );
 
     private final List<CodeParser> parsers;

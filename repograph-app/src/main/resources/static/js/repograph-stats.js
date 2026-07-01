@@ -418,3 +418,20 @@ async function toggleWatch() {
     showToast(e.message || 'Watch toggle failed');
   }
 }
+
+async function deleteProjectFromStats() {
+  if (!_watchBarPid) return;
+  if (!await showDeleteModal(_watchBarPid, _watchBarRoot)) return;
+  try {
+    await api.deleteProject(_watchBarPid);
+    showToast(`${t('btn.delete')}: ${_watchBarRoot || _watchBarPid}`);
+    document.getElementById('stats-watch-bar').style.display = 'none';
+    document.getElementById('stats-project-input').value = '';
+    document.getElementById('stats-content').innerHTML = `<div class="empty-state"><p>${t('stats.empty')}</p><span>${t('stats.emptyHint')}</span></div>`;
+    _watchBarPid = null;
+    _watchBarRoot = '';
+    await refreshProjectsList();
+  } catch (e) {
+    showToast(e.message || 'Delete failed');
+  }
+}

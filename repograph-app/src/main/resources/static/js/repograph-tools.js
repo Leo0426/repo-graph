@@ -193,7 +193,7 @@ async function renderProjectsManage() {
 }
 
 async function deleteProject(projectId, projectRoot) {
-  if (!confirm(t('confirm.delete', projectId, projectRoot))) return;
+  if (!await showDeleteModal(projectId, projectRoot)) return;
   try {
     await api.deleteProject(projectId);
     showToast(`Deleted ${projectRoot || projectId}`);

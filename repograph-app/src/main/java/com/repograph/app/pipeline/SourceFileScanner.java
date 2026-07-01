@@ -30,7 +30,9 @@ class SourceFileScanner {
             "java", "java",
             "c", "c",
             "h", "c",
-            "py", "python"
+            "py", "python",
+            "md", "doc",
+            "markdown", "doc"
     );
 
     /**

@@ -43,6 +43,25 @@
 
 <div id="tooltip"></div>
 <div id="toast"></div>
+
+<!-- Delete confirm modal -->
+<div id="delete-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)hideDeleteModal()">
+  <div class="modal-card">
+    <div class="modal-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+        <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+      </svg>
+    </div>
+    <div class="modal-title" id="delete-modal-title">删除项目</div>
+    <div class="modal-body" id="delete-modal-body"></div>
+    <div class="modal-warn">Neo4j 节点 · Qdrant 向量 · 增量缓存</div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="hideDeleteModal()">取消</button>
+      <button class="btn btn-danger" id="delete-modal-confirm">确认删除</button>
+    </div>
+  </div>
+</div>
 <datalist id="projects-datalist"></datalist>
 <datalist id="graph-symbols-datalist"></datalist>
 

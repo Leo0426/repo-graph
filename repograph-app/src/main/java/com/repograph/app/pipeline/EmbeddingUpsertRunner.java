@@ -134,6 +134,12 @@ class EmbeddingUpsertRunner {
      * 自身 Javadoc 是检索信号最强的文本——用自然语言描述意图，与自然语言查询直接匹配。
      */
     static String buildSemanticText(CodeUnit unit, Map<String, CodeUnit> parentByQn) {
+        // 文档单元直接使用原始正文，最大 1024 字符
+        if (unit.kind() == CodeUnitKind.DOCUMENT) {
+            String raw = unit.rawSource() != null ? unit.rawSource().trim() : "";
+            return raw.length() > 1024 ? raw.substring(0, 1024) : raw;
+        }
+
         StringBuilder sb = new StringBuilder();
 
         // 为非类级单元前置父类上下文

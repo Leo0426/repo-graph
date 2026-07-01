@@ -129,6 +129,8 @@ const api = {
   watchStop: (projectId) => fetch(`/api/v1/watch/${encodeURIComponent(projectId)}`, { method: 'DELETE' }),
   vulnScanCode: (projectId) =>
     fetch(`/api/v1/vulns/scan/code?projectId=${encodeURIComponent(projectId)}`, { method: 'POST' }).then(r => r.json()),
+  vulnScanTaint: (projectId) =>
+    fetch(`/api/v1/vulns/scan/taint?projectId=${encodeURIComponent(projectId)}`, { method: 'POST' }).then(r => r.json()),
   vulnScanDeps: (projectId, projectRoot) => {
     const p = new URLSearchParams({ projectId, projectRoot });
     return fetch(`/api/v1/vulns/scan/deps?${p}`, { method: 'POST' }).then(r => r.json());
@@ -387,6 +389,29 @@ document.addEventListener('keydown', e => {
     }
   }
 });
+
+/* ── Delete modal ── */
+let _deleteModalResolve = null;
+
+function showDeleteModal(projectId, projectRoot) {
+  const name = projectRoot
+    ? projectRoot.replace(/\\/g, '/').split('/').filter(Boolean).pop()
+    : projectId;
+  document.getElementById('delete-modal-title').textContent = '删除项目';
+  document.getElementById('delete-modal-body').innerHTML =
+    `确定要删除 <strong>${esc(name)}</strong> 的所有索引数据？<br>此操作不可撤销。`;
+  const modal = document.getElementById('delete-modal');
+  modal.style.display = 'flex';
+  return new Promise(resolve => {
+    _deleteModalResolve = resolve;
+    document.getElementById('delete-modal-confirm').onclick = () => hideDeleteModal(true);
+  });
+}
+
+function hideDeleteModal(confirmed = false) {
+  document.getElementById('delete-modal').style.display = 'none';
+  if (_deleteModalResolve) { _deleteModalResolve(confirmed); _deleteModalResolve = null; }
+}
 
 /* ── Tooltip ── */
 function showTooltip(e, text) {

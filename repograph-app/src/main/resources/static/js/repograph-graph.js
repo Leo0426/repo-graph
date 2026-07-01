@@ -1,5 +1,8 @@
 let graphZoomBehavior = null;
 let graphSvgEl = null;
+// Track running simulations so we can stop them before starting a new render
+let _currentGraphSim = null;
+let _currentFlowSim  = null;
 
 function setGraphMode(mode, btn) {
   state.graphMode = mode;
@@ -26,7 +29,7 @@ function initGraphCanvas() {
   graphSvgEl = svg;
 
   graphZoomBehavior = d3.zoom()
-    .scaleExtent([0.1, 4])
+    .scaleExtent([0.05, 4])
     .on('zoom', e => svg.select('.zoom-g').attr('transform', e.transform));
 
   svg.call(graphZoomBehavior);
@@ -176,6 +179,9 @@ function switchFlowView(view, btn) {
 }
 
 function renderFlowGraph(view) {
+  // Stop previous flow simulation before starting a new one
+  if (_currentFlowSim) { _currentFlowSim.stop(); _currentFlowSim = null; }
+
   const result = state.flowResult;
   if (!result) return;
   const graph = view === 'pdg' ? result.programDependenceGraph : result.controlFlowGraph;
@@ -209,7 +215,10 @@ function renderFlowGraph(view) {
       .append('path').attr('d', 'M0,-5L10,0L0,5').attr('fill', '#64748B');
   }
 
-  const sim = d3.forceSimulation(nodes)
+  // alphaDecay 0.1: converges ~2× faster than the previous 0.05
+  _currentFlowSim = d3.forceSimulation(nodes)
+    .alphaDecay(0.1)
+    .velocityDecay(.4)
     .force('link', d3.forceLink(links).id(d => d.id).distance(view === 'pdg' ? 105 : 88).strength(.75))
     .force('charge', d3.forceManyBody().strength(-360))
     .force('x', d3.forceX(0).strength(.08))
@@ -239,9 +248,9 @@ function renderFlowGraph(view) {
   const node = g.append('g').selectAll('g').data(nodes).join('g')
     .attr('cursor', 'default')
     .call(d3.drag()
-      .on('start', (e, d) => { if (!e.active) sim.alphaTarget(.3).restart(); d.fx = d.x; d.fy = d.y; })
+      .on('start', (e, d) => { if (!e.active) _currentFlowSim?.alphaTarget(.3).restart(); d.fx = d.x; d.fy = d.y; })
       .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
-      .on('end', (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }));
+      .on('end', (e, d) => { if (!e.active) _currentFlowSim?.alphaTarget(0); d.fx = null; d.fy = null; }));
 
   node.append('rect')
     .attr('x', -31).attr('y', -18).attr('width', 62).attr('height', 36).attr('rx', 9)
@@ -258,14 +267,15 @@ function renderFlowGraph(view) {
     .attr('fill', '#334155').attr('font-family', 'var(--fm)').attr('font-size', 7.5)
     .text(d => `${d.kind} · L${d.line}`);
 
-  sim.on('tick', () => {
+  _currentFlowSim.on('tick', () => {
     link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
       .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
     edgeText.attr('x', d => (d.source.x + d.target.x) / 2)
       .attr('y', d => (d.source.y + d.target.y) / 2 - 4);
     node.attr('transform', d => `translate(${d.x},${d.y})`);
   });
-  setTimeout(() => sim.stop(), 3500);
+  _currentFlowSim.on('end', () => { _currentFlowSim = null; });
+  setTimeout(() => { if (_currentFlowSim) { _currentFlowSim.stop(); _currentFlowSim = null; } }, 2500);
 
   document.getElementById('graph-hint').textContent =
     `${result.target.split('#').pop()} · ${view.toUpperCase()} · ${nodes.length} nodes · ${links.length} edges`;
@@ -275,45 +285,74 @@ function renderFlowGraph(view) {
   );
 }
 
+// Above this node count, use a static radial layout instead of force simulation.
+// Star-topology graphs (callers / impact / entrypoints) converge to a ring anyway —
+// pre-computing the ring position is instant and eliminates all O(n²) physics cost.
+const GRAPH_LARGE_THRESHOLD = 70;
+const GRAPH_MAX_NODES = 400;
+
 function renderGraph(rootQn, units) {
+  // Kill any running simulation from a previous render
+  if (_currentGraphSim) { _currentGraphSim.stop(); _currentGraphSim = null; }
+
   const svg = d3.select('#graph-svg');
   const hint = document.getElementById('graph-hint');
   const el = svg.node();
   const W = el.clientWidth, H = el.clientHeight;
 
-  const rootNode = { id: rootQn, qualifiedName: rootQn, kind: 'ROOT', isRoot: true };
-  const allNodes = [rootNode, ...units.map(u => ({ ...u, id: u.qualifiedName || u.id, isRoot: false }))];
-  const links = units.map(u => ({ source: rootQn, target: u.qualifiedName || u.id }));
+  const cappedUnits = units.length > GRAPH_MAX_NODES ? units.slice(0, GRAPH_MAX_NODES) : units;
+  const wasCapped   = cappedUnits.length < units.length;
+  const isLarge     = cappedUnits.length >= GRAPH_LARGE_THRESHOLD;
 
-  if (units.length === 0) {
+  const rootNode = { id: rootQn, qualifiedName: rootQn, kind: 'ROOT', isRoot: true, x: 0, y: 0 };
+  const allNodes = [rootNode, ...cappedUnits.map(u => ({ ...u, id: u.qualifiedName || u.id, isRoot: false }))];
+  const links    = cappedUnits.map(u => ({ source: rootQn, target: u.qualifiedName || u.id }));
+
+  if (cappedUnits.length === 0) {
     hint.textContent = t('graph.hint.noResult', state.graphMode, rootQn);
     svg.select('.zoom-g').selectAll('*').remove();
     return;
   }
-  hint.textContent = t('graph.hint.result', units.length, state.graphMode, rootQn);
+
+  hint.textContent = t('graph.hint.result', cappedUnits.length, state.graphMode, rootQn)
+    + (wasCapped ? `（限显 ${GRAPH_MAX_NODES} / 共 ${units.length}）` : '');
 
   const g = svg.select('.zoom-g');
   g.selectAll('*').remove();
 
-  const sim = d3.forceSimulation(allNodes)
-    .alphaDecay(0.05)
-    .velocityDecay(0.4)
-    .force('link', d3.forceLink(links).id(d => d.id).distance(130).strength(0.6))
-    .force('charge', d3.forceManyBody().strength(-400))
-    .force('center', d3.forceCenter(0, 0))
-    .force('collision', d3.forceCollide(40));
+  // ── Large graph: pre-compute evenly-spaced ring (no physics needed) ──────
+  if (isLarge) {
+    const R = Math.max(260, cappedUnits.length * 11);
+    cappedUnits.forEach((u, i) => {
+      const θ = (2 * Math.PI * i) / cappedUnits.length;
+      allNodes[i + 1].x = Math.cos(θ) * R;
+      allNodes[i + 1].y = Math.sin(θ) * R;
+    });
+  }
 
+  // ── Links ─────────────────────────────────────────────────────────────────
   const link = g.append('g').attr('class', 'links').selectAll('line').data(links).join('line')
     .attr('stroke', 'url(#link-grad)')
-    .attr('stroke-width', 1.5)
-    .attr('stroke-opacity', 0.5);
+    .attr('stroke-width',   isLarge ? 0.7 : 1.5)
+    .attr('stroke-opacity', isLarge ? 0.22 : 0.5);
 
+  // ── Nodes ─────────────────────────────────────────────────────────────────
   const node = g.append('g').attr('class', 'nodes').selectAll('g').data(allNodes).join('g')
     .attr('cursor', 'pointer')
     .call(d3.drag()
-      .on('start', (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
-      .on('drag',  (e, d) => { d.fx = e.x; d.fy = e.y; })
-      .on('end',   (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
+      .on('start', (e, d) => {
+        if (_currentGraphSim && !e.active) _currentGraphSim.alphaTarget(0.3).restart();
+        d.fx = d.x; d.fy = d.y;
+      })
+      .on('drag', (e, d) => {
+        d.x = d.fx = e.x; d.y = d.fy = e.y;
+        // In static layout there is no simulation; update DOM directly
+        if (!_currentGraphSim) _updateGraphPositions(link, node);
+      })
+      .on('end', (e, d) => {
+        if (_currentGraphSim && !e.active) _currentGraphSim.alphaTarget(0);
+        if (!_currentGraphSim) { d.fx = null; d.fy = null; }
+      })
     )
     .on('click', (e, d) => selectNode(d))
     .on('dblclick', (e, d) => {
@@ -325,11 +364,12 @@ function renderGraph(rootQn, units) {
     .on('mouseout', hideTooltip);
 
   node.append('circle')
-    .attr('r', d => d.isRoot ? 22 : 14)
-    .attr('fill', d => d.isRoot ? 'rgba(248,113,113,0.2)' : `${kindColor(d.kind)}22`)
+    .attr('r', d => d.isRoot ? 22 : (isLarge ? 7 : 14))
+    .attr('fill',   d => d.isRoot ? 'rgba(248,113,113,0.2)' : `${kindColor(d.kind)}22`)
     .attr('stroke', d => d.isRoot ? '#F87171' : kindColor(d.kind))
     .attr('stroke-width', d => d.isRoot ? 2 : 1.5)
-    .attr('filter', d => d.isRoot ? 'url(#glow-strong)' : 'url(#glow)');
+    // Glow SVG filters are expensive (per-node compositing pass); skip them for large graphs
+    .attr('filter', d => isLarge ? null : (d.isRoot ? 'url(#glow-strong)' : 'url(#glow)'));
 
   node.append('text')
     .attr('text-anchor', 'middle')
@@ -339,25 +379,45 @@ function renderGraph(rootQn, units) {
     .attr('font-size', d => d.isRoot ? 10 : 9)
     .attr('font-weight', '700')
     .attr('pointer-events', 'none')
+    // Hide per-node labels in large mode (too crowded; hover tooltip still works)
     .text(d => {
+      if (isLarge && !d.isRoot) return '';
       const n = (d.simpleName || d.qualifiedName || d.id || '').split('#').pop().split('.').pop();
       return n.length > 12 ? n.slice(0, 11) + '…' : n;
     });
 
-  sim.on('tick', () => {
-    link
-      .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
-      .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
-    node.attr('transform', d => `translate(${d.x},${d.y})`);
-  });
+  // ── Render ────────────────────────────────────────────────────────────────
+  if (isLarge) {
+    // Static layout: one-shot DOM update, zero CPU after this
+    _updateGraphPositions(link, node);
+  } else {
+    // Small graph: run force simulation (faster alphaDecay → ~65 ticks vs ~134)
+    _currentGraphSim = d3.forceSimulation(allNodes)
+      .alphaDecay(0.1)
+      .velocityDecay(0.4)
+      .force('link', d3.forceLink(links).id(d => d.id).distance(130).strength(0.6))
+      .force('charge', d3.forceManyBody().strength(-400))
+      .force('center', d3.forceCenter(0, 0))
+      .force('collision', d3.forceCollide(40));
+    _currentGraphSim.on('tick', () => _updateGraphPositions(link, node));
+    _currentGraphSim.on('end',  () => { _currentGraphSim = null; });
+    setTimeout(() => { if (_currentGraphSim) { _currentGraphSim.stop(); _currentGraphSim = null; } }, 3000);
+  }
 
-  sim.on('end', () => sim.stop());
-  setTimeout(() => { if (sim.alpha() > 0.001) sim.stop(); }, 5000);
-
-  const zoomT = d3.zoomIdentity.translate(W / 2, H / 2).scale(
-    Math.min(1, Math.min(W, H) / (Math.sqrt(allNodes.length) * 120))
+  // ── Zoom to fit ────────────────────────────────────────────────────────────
+  const fitR  = isLarge ? Math.max(260, cappedUnits.length * 11) * 2.5 : Math.sqrt(allNodes.length) * 120;
+  const scale = Math.min(isLarge ? 0.88 : 1, Math.min(W, H) / fitR);
+  svg.transition().duration(600).call(
+    graphZoomBehavior.transform,
+    d3.zoomIdentity.translate(W / 2, H / 2).scale(scale)
   );
-  svg.transition().duration(600).call(graphZoomBehavior.transform, zoomT);
+}
+
+function _updateGraphPositions(link, node) {
+  link
+    .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+    .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+  node.attr('transform', d => `translate(${d.x},${d.y})`);
 }
 
 function selectNode(d) {

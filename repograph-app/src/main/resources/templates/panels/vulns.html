@@ -18,6 +18,11 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
         <span data-i18n="btn.scanVulns">代码扫描</span>
       </button>
+      <button class="btn btn-secondary" onclick="triggerTaintScan()" id="vuln-taint-btn" disabled
+              title="从 HTTP 入口参数出发，追踪跨方法污点路径到达 Sink（较慢）">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+        <span data-i18n="btn.scanTaint">污点追踪</span>
+      </button>
       <button class="btn btn-secondary" onclick="triggerDepsScan()" id="vuln-deps-btn" disabled>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
         <span data-i18n="btn.scanDeps">依赖扫描</span>

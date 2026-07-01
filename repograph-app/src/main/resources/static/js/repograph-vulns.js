@@ -7,6 +7,8 @@ function onVulnProjectChange() {
   _vulnProjectId = sel ? sel.value : '';
   const btn = document.getElementById('vuln-scan-btn');
   if (btn) btn.disabled = !_vulnProjectId;
+  const taintBtn = document.getElementById('vuln-taint-btn');
+  if (taintBtn) taintBtn.disabled = !_vulnProjectId;
   const depsBtn = document.getElementById('vuln-deps-btn');
   if (depsBtn) depsBtn.disabled = !_vulnProjectId;
   if (_vulnProjectId) loadVulns();
@@ -28,6 +30,26 @@ async function triggerVulnScan() {
     await loadVulns();
   } catch (e) {
     if (stEl) stEl.textContent = 'Scan failed: ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function triggerTaintScan() {
+  if (!_vulnProjectId) return;
+  const btn  = document.getElementById('vuln-taint-btn');
+  const stEl = document.getElementById('vuln-scan-status');
+  btn.disabled = true;
+  if (stEl) stEl.textContent = t('vuln.scanningTaint') || '正在追踪污点路径…';
+  try {
+    const r = await api.vulnScanTaint(_vulnProjectId);
+    if (stEl) stEl.textContent =
+      `污点扫描完成：${r.entryPoints ?? 0} 入口点，${r.pathsAnalyzed ?? 0} 条路径，发现 ${r.newFindings ?? 0} 条`;
+    const reportBtn = document.getElementById('vuln-report-btn');
+    if (reportBtn) reportBtn.disabled = false;
+    await loadVulns();
+  } catch (e) {
+    if (stEl) stEl.textContent = 'Taint scan failed: ' + e.message;
   } finally {
     btn.disabled = false;
   }
@@ -105,13 +127,13 @@ function renderVulnList(findings) {
           ${f.detail ? `<div style="font-size:12px;color:var(--text-2);margin-top:4px">${esc(f.detail)}</div>` : ''}
         </div>
         <div style="flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:4px">
-          <span style="font-size:11px;color:${stColor};font-weight:600">${esc(f.status)}</span>
+          <span style="font-size:11px;color:${stColor};font-weight:600">${t('vuln.' + f.status.toLowerCase())}</span>
           <select style="font-size:11px;padding:2px 4px" onchange="updateVulnStatus('${esc(f.id)}', this.value)">
             <option value="" disabled selected>${t('vuln.changeStatus')}</option>
-            <option value="SUSPECTED">SUSPECTED</option>
-            <option value="CONFIRMED">CONFIRMED</option>
-            <option value="FIXED">FIXED</option>
-            <option value="DISMISSED">DISMISSED</option>
+            <option value="SUSPECTED">${t('vuln.suspected')}</option>
+            <option value="CONFIRMED">${t('vuln.confirmed')}</option>
+            <option value="FIXED">${t('vuln.fixed')}</option>
+            <option value="DISMISSED">${t('vuln.dismissed')}</option>
           </select>
           ${f.ruleId !== 'DEP_VULNERABILITY' ? `
           <button class="btn btn-ghost" style="font-size:11px;padding:2px 8px"
@@ -135,15 +157,17 @@ async function updateVulnStatus(id, status) {
   }
 }
 
-/** Navigate to graph panel with the vulnerable symbol pre-filled for impact exploration. */
 function jumpToImpact(qualifiedName) {
-  // Set graph panel's symbol input and switch
-  const input = document.getElementById('graph-symbol-input')
-             || document.getElementById('graph-target-input');
+  const input = document.getElementById('graph-target');
   if (input) input.value = qualifiedName;
+
+  // 切换到影响面模式
+  const impactBtn = document.querySelector('#graph-tab-row .tab[onclick*="\'impact\'"]');
+  if (impactBtn) setGraphMode('impact', impactBtn);
+
   switchPanel('graph');
-  // Trigger the impact analysis query if a function exists
-  if (typeof runImpactAnalysis === 'function') runImpactAnalysis(qualifiedName);
+  // 面板切换完成后触发查询
+  setTimeout(() => doGraphQuery(), 100);
 }
 
 async function showVulnReport() {
@@ -266,6 +290,8 @@ function populateVulnProjectSelect(projects) {
     _vulnProjectId = prev;
     const btn = document.getElementById('vuln-scan-btn');
     if (btn) btn.disabled = false;
+    const taintBtn = document.getElementById('vuln-taint-btn');
+    if (taintBtn) taintBtn.disabled = false;
     const depsBtn = document.getElementById('vuln-deps-btn');
     if (depsBtn) depsBtn.disabled = false;
     loadVulns();

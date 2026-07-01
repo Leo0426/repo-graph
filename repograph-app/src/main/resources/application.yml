@@ -5,7 +5,7 @@ repograph:
     collection: code_units
     vector-size: 3584
   ollama:
-    base-url: http://localhost:11434
+    base-url: http://192.168.4.113:11434
     model: manutic/nomic-embed-code
     timeout-seconds: 300
   neo4j:

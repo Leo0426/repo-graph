@@ -1280,6 +1280,97 @@ kbd {
 }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+/* ── Delete modal ── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.72);
+  backdrop-filter: blur(4px);
+  z-index: 4000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.15s ease;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.modal-card {
+  background: var(--bg-3);
+  border: 1px solid rgba(239,68,68,0.25);
+  border-radius: 6px;
+  padding: 32px 28px 24px;
+  width: 360px;
+  max-width: calc(100vw - 40px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 0 40px rgba(239,68,68,0.12), 0 20px 60px rgba(0,0,0,0.7);
+  animation: slideUp 0.18s var(--ease);
+}
+@keyframes slideUp { from { transform: translateY(12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+.modal-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(239,68,68,0.1);
+  border: 1px solid rgba(239,68,68,0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+.modal-icon svg { width: 22px; height: 22px; color: var(--red); }
+
+.modal-title {
+  font-family: var(--ff);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text);
+}
+
+.modal-body {
+  font-size: 12px;
+  color: var(--text-2);
+  text-align: center;
+  line-height: 1.6;
+  word-break: break-all;
+}
+.modal-body strong { color: var(--text); font-weight: 600; }
+
+.modal-warn {
+  font-size: 10px;
+  color: var(--text-3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-top: 2px;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+  width: 100%;
+}
+.modal-actions .btn { flex: 1; justify-content: center; }
+
+.btn-danger {
+  background: rgba(239,68,68,0.15);
+  border: 1px solid rgba(239,68,68,0.4);
+  color: var(--red);
+}
+.btn-danger:hover {
+  background: rgba(239,68,68,0.25);
+  border-color: rgba(239,68,68,0.7);
+  box-shadow: 0 0 16px rgba(239,68,68,0.2);
+  transform: translateY(-1px);
+}
+
 #index-btn:disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
 
 .load-more-btn {

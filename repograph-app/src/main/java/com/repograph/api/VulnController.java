@@ -4,6 +4,7 @@ import com.repograph.core.graph.GraphQueryService;
 import com.repograph.core.model.CodeUnit;
 import com.repograph.vuln.CodeVulnScanner;
 import com.repograph.vuln.DepsVulnScanner;
+import com.repograph.vuln.TaintVulnScanner;
 import com.repograph.vuln.VulnFinding;
 import com.repograph.vuln.VulnReport;
 import com.repograph.vuln.VulnStore;
@@ -44,14 +45,17 @@ public class VulnController {
 
     private final CodeVulnScanner scanner;
     private final DepsVulnScanner depsScanner;
+    private final TaintVulnScanner taintScanner;
     private final VulnStore vulnStore;
     private final GraphQueryService graphQueryService;
 
     public VulnController(CodeVulnScanner scanner, DepsVulnScanner depsScanner,
+                          TaintVulnScanner taintScanner,
                           VulnStore vulnStore, GraphQueryService graphQueryService) {
-        this.scanner      = scanner;
-        this.depsScanner  = depsScanner;
-        this.vulnStore    = vulnStore;
+        this.scanner       = scanner;
+        this.depsScanner   = depsScanner;
+        this.taintScanner  = taintScanner;
+        this.vulnStore     = vulnStore;
         this.graphQueryService = graphQueryService;
     }
 
@@ -68,6 +72,24 @@ public class VulnController {
                 "projectId",    projectId,
                 "scannedUnits", summary.scannedUnits(),
                 "newFindings",  summary.newFindings()
+        ));
+    }
+
+    /**
+     * 触发跨过程污点追踪扫描：从 HTTP 入口参数出发，沿调用图传播，报告到达已知 Sink 的路径。
+     * 比代码扫描慢（秒~分钟级），但能检测跨方法的多跳漏洞。
+     */
+    @PostMapping("/scan/taint")
+    public ResponseEntity<Map<String, Object>> scanTaint(@RequestParam String projectId) {
+        if (projectId == null || projectId.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "projectId is required"));
+        }
+        TaintVulnScanner.ScanSummary summary = taintScanner.scan(projectId);
+        return ResponseEntity.ok(Map.of(
+                "projectId",     projectId,
+                "entryPoints",   summary.entryPoints(),
+                "pathsAnalyzed", summary.pathsAnalyzed(),
+                "newFindings",   summary.newFindings()
         ));
     }
 

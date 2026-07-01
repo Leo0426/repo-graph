@@ -48,5 +48,8 @@ public enum CodeUnitKind {
     MACRO,
 
     /** C 顶层函数定义或声明（无所属类，区别于 Java 的 METHOD）。 */
-    FUNCTION
+    FUNCTION,
+
+    /** Markdown / 文档文件中的一个章节（以 # 标题为边界）。 */
+    DOCUMENT
 }
