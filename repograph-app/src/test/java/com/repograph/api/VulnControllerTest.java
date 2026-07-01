@@ -5,6 +5,7 @@ import com.repograph.core.model.CodeUnit;
 import com.repograph.core.model.CodeUnitKind;
 import com.repograph.vuln.CodeVulnScanner;
 import com.repograph.vuln.DepsVulnScanner;
+import com.repograph.vuln.TaintVulnScanner;
 import com.repograph.vuln.VulnFinding;
 import com.repograph.vuln.VulnStore;
 import org.junit.jupiter.api.Test;
@@ -45,6 +46,9 @@ class VulnControllerTest {
 
     @MockitoBean
     DepsVulnScanner depsScanner;
+
+    @MockitoBean
+    TaintVulnScanner taintScanner;
 
     @MockitoBean
     VulnStore vulnStore;

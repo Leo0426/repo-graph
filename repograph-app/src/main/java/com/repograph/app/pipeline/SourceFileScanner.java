@@ -78,8 +78,11 @@ class SourceFileScanner {
         boolean explicitBytecode = langs != null && langs.contains("class");
 
         if (langs == null || langs.isEmpty()) {
-            // 默认模式：只扫源码，不扫字节码，防止 build/ 目录产生重复索引
-            return EXTENSION_TO_LANGUAGE.keySet();
+            // 默认模式：只扫源码，不扫字节码或文档，防止 build/ 目录产生重复索引
+            return EXTENSION_TO_LANGUAGE.entrySet().stream()
+                    .filter(e -> !e.getValue().equals("doc"))
+                    .map(Map.Entry::getKey)
+                    .collect(Collectors.toSet());
         }
 
         Set<String> extensions = langs.stream()
