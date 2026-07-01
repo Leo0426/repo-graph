@@ -169,6 +169,30 @@ public class RepographMcpTools {
                 ),
                 List.of("target")
             )
+        ),
+
+        tool("search_graphrag",
+            "GraphRAG search: combines vector similarity, call-graph expansion, and security-aware " +
+            "re-ranking into a single retrieval call. Starting from semantically similar seed results, " +
+            "it expands along CALLS edges (callers and callees) and security-sensitive impact paths, " +
+            "then boosts entry points, authentication, SQL execution, command execution, and " +
+            "cryptographic operations. Each result is annotated with its origin (VECTOR / CALL_GRAPH / " +
+            "IMPACT), relation to the query seed (SEED / CALLER / CALLEE / IMPACT), and raw source code. " +
+            "Use this as the primary search when you need rich context: understanding how a feature is " +
+            "implemented end-to-end, tracing a vulnerability path, or mapping the blast radius of a change. " +
+            "Prefer search_semantic when you only need a quick symbol list without graph expansion.",
+            schema(
+                Map.of(
+                    "query",           strProp("Natural language description of what to find"),
+                    "lang",            strProp("Filter by language: java, c, or python"),
+                    "projectId",       strProp("12-char project ID to scope the search"),
+                    "limit",           intProp("Number of vector seed candidates (default 10)", 1, 20, 10),
+                    "depth",           intProp("Call-graph expansion depth (default 1)", 1, 3, 1),
+                    "callGraph",       boolProp("Expand along callers/callees (default true)"),
+                    "impactExpansion", boolProp("Add security-sensitive impact nodes (default true)")
+                ),
+                List.of("query")
+            )
         )
     );
 
@@ -205,7 +229,8 @@ public class RepographMcpTools {
                 case "find_subtypes"   -> runFindSubtypes(args);
                 case "locate_at"       -> runLocateAt(args);
                 case "find_entrypoints" -> runFindEntrypoints(args);
-                case "analyze_flow"     -> runAnalyzeFlow(args);
+                case "analyze_flow"      -> runAnalyzeFlow(args);
+                case "search_graphrag"   -> runSearchGraphRag(args);
                 default -> "Unknown tool: " + name;
             };
             return toolResult(text, false);
@@ -320,6 +345,28 @@ public class RepographMcpTools {
         return "**Symbol at** `" + file + "` **line " + line + ":**\n\n" + formatUnit(result.get());
     }
 
+    private String runSearchGraphRag(JsonNode args) {
+        String query = require(args, "query");
+        var path = new StringBuilder("/api/v1/search/graphrag?q=").append(enc(query));
+        opt(args, "lang").ifPresent(v -> path.append("&lang=").append(enc(v)));
+        opt(args, "projectId").ifPresent(v -> path.append("&projectId=").append(enc(v)));
+        path.append("&limit=").append(args.path("limit").asInt(10));
+        path.append("&depth=").append(args.path("depth").asInt(1));
+        if (!args.path("callGraph").isMissingNode()) {
+            path.append("&callGraph=").append(args.path("callGraph").asBoolean(true));
+        }
+        if (!args.path("impactExpansion").isMissingNode()) {
+            path.append("&impactExpansion=").append(args.path("impactExpansion").asBoolean(true));
+        }
+
+        Optional<JsonNode> result = client.get(path.toString());
+        if (result.isEmpty()) {
+            return "No GraphRAG results for \"" + query + "\".\n\n" +
+                   "Ensure the project is indexed and repograph-app is running.";
+        }
+        return formatGraphRagResult(query, result.get());
+    }
+
     private String runAnalyzeFlow(JsonNode args) {
         String target = require(args, "target");
         var path = new StringBuilder("/api/v1/flow/analyze?target=").append(enc(target));
@@ -343,6 +390,74 @@ public class RepographMcpTools {
                    "project has been indexed (`POST /api/v1/index/project`).";
         }
         return formatUnit(result.get());
+    }
+
+    // ── GraphRAG 格式化 ───────────────────────────────────────────────────────
+
+    private String formatGraphRagResult(String query, JsonNode r) {
+        JsonNode results = r.path("results");
+        if (!results.isArray() || results.isEmpty()) {
+            return "No GraphRAG results for \"" + query + "\".\n\n" +
+                   "Try broadening the query or removing language/project filters.";
+        }
+
+        int seedCount    = r.path("seedCount").asInt(0);
+        int cgExpanded   = r.path("callGraphExpanded").asInt(0);
+        int impExpanded  = r.path("impactExpanded").asInt(0);
+        int secHighlight = r.path("securityHighlightCount").asInt(0);
+
+        var sb = new StringBuilder();
+        sb.append("## GraphRAG search: \"").append(query).append("\"\n\n");
+        sb.append("**Stats:** ")
+          .append(seedCount).append(" vector seed(s)")
+          .append(" + ").append(cgExpanded).append(" call-graph")
+          .append(" + ").append(impExpanded).append(" impact")
+          .append(" = ").append(results.size()).append(" total")
+          .append("  |  ").append(secHighlight).append(" security-highlighted\n\n");
+
+        for (int i = 0; i < results.size(); i++) {
+            JsonNode ranked = results.get(i);
+            JsonNode u      = ranked.path("unit");
+            double finalScore  = ranked.path("finalScore").asDouble();
+            double secScore    = ranked.path("securityScore").asDouble();
+            String source      = ranked.path("source").asText("");
+            String relation    = ranked.path("relation").asText("");
+            JsonNode signals   = ranked.path("securitySignals");
+
+            sb.append("### ").append(i + 1).append(". `")
+              .append(u.path("qualifiedName").asText("?")).append("`\n");
+            sb.append("**Kind:** ").append(u.path("kind").asText("?"))
+              .append("  **Lang:** ").append(u.path("language").asText("?"))
+              .append("  **Score:** ").append(String.format("%.3f", finalScore));
+            if (secScore > 0.0) {
+                sb.append("  **Security:** ").append(String.format("%.2f", secScore));
+            }
+            sb.append("  **Via:** ").append(source).append("/").append(relation).append("\n");
+            sb.append("**File:** `").append(u.path("filePath").asText("?")).append("`")
+              .append("  L").append(u.path("startLine").asInt())
+              .append("–").append(u.path("endLine").asInt()).append("\n");
+
+            String sig = u.path("signature").asText("");
+            if (!sig.isBlank()) {
+                sb.append("**Signature:** `").append(sig).append("`\n");
+            }
+
+            if (signals.isArray() && !signals.isEmpty()) {
+                sb.append("**Security signals:**");
+                signals.forEach(s -> sb.append(" `").append(s.asText()).append("`"));
+                sb.append("\n");
+            }
+
+            String rawSource = u.path("rawSource").asText("");
+            if (!rawSource.isBlank()) {
+                String lang = u.path("language").asText("java");
+                sb.append("\n```").append(lang).append("\n")
+                  .append(rawSource).append("\n```\n");
+            }
+            sb.append("\n");
+        }
+
+        return sb.toString().stripTrailing();
     }
 
     // ── 流分析格式化 ──────────────────────────────────────────────────────────
@@ -555,6 +670,10 @@ public class RepographMcpTools {
     private static Map<String, Object> intProp(String desc, int min, int max, int dflt) {
         return Map.of("type", "integer", "description", desc,
                       "minimum", min, "maximum", max, "default", dflt);
+    }
+
+    private static Map<String, Object> boolProp(String desc) {
+        return Map.of("type", "boolean", "description", desc);
     }
 
     // ── 工具方法 ──────────────────────────────────────────────────────────────

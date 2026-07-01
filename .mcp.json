@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "repograph": {
+      "type": "stdio",
+      "command": "java",
+      "args": [
+        "-jar",
+        "repograph-mcp/build/libs/repograph-mcp-0.5.0-exec.jar",
+        "--repograph-url",
+        "http://localhost:8080"
+      ]
+    }
+  }
+}

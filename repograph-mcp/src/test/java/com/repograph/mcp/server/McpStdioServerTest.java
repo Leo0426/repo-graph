@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -156,7 +157,59 @@ class McpStdioServerTest {
         assertTrue(names.contains("locate_at"),        "Missing locate_at");
         assertTrue(names.contains("find_entrypoints"), "Missing find_entrypoints");
         assertTrue(names.contains("analyze_flow"),     "Missing analyze_flow");
-        assertEquals(10, list.size(), "Should have exactly 10 tools");
+        assertTrue(names.contains("search_graphrag"),  "Missing search_graphrag");
+        assertEquals(11, list.size(), "Should have exactly 11 tools");
+    }
+
+    // ── search_graphrag ───────────────────────────────────────────────────────
+
+    @Test
+    void searchGraphRag_returnsFormattedMarkdown() throws Exception {
+        RepographApiClient mockClient = mock(RepographApiClient.class);
+        String graphRagJson = """
+                {
+                  "results": [{
+                    "unit": {
+                      "qualifiedName": "com.example.AuthService#login(String)",
+                      "kind": "METHOD",
+                      "language": "java",
+                      "filePath": "src/main/java/com/example/AuthService.java",
+                      "startLine": 20,
+                      "endLine": 35,
+                      "signature": "public boolean login(String username)",
+                      "rawSource": "public boolean login(String username) { return true; }",
+                      "annotations": ["@Transactional"],
+                      "metadata": {"is_entry_point": "true"}
+                    },
+                    "vectorScore": 0.88,
+                    "securityScore": 0.75,
+                    "finalScore": 0.91,
+                    "source": "VECTOR",
+                    "relation": "SEED",
+                    "securitySignals": ["entry_point", "auth_check"]
+                  }],
+                  "seedCount": 1,
+                  "callGraphExpanded": 0,
+                  "impactExpanded": 0,
+                  "securityHighlightCount": 1
+                }""";
+        when(mockClient.get(contains("graphrag"))).thenReturn(
+                Optional.of(mapper.readTree(graphRagJson)));
+
+        RepographMcpTools realTools = new RepographMcpTools(mockClient);
+        String req = """
+                {"jsonrpc":"2.0","id":10,"method":"tools/call",\
+                "params":{"name":"search_graphrag","arguments":{"query":"authentication login"}}}""";
+
+        McpStdioServer localServer = new McpStdioServer(mapper, realTools, mockClient);
+        JsonNode resp = parse(localServer.dispatch(req));
+
+        assertFalse(resp.path("result").path("isError").asBoolean());
+        String text = resp.path("result").path("content").get(0).path("text").asText();
+        assertTrue(text.contains("GraphRAG search"), "Should contain header");
+        assertTrue(text.contains("AuthService#login"), "Should contain qualifiedName");
+        assertTrue(text.contains("entry_point"), "Should contain security signals");
+        assertTrue(text.contains("login(String username)"), "Should contain rawSource");
     }
 
     // ── malformed JSON ────────────────────────────────────────────────────────
