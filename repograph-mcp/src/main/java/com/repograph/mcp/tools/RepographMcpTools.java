@@ -250,6 +250,51 @@ public class RepographMcpTools {
                 ),
                 List.of("projectId")
             )
+        ),
+
+        tool("get_health_report",
+            "Get a comprehensive health report for an indexed project in a single call. " +
+            "Returns: health score (0–100), vulnerability counts by severity, " +
+            "top 5 most complex methods with qualifiedName (pass directly to analyze_flow), " +
+            "top 5 most unstable couplings, package cycles, dead code count, and test gap count. " +
+            "Use this at the start of any analysis session to orient yourself before diving into " +
+            "specific tools. A low health score indicates where to focus first.",
+            schema(
+                Map.of(
+                    "projectId", strProp("12-char project ID (use list_projects to find it)")
+                ),
+                List.of("projectId")
+            )
+        ),
+
+        tool("trigger_index",
+            "Trigger background indexing of a project directory. Indexing parses source files " +
+            "(Java / C / Python / Markdown), builds the Neo4j code graph, and generates vector " +
+            "embeddings via Ollama. Returns immediately (async) — large codebases may take " +
+            "several minutes due to embedding. Use index_status to poll for completion. " +
+            "After indexing finishes, all 18 tools become available for the new project.",
+            schema(
+                Map.of(
+                    "projectRoot", strProp("Absolute path to the project root directory on the server"),
+                    "lang",        strProp("Comma-separated language filter: java, c, python (omit for all)"),
+                    "strategy",    strProp("Parse strategy: auto, precise, or heuristic (default: auto)")
+                ),
+                List.of("projectRoot")
+            )
+        ),
+
+        tool("index_status",
+            "Check the indexing progress or result for a project root. " +
+            "Returns status (running / done / idle), file counts, unit/edge counts, " +
+            "duration, and any errors. Call repeatedly after trigger_index until " +
+            "status is 'done', then use list_projects to get the projectId for other tools.",
+            schema(
+                Map.of(
+                    "projectRoot", strProp("Absolute path used in trigger_index, " +
+                                           "e.g. '/Users/me/myproject'")
+                ),
+                List.of("projectRoot")
+            )
         )
     );
 
@@ -292,6 +337,9 @@ public class RepographMcpTools {
                 case "trace_taint"       -> runTraceTaint(args);
                 case "list_vulns"        -> runListVulns(args);
                 case "scan_vuln_code"    -> runScanVulnCode(args);
+                case "get_health_report" -> runGetHealthReport(args);
+                case "trigger_index"     -> runTriggerIndex(args);
+                case "index_status"      -> runIndexStatus(args);
                 default -> "Unknown tool: " + name;
             };
             return toolResult(text, false);
@@ -404,6 +452,51 @@ public class RepographMcpTools {
                    "The file may not have been indexed, or the line is inside a comment or blank area.";
         }
         return "**Symbol at** `" + file + "` **line " + line + ":**\n\n" + formatUnit(result.get());
+    }
+
+    private String runGetHealthReport(JsonNode args) {
+        String projectId = require(args, "projectId");
+        Optional<JsonNode> result = client.get("/api/v1/metrics/report?projectId=" + enc(projectId));
+        if (result.isEmpty()) {
+            return "No health report for project `" + projectId + "`.\n\n" +
+                   "Ensure the project is indexed — use `list_projects` to verify.";
+        }
+        return formatHealthReport(result.get());
+    }
+
+    private String runTriggerIndex(JsonNode args) {
+        String projectRoot = require(args, "projectRoot");
+        var path = new StringBuilder("/api/v1/index/project?projectRoot=").append(enc(projectRoot));
+        opt(args, "lang").ifPresent(v -> path.append("&lang=").append(enc(v)));
+        opt(args, "strategy").ifPresent(v -> path.append("&strategy=").append(enc(v)));
+
+        try {
+            JsonNode result = client.post(path.toString());
+            return "## Indexing started\n\n" +
+                   "**Project root:** `" + projectRoot + "`\n" +
+                   "**Status:** " + result.path("status").asText() + "\n\n" +
+                   result.path("message").asText("Indexing started in background") + "\n\n" +
+                   "Call `index_status` with `projectRoot=" + projectRoot + "` to monitor progress.\n" +
+                   "Large codebases may take several minutes (embedding generation is the bottleneck).";
+        } catch (RepographApiClient.RepographApiException e) {
+            if (e.getMessage() != null && e.getMessage().contains("409")) {
+                return "**Indexing already in progress** for `" + projectRoot + "`.\n\n" +
+                       "Call `index_status` with `projectRoot=" + projectRoot +
+                       "` to monitor progress.";
+            }
+            throw e;
+        }
+    }
+
+    private String runIndexStatus(JsonNode args) {
+        String projectRoot = require(args, "projectRoot");
+        Optional<JsonNode> result = client.get(
+                "/api/v1/index/project/status?projectRoot=" + enc(projectRoot));
+        if (result.isEmpty()) {
+            return "No indexing record found for `" + projectRoot + "`.\n\n" +
+                   "Call `trigger_index` with `projectRoot=" + projectRoot + "` to start indexing.";
+        }
+        return formatIndexStatus(projectRoot, result.get());
     }
 
     private String runSearchGraphRag(JsonNode args) {
@@ -670,6 +763,105 @@ public class RepographMcpTools {
             if (!detail.isBlank()) sb.append("   ").append(detail).append("\n");
             sb.append("   CWE: ").append(v.path("cwe").asText("N/A"))
               .append("  ID: `").append(v.path("id").asText()).append("`\n\n");
+        }
+
+        return sb.toString().stripTrailing();
+    }
+
+    // ── 健康报告 & 索引格式化 ─────────────────────────────────────────────────
+
+    private String formatHealthReport(JsonNode r) {
+        int score = r.path("healthScore").asInt(0);
+        String icon = score >= 80 ? "🟢" : score >= 50 ? "🟡" : score >= 30 ? "🟠" : "🔴";
+        String projectId = r.path("projectId").asText("?");
+
+        var sb = new StringBuilder();
+        sb.append("## Health report: `").append(projectId).append("`\n\n");
+        sb.append("**Health score:** ").append(icon).append(" **").append(score).append(" / 100**\n");
+        sb.append("**Units:** ").append(r.path("totalUnits").asInt())
+          .append("  **Files:** ").append(r.path("totalFiles").asInt())
+          .append("  **Edges:** ").append(r.path("totalEdges").asInt()).append("\n\n");
+
+        int crit = r.path("vulnCritical").asInt(0);
+        int high = r.path("vulnHigh").asInt(0);
+        int med  = r.path("vulnMedium").asInt(0);
+        int low  = r.path("vulnLow").asInt(0);
+        if (crit + high + med + low > 0) {
+            sb.append("### Vulnerabilities\n");
+            if (crit > 0) sb.append("- 🔴 CRITICAL: ").append(crit).append("\n");
+            if (high > 0) sb.append("- 🟠 HIGH: ").append(high).append("\n");
+            if (med  > 0) sb.append("- 🟡 MEDIUM: ").append(med).append("\n");
+            if (low  > 0) sb.append("- 🔵 LOW: ").append(low).append("\n");
+            sb.append("\nRun `list_vulns` with `projectId=").append(projectId)
+              .append("` to review findings.\n\n");
+        }
+
+        sb.append("### Code quality\n");
+        sb.append("- High-complexity methods (CC > 10): ")
+          .append(r.path("highComplexityMethods").asInt()).append("\n");
+        sb.append("- High-instability classes: ")
+          .append(r.path("highInstabilityClasses").asInt()).append("\n");
+        sb.append("- Package cycles: ").append(r.path("packageCycles").asInt()).append("\n");
+        sb.append("- Dead code units: ").append(r.path("deadCodeCount").asInt()).append("\n");
+        sb.append("- Test gaps: ").append(r.path("testGapCount").asInt())
+          .append(" / ").append(r.path("totalProductionMethods").asInt())
+          .append(" production methods\n\n");
+
+        JsonNode topComplex = r.path("topComplexMethods");
+        if (topComplex.isArray() && !topComplex.isEmpty()) {
+            sb.append("### Top complex methods\n");
+            for (JsonNode m : topComplex) {
+                sb.append("- `").append(m.path("qualifiedName").asText())
+                  .append("` CC=").append(m.path("complexity").asInt())
+                  .append("  `").append(m.path("filePath").asText()).append("`\n");
+            }
+            sb.append("\n→ Use `analyze_flow` on any method above for CFG/PDG details.\n\n");
+        }
+
+        JsonNode topUnstable = r.path("topInstableCouplings");
+        if (topUnstable.isArray() && !topUnstable.isEmpty()) {
+            sb.append("### Top unstable couplings\n");
+            for (JsonNode c : topUnstable) {
+                sb.append("- `").append(c.path("classQualifiedName").asText())
+                  .append("` I=").append(String.format("%.2f", c.path("instability").asDouble()))
+                  .append("  fan-in=").append(c.path("fanIn").asInt())
+                  .append(" fan-out=").append(c.path("fanOut").asInt()).append("\n");
+            }
+            sb.append("\n");
+        }
+
+        return sb.toString().stripTrailing();
+    }
+
+    private String formatIndexStatus(String projectRoot, JsonNode r) {
+        String status = r.path("status").asText("unknown");
+        var sb = new StringBuilder();
+        sb.append("## Index status: `").append(projectRoot).append("`\n\n");
+        sb.append("**Status:** ").append(status).append("\n");
+
+        if ("running".equals(status)) {
+            int total  = r.path("totalFiles").asInt(0);
+            int parsed = r.path("parsedFiles").asInt(0);
+            if (total > 0) {
+                sb.append("**Progress:** ").append(parsed).append(" / ")
+                  .append(total).append(" files\n");
+            }
+            sb.append("\nIndexing in progress — call `index_status` again to check for completion.\n");
+        } else if ("done".equals(status)) {
+            sb.append("**Units indexed:** ").append(r.path("totalUnits").asInt())
+              .append("  **Edges:** ").append(r.path("totalEdges").asInt()).append("\n");
+            sb.append("**Files:** ").append(r.path("totalFiles").asInt()).append("\n");
+            long ms = r.path("durationMs").asLong(0);
+            sb.append("**Duration:** ").append(ms / 1000).append("s\n");
+            sb.append("**Indexed at:** ").append(r.path("indexedAt").asText("")).append("\n");
+            JsonNode errors = r.path("errors");
+            if (errors.isArray() && !errors.isEmpty()) {
+                sb.append("\n⚠ **").append(errors.size()).append(" error(s) during indexing:**\n");
+                for (JsonNode e : errors) sb.append("- ").append(e.asText()).append("\n");
+            }
+            sb.append("\nIndexing complete. Use `list_projects` to get the projectId for other tools.\n");
+        } else {
+            sb.append("\nProject has not been indexed yet. Call `trigger_index` to start.\n");
         }
 
         return sb.toString().stripTrailing();

@@ -161,8 +161,11 @@ class McpStdioServerTest {
         assertTrue(names.contains("list_projects"),    "Missing list_projects");
         assertTrue(names.contains("trace_taint"),      "Missing trace_taint");
         assertTrue(names.contains("list_vulns"),       "Missing list_vulns");
-        assertTrue(names.contains("scan_vuln_code"),   "Missing scan_vuln_code");
-        assertEquals(15, list.size(), "Should have exactly 15 tools");
+        assertTrue(names.contains("scan_vuln_code"),    "Missing scan_vuln_code");
+        assertTrue(names.contains("get_health_report"), "Missing get_health_report");
+        assertTrue(names.contains("trigger_index"),     "Missing trigger_index");
+        assertTrue(names.contains("index_status"),      "Missing index_status");
+        assertEquals(18, list.size(), "Should have exactly 18 tools");
     }
 
     // ── search_graphrag ───────────────────────────────────────────────────────
@@ -321,6 +324,91 @@ class McpStdioServerTest {
         assertTrue(text.contains("120"),          "Should show scannedUnits");
         assertTrue(text.contains("3"),            "Should show newFindings");
         assertTrue(text.contains("list_vulns"),   "Should suggest next step");
+    }
+
+    // ── get_health_report ─────────────────────────────────────────────────────
+
+    @Test
+    void getHealthReport_returnsScoreAndTopMethods() throws Exception {
+        RepographApiClient mockClient = mock(RepographApiClient.class);
+        String reportJson = """
+                {"projectId":"abc123","projectRoot":"/src","generatedAt":"2026-07-02T00:00:00Z",
+                 "healthScore":42,"totalUnits":500,"totalFiles":80,"totalEdges":1200,
+                 "vulnCritical":0,"vulnHigh":5,"vulnMedium":2,"vulnLow":0,
+                 "packageCycles":1,"highComplexityMethods":8,"highInstabilityClasses":12,
+                 "deadCodeCount":30,"testGapCount":100,"totalProductionMethods":300,
+                 "topComplexMethods":[
+                   {"qualifiedName":"com.example.Foo#bar(String)","filePath":"Foo.java",
+                    "startLine":10,"kind":"METHOD","complexity":25}
+                 ],
+                 "topInstableCouplings":[
+                   {"classQualifiedName":"com.example.Svc","fanIn":0,"fanOut":3,"instability":1.0}
+                 ],
+                 "packageCycleList":[]}""";
+        when(mockClient.get(contains("metrics/report"))).thenReturn(
+                Optional.of(mapper.readTree(reportJson)));
+
+        RepographMcpTools realTools = new RepographMcpTools(mockClient);
+        McpStdioServer localServer = new McpStdioServer(mapper, realTools, mockClient);
+        JsonNode resp = parse(localServer.dispatch("""
+                {"jsonrpc":"2.0","id":15,"method":"tools/call",
+                "params":{"name":"get_health_report","arguments":{"projectId":"abc123"}}}"""));
+
+        assertFalse(resp.path("result").path("isError").asBoolean());
+        String text = resp.path("result").path("content").get(0).path("text").asText();
+        assertTrue(text.contains("42 / 100"),            "Should show health score");
+        assertTrue(text.contains("HIGH: 5"),             "Should show vuln count");
+        assertTrue(text.contains("Foo#bar(String)"),     "Should show top complex method");
+        assertTrue(text.contains("CC=25"),               "Should show complexity score");
+        assertTrue(text.contains("analyze_flow"),        "Should suggest next tool");
+    }
+
+    // ── trigger_index ─────────────────────────────────────────────────────────
+
+    @Test
+    void triggerIndex_returnsStartedMessage() throws Exception {
+        RepographApiClient mockClient = mock(RepographApiClient.class);
+        when(mockClient.post(contains("index/project"))).thenReturn(
+                mapper.readTree("""
+                        {"status":"running","message":"Indexing started in background",
+                         "pollUrl":"/api/v1/index/project/status?projectRoot=/src/myapp"}"""));
+
+        RepographMcpTools realTools = new RepographMcpTools(mockClient);
+        McpStdioServer localServer = new McpStdioServer(mapper, realTools, mockClient);
+        JsonNode resp = parse(localServer.dispatch("""
+                {"jsonrpc":"2.0","id":16,"method":"tools/call",
+                "params":{"name":"trigger_index","arguments":{"projectRoot":"/src/myapp"}}}"""));
+
+        assertFalse(resp.path("result").path("isError").asBoolean());
+        String text = resp.path("result").path("content").get(0).path("text").asText();
+        assertTrue(text.contains("Indexing started"), "Should confirm indexing started");
+        assertTrue(text.contains("index_status"),     "Should suggest index_status");
+        assertTrue(text.contains("/src/myapp"),       "Should show projectRoot");
+    }
+
+    // ── index_status ──────────────────────────────────────────────────────────
+
+    @Test
+    void indexStatus_done_showsCompletionSummary() throws Exception {
+        RepographApiClient mockClient = mock(RepographApiClient.class);
+        when(mockClient.get(contains("index/project/status"))).thenReturn(
+                Optional.of(mapper.readTree("""
+                        {"status":"done","indexedAt":"2026-07-02T10:00:00Z",
+                         "totalFiles":120,"parsedFiles":120,"totalUnits":800,
+                         "totalEdges":2000,"durationMs":45000,"errors":[]}""")));
+
+        RepographMcpTools realTools = new RepographMcpTools(mockClient);
+        McpStdioServer localServer = new McpStdioServer(mapper, realTools, mockClient);
+        JsonNode resp = parse(localServer.dispatch("""
+                {"jsonrpc":"2.0","id":17,"method":"tools/call",
+                "params":{"name":"index_status","arguments":{"projectRoot":"/src/myapp"}}}"""));
+
+        assertFalse(resp.path("result").path("isError").asBoolean());
+        String text = resp.path("result").path("content").get(0).path("text").asText();
+        assertTrue(text.contains("done"),          "Should show done status");
+        assertTrue(text.contains("800"),           "Should show unit count");
+        assertTrue(text.contains("45s"),           "Should show duration");
+        assertTrue(text.contains("list_projects"), "Should suggest list_projects");
     }
 
     // ── malformed JSON ────────────────────────────────────────────────────────
