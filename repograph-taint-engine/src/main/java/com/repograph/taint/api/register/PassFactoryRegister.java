@@ -70,7 +70,7 @@ public class PassFactoryRegister {
 	}
 
 	// Defines the package path where service implementation classes are located.
-	private static final String PASS_PATH = "com.clouditera.java.engine.rules";
+	private static final String PASS_PATH = "com.repograph.java.engine.rules";
 
 	/**
 	 * Registers all classes annotated with @RuleService and returns instances

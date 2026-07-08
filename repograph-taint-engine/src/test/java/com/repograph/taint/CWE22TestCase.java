@@ -55,10 +55,10 @@ public class CWE22TestCase {
 	protected SolverManager manager = null;
 
 	public static void main(String[] args) {
-		Path path = Paths.get("/Users/leolu/Downloads/test-case/clouditera-aigc-client/clouditera-aigc-client");
+		Path path = Paths.get("/Users/leolu/Downloads/test-case/aigc-client/aigc-client");
 
 		DefaultContext build = IContext.builder()
-			.withTaskName("clouditera-java-engine")
+			.withTaskName("java-engine")
 			.withOutputPath(Paths.get("."))
 			.withCheckConfig(
 				CheckConfig.builder()

@@ -519,7 +519,7 @@ public class CCodeParser implements CodeParser {
     /**
      * 递归解包 declarator 节点，提取真正的函数或变量名。
      *
-     * <p>按 CLAUDE.md 规范递归处理以下包装节点：
+     * <p>递归处理以下包装节点：
      * pointer_declarator → 剥离 *，递归；
      * function_declarator → 取 declarator 字段，递归；
      * parenthesized_declarator → 取内部节点，递归；

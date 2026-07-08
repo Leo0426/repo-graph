@@ -59,7 +59,7 @@ public class TaintPass {
 		Path path = Paths.get("/Users/leolu/Project/personal_projects/test_case/java_test_case/Juliet/Juliet/Juliet_Test_Suite/src/testcases/CWE89_SQL_Injection/s01/antbuild/testcases/CWE89_SQL_Injection/s01");
 
 		DefaultContext build = IContext.builder()
-			.withTaskName("clouditera-java-engine")
+			.withTaskName("java-engine")
 			.withOutputPath(path)
 			.withRules(new ArrayList<>())
 			.withTargetPath(List.of(path))

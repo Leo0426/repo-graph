@@ -17,12 +17,22 @@
 
 # RepoGraph
 
-> **Local-first code knowledge graph** — semantic search, call chain analysis, security-aware GraphRAG, and vulnerability scanning. Fully offline. MCP-native.
+> **Local-first code knowledge graph** — semantic search, call chain analysis, security-aware GraphRAG, taint analysis, and vulnerability scanning. Fully offline. MCP-native.
 
 RepoGraph indexes your source code into a graph + vector database running entirely on your machine. No code leaves your network. Built for private codebases and air-gapped environments.
 
-**Supported languages**: Java · C · Python  
+**Parsed sources**: Java · C · Python · Markdown docs · Java bytecode (optional)  
 **Storage backends**: [Qdrant](https://qdrant.tech/) (vector) · [Neo4j](https://neo4j.com/) (graph) · [Ollama](https://ollama.ai/) (embeddings) · SQLite (incremental cache)
+
+---
+
+## Positioning
+
+RepoGraph's end goal is to be a **context provider for LLM agents**: let an agent locate the right context on demand inside a large codebase through tool calls, instead of stuffing the whole repo into a context window. The MCP toolset + GraphRAG retrieval are the core deliverables.
+
+The current phase ships as a **standalone code-audit platform** — every analysis capability is built and validated on the platform first (web console / REST / CLI), then exposed as MCP tools step by step (see [Roadmap](#roadmap)).
+
+**Scope boundary**: static heuristic analysis, not full compiler semantics — coarse-to-medium granularity is enough for retrieval and auditing; the WALA IFDS precise taint engine covers the cases that demand maximum precision. Fully local; code never leaves your network.
 
 ---
 
@@ -33,6 +43,7 @@ RepoGraph indexes your source code into a graph + vector database running entire
 | Parsing | Java | Full AST — types, methods, fields, annotations, call edges |
 | Parsing | C / Python | Tree-sitter; graceful fallback to heuristic parsing |
 | Parsing | Bytecode | Optional `.class` analysis |
+| Parsing | Markdown docs | H1–H3 sections become DOCUMENT units, searchable via semantic search |
 | Indexing | Incremental | File-level cache; only modified files reprocessed |
 | Indexing | File watching | Auto-triggered on create / modify / delete |
 | Indexing | Multi-project | Per-project isolation with stable IDs, stats, and delete |
@@ -47,17 +58,23 @@ RepoGraph indexes your source code into a graph + vector database running entire
 | Flow analysis | CFG | On-demand control-flow graph per method / constructor |
 | Flow analysis | PDG | Data and control dependency graph |
 | Flow analysis | Data flow summary | Parameter → return and field read / write summaries |
+| Flow analysis | Interprocedural taint | Per-method summaries + BFS along the call graph; built-in SQL / OS / deserialization sinks |
 | Framework | Entry points | Spring MVC, JAX-RS, MyBatis — marks `is_entry_point` |
 | SBOM | Maven | `pom.xml` → CycloneDX JSON (`pkg:maven`) |
 | SBOM | Gradle | `build.gradle[.kts]` + `libs.versions.toml` → CycloneDX JSON (`pkg:maven`) |
 | SBOM | npm | `package.json` → CycloneDX JSON (`pkg:npm`); scoped packages supported |
 | SBOM | pip | `pyproject.toml` + `requirements*.txt` → CycloneDX JSON (`pkg:pypi`) |
 | Vulnerability | Code scanning | 9 CWE-tagged rules: SQL/command injection, XXE, weak crypto, hardcoded secrets, path traversal, unsafe deserialization, insecure random, sensitive logging |
+| Vulnerability | Taint scanning | Interprocedural taint tracking (HTTP entry point → sink, source-level heuristic) |
+| Vulnerability | Precise taint scanning | WALA IFDS bytecode-level field-sensitive analysis (standalone engine process) |
 | Vulnerability | Dependency scanning | Offline CVE advisory — 80 CVEs across major Java libraries |
 | Vulnerability | Impact analysis | Graph traversal from a finding to all reachable callers |
 | Vulnerability | Status management | `SUSPECTED → CONFIRMED → FIXED / DISMISSED` state machine |
-| AI integration | MCP server | stdio MCP server — plug into Claude Desktop, Cursor, and any MCP client |
-| UI | Web console | Search, graph, flow analysis, stats, indexing, health — at `localhost:8080` |
+| Quality | Code metrics | Cyclomatic complexity, coupling / instability, package cycles (Tarjan SCC), git churn hotspots |
+| Quality | Health report | Six-dimension score aggregating vulnerabilities, cycles, complexity, test gaps, dead code |
+| Visualization | Dependency graph export | Package-level dependency graph → DOT / Mermaid, cycles highlighted |
+| AI integration | MCP server | 18 stdio MCP tools — search / GraphRAG / call graph / taint / vulns / indexing |
+| UI | Web console | Search, graph, flow analysis, vulnerability panel, stats, indexing, health — at `localhost:8080` |
 
 ---
 
@@ -90,8 +107,15 @@ RepoGraph indexes your source code into a graph + vector database running entire
 │                                 │    │  (AI tool bridge)│
 │  Parser  ──► Graph ──► Vector   │    └──────────────────┘
 │  (Java/C/Python)  Neo4j  Qdrant │
-└────────┬────────────────────────┘
-         │
+└────────┬───────────────┬────────┘
+         │               │ subprocess (JSON I/O)
+         │               ▼
+         │      ┌──────────────────────────┐
+         │      │  repograph-taint-engine  │
+         │      │  WALA IFDS precise taint │
+         │      │  (experimental module;   │
+         │      │   runs on a jmods JDK)   │
+         │      └──────────────────────────┘
          ▼  External services (Docker Compose provided)
 ┌────────────────────────────────────────────────┐
 │  Qdrant :16333/:16334   Neo4j :7474/:7687      │
@@ -168,6 +192,14 @@ repograph sbom <projectId>           Generate SBOM (CycloneDX JSON) — auto-det
 repograph delete <projectRoot>       Remove project index
 repograph watch <projectRoot>        Watch for file changes and auto-reindex
 repograph serve                      Start REST server
+repograph complexity <projectId>     Cyclomatic complexity ranking
+repograph coupling <projectId>       Coupling / instability analysis
+repograph cycles <projectId>         Package cycle detection
+repograph hotspots <projectId>       Git churn hotspots
+repograph deadcode <projectId>       Dead code detection
+repograph testgap <projectId>        Test gap detection
+repograph report <projectId>         Code health report (6 dimensions + score)
+repograph export <projectId>         Package dependency graph (DOT / Mermaid)
 repograph vuln scan-code <projectId>             Scan for code vulnerabilities
 repograph vuln scan-deps <projectId> <root>      Scan dependencies against advisory DB
 repograph vuln list <projectId>                  List vulnerability findings
@@ -203,10 +235,19 @@ Common `index` options:
 | `GET` | `/api/v1/graph/subtypes` | Subclasses and implementations |
 | `GET` | `/api/v1/graph/entrypoints` | Framework entry points |
 | `GET` | `/api/v1/flow/analyze` | On-demand CFG / PDG / data flow |
+| `GET` | `/api/v1/flow/taint` | Interprocedural taint trace (source method → sink) |
+| `GET` | `/api/v1/metrics/complexity` | Cyclomatic complexity ranking |
+| `GET` | `/api/v1/metrics/coupling` | Coupling / instability analysis |
+| `GET` | `/api/v1/metrics/cycles` | Package cycle detection |
+| `GET` | `/api/v1/metrics/hotspots` | Git churn hotspots |
+| `GET` | `/api/v1/metrics/report` | Code health report (6 dimensions + score) |
+| `GET` | `/api/v1/export/graph` | Package dependency graph export (DOT / Mermaid) |
 | `GET` | `/api/v1/projects` | List indexed projects |
 | `GET` | `/api/v1/projects/{projectId}/stats` | Project statistics |
 | `GET` | `/api/v1/sbom/{projectId}` | Generate SBOM |
 | `POST` | `/api/v1/vulns/scan/code` | Trigger code vulnerability scan |
+| `POST` | `/api/v1/vulns/scan/taint` | Trigger taint vulnerability scan (source-level heuristic) |
+| `POST` | `/api/v1/vulns/scan/taint/precise` | Trigger precise taint scan (WALA IFDS engine) |
 | `POST` | `/api/v1/vulns/scan/deps` | Trigger dependency vulnerability scan |
 | `GET` | `/api/v1/vulns` | List vulnerability findings |
 | `PUT` | `/api/v1/vulns/{id}/status` | Update finding status |
@@ -218,9 +259,9 @@ Common `index` options:
 
 ## MCP Integration
 
-RepoGraph ships a standalone MCP stdio server (`repograph-mcp`) for direct integration with Claude Desktop, Cursor, and other MCP-compatible AI tools.
+RepoGraph ships a standalone MCP stdio server (`repograph-mcp`) for direct integration with Cursor and any other MCP-compatible AI tool.
 
-Add to your `claude_desktop_config.json`:
+Add to your MCP client configuration (`mcpServers` format):
 
 ```json
 {
@@ -242,6 +283,7 @@ Add to your `claude_desktop_config.json`:
 |------|-------------|
 | `search_semantic` | Natural language code search |
 | `search_code` | Code snippet similarity search |
+| `search_graphrag` | GraphRAG search (vector + call graph + impact + security rerank) |
 | `lookup_symbol` | Full symbol details by qualified name |
 | `locate_at` | File + line → symbol name |
 | `find_callers` | Find callers (configurable depth) |
@@ -249,6 +291,14 @@ Add to your `claude_desktop_config.json`:
 | `get_impact` | Transitive impact analysis |
 | `find_subtypes` | Subclasses and interface implementations |
 | `find_entrypoints` | Framework entry points |
+| `analyze_flow` | Per-method data flow summary / CFG / PDG |
+| `trace_taint` | Interprocedural taint trace (source method → sink) |
+| `scan_vuln_code` | Trigger code vulnerability scan |
+| `list_vulns` | List vulnerability findings (with filters) |
+| `list_projects` | List indexed projects |
+| `get_health_report` | Code health report (6 dimensions + score) |
+| `trigger_index` | Trigger project indexing (async) |
+| `index_status` | Poll indexing progress |
 
 ---
 
@@ -307,6 +357,12 @@ repograph:
       embed: 8                    # Reduce if Ollama times out
       upsert: 256
     default-strategy: AUTO        # auto | precise | heuristic
+  taint:
+    precise:                      # Precise taint scan (WALA IFDS engine, separate process)
+      enabled: false              # Enable after setting java-home and engine-lib-dir
+      java-home: ""               # JDK home with jmods (e.g. JDK 21)
+      engine-lib-dir: ""          # lib dir from :repograph-taint-engine:installDist
+      timeout-seconds: 600
 ```
 
 ---
@@ -330,8 +386,9 @@ repograph:
 **Build outputs:**
 - `repograph-app/build/libs/repograph-app-0.5.0.jar` — REST server + CLI
 - `repograph-mcp/build/libs/repograph-mcp-exec.jar` — MCP stdio server
+- `./gradlew :repograph-taint-engine:installDist` — precise taint engine (`build/install/repograph-taint-engine/`, invoked as a subprocess by the precise scan)
 
-> **Note:** JDK 25 is required. The `--enable-native-access=ALL-UNNAMED` flag is set automatically via `gradle.properties`.
+> **Note:** JDK 25 is required for the app. The `--enable-native-access=ALL-UNNAMED` flag is set automatically via `gradle.properties`. The taint engine builds and runs on JDK 21 (its Gradle toolchain downloads it if missing); at runtime the precise scan needs a JDK that ships `jmods` (JDK 17/21 do, JDK 25 does not).
 
 ---
 
@@ -356,11 +413,21 @@ Phase 2 (next)      LLM-agent context provider
 
 Everything in the [Features](#features) table is implemented and available today via the web console, REST API, and CLI.
 
-### Phase 2 — LLM Agent Integration
+### Phase 2 — LLM Agent Integration (in progress)
+
+Done:
 
 | Item | Description |
 |------|-------------|
-| `search_graphrag` MCP tool | Expose the 4-stage GraphRAG pipeline (vector → call graph → impact → rerank) as an MCP tool — currently only reachable via REST |
+| `search_graphrag` MCP tool ✓ | The 4-stage GraphRAG pipeline (vector → call graph → impact → rerank) is exposed as an MCP tool |
+| Security MCP tools ✓ | `trace_taint` / `list_vulns` / `scan_vuln_code` / `list_projects` |
+| Agent orientation tools ✓ | `get_health_report` / `trigger_index` / `index_status` — the agent can check index state and trigger indexing itself |
+| Precise taint engine ✓ | `repograph-taint-engine` (WALA IFDS) integrated as a separate process — the fourth scanning path |
+
+Next:
+
+| Item | Description |
+|------|-------------|
 | `rawSource` in tool results | MCP tools return metadata only; adding source text lets the agent read a method body without a separate file lookup |
 | Cross-project call resolution | Better call-edge linking across sub-projects inside a monorepo |
 | More language support | Go (`go.mod` SBOM; Tree-sitter parsing) |
@@ -374,4 +441,5 @@ Everything in the [Features](#features) table is implemented and available today
 - Reflection and dynamic proxy calls cannot be statically traced
 - C preprocessor macro expansion is not performed; conditional compilation is not build-config-aware
 - C function pointer calls cannot be precisely resolved
-- Flow analysis (CFG/PDG) covers Java only; data dependencies are conservative heuristics, not SSA
+- Flow analysis: Java gets CFG + PDG + taint summaries (precise AST); C / Python get CFG + conservative data-flow summaries only. Data dependencies are conservative heuristics, not SSA
+- Precise taint scanning requires compiled classes / jars and a JDK that ships `jmods` (JDK 17/21 work; JDK 25 does not include them)

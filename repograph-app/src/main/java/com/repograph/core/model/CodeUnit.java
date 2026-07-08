@@ -21,7 +21,7 @@ import java.util.Map;
  * @param signature          仅签名行，用于语义 embedding 和展示
  * @param annotations        注解列表，如 {@code ["@Service", "@Transactional"]}；无注解时为空列表，不为 {@code null}
  * @param parentQualifiedName 所属类的全限定名；顶层类或 C 顶层函数为 {@code null}
- * @param metadata           扩展元数据，键集合见 CLAUDE.md 中"metadata 标准 key"一节；不为 {@code null}
+ * @param metadata           扩展元数据，键集合见 CONTEXT.md 中"metadata 标准 key"一节；不为 {@code null}
  * @author leolu
  * @since 0.1.0
  */

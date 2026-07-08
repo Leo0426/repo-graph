@@ -25,8 +25,6 @@
 package com.repograph.taint.api;
 
 /**
- * Language Support in clouditera report.
- *
  * @author LeoLu
  * @since 4/21/21
  **/

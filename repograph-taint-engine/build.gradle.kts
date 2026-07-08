@@ -38,7 +38,6 @@ dependencies {
     implementation("org.dom4j:dom4j:2.1.4")
     implementation("org.javassist:javassist:3.30.2-GA")
 
-    // 报告/输出层(copied 自 clouditera-report,后续将映射到 repo-graph VulnFinding/TaintPath)
     implementation("com.fasterxml.jackson.core:jackson-databind:2.14.2")
     implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.14.2")
     // 规则反射注册

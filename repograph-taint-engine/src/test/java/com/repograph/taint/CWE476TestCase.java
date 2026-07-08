@@ -52,7 +52,7 @@ public class CWE476TestCase {
 		Path path = Paths.get("/Users/leolu/Project/personal_projects/test_case/java_test_case/Juliet/Juliet/Juliet_Test_Suite/src/testcases/CWE476_NULL_Pointer_Dereference");
 
 		DefaultContext build = IContext.builder()
-			.withTaskName("clouditera-java-engine")
+			.withTaskName("java-engine")
 			.withOutputPath(path)
 			.withCheckConfig(
 				CheckConfig.builder()

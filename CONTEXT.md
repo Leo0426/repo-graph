@@ -68,7 +68,7 @@ repograph-app/   Spring Boot 服务 + Picocli CLI
 
 repograph-mcp/   独立 MCP stdio 服务（JSON-RPC，供 AI 工具调用，通过 HTTP 转发至 repograph-app）
 
-repograph-taint-engine/   WALA-based IFDS 精确污点引擎（迁移自 clouditera-taint，命名空间 com.repograph.taint.*）
+repograph-taint-engine/   WALA-based IFDS 精确污点引擎
   ── 独立进程运行（方案 A）：app 以子进程调用，见下方 ADR ──
   com.repograph.taint.cli/  TaintScanRunner（可复用管道）+ TaintScanCli（JSON I/O 入口）+ TaintFlowDto
   application 插件 → installDist 产出 bin/ + lib/（供 app 用带 jmods 的 JDK 启动）

@@ -94,7 +94,7 @@ public class MessageWrapper {
 				.withMethodName("test")
 				.withVariable("test_variable")
 				.withLineNumber(10)
-				.withAbstractFilePath("com/clouditera/engine/report/i18n/messages.yaml")
+				.withAbstractFilePath("com/java/engine/report/i18n/messages.yaml")
 				.withFieldName("test_field")
 				.build()
 		);

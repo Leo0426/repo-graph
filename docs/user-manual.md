@@ -33,7 +33,7 @@ RepoGraph 是一个**本地代码知识图谱**工具，通过静态分析将代
 | **类型层次查询** | 谁继承/实现了 X |
 | **符号定位** | file:line → 包含该行的符号 |
 | **SBOM 生成** | Maven pom.xml → CycloneDX JSON |
-| **AI Agent 集成** | MCP stdio 协议，8 个工具直接对接 Claude / Cursor |
+| **AI Agent 集成** | MCP stdio 协议，工具直接对接 Cursor 等 MCP 客户端 |
 
 **支持语言**：Java（JavaParser AST）、C/C++（Tree-sitter）、Python（Tree-sitter）
 
@@ -587,7 +587,7 @@ GET /api/v1/sbom/a1b2c3d4e5f6?format=cyclonedx
 
 ## 7. MCP 服务器
 
-RepoGraph 内置 MCP（Model Context Protocol）stdio 服务器，让 Claude、Cursor 等 AI 工具直接查询代码知识图谱。
+RepoGraph 内置 MCP（Model Context Protocol）stdio 服务器，让 Cursor 等支持 MCP 协议的 AI 工具直接查询代码知识图谱。
 
 ### 7.1 构建与启动
 
@@ -614,9 +614,9 @@ repograph.timeout-seconds=30
 REPOGRAPH_BASE_URL=http://192.168.1.100:8080 java -jar repograph-mcp.jar
 ```
 
-### 7.3 Claude Desktop 集成
+### 7.3 MCP 客户端集成
 
-在 `~/Library/Application Support/Claude/claude_desktop_config.json`（macOS）中添加：
+在 MCP 客户端配置（`mcpServers` 格式）中添加：
 
 ```json
 {

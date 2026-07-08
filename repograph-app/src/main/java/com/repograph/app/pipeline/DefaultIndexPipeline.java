@@ -37,7 +37,7 @@ import java.util.stream.Collectors;
 /**
  * 索引管道默认实现，编排文件扫描、增量过滤、解析、元数据增强、图构建、Embedding 和 Qdrant 写入。
  *
- * <p>流程顺序（与 CLAUDE.md 规范一致，不可打乱）：
+ * <p>流程顺序（与 CONTEXT.md 规范一致，不可打乱）：
  * <ol>
  *   <li>扫描文件（按扩展名分语言）</li>
  *   <li>增量过滤（SQLite MD5 缓存，跳过未变更文件；{@code noIncremental=true} 时跳过此步）</li>

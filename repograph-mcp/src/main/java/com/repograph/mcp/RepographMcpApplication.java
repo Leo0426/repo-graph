@@ -17,7 +17,7 @@ import org.springframework.context.annotation.Bean;
  *   java -jar repograph-mcp-exec.jar [--base-url http://localhost:8080]
  * </pre>
  *
- * <p>Claude Desktop mcpServers 配置示例：
+ * <p>MCP 客户端 mcpServers 配置示例：
  * <pre>
  * {
  *   "mcpServers": {
