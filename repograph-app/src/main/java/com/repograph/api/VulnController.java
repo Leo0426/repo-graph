@@ -46,15 +46,18 @@ public class VulnController {
     private final CodeVulnScanner scanner;
     private final DepsVulnScanner depsScanner;
     private final TaintVulnScanner taintScanner;
+    private final com.repograph.vuln.PreciseTaintScanService preciseTaintScanner;
     private final VulnStore vulnStore;
     private final GraphQueryService graphQueryService;
 
     public VulnController(CodeVulnScanner scanner, DepsVulnScanner depsScanner,
                           TaintVulnScanner taintScanner,
+                          com.repograph.vuln.PreciseTaintScanService preciseTaintScanner,
                           VulnStore vulnStore, GraphQueryService graphQueryService) {
         this.scanner       = scanner;
         this.depsScanner   = depsScanner;
         this.taintScanner  = taintScanner;
+        this.preciseTaintScanner = preciseTaintScanner;
         this.vulnStore     = vulnStore;
         this.graphQueryService = graphQueryService;
     }
@@ -90,6 +93,43 @@ public class VulnController {
                 "entryPoints",   summary.entryPoints(),
                 "pathsAnalyzed", summary.pathsAnalyzed(),
                 "newFindings",   summary.newFindings()
+        ));
+    }
+
+    /**
+     * 触发精确污点扫描(方案 A:WALA IFDS 引擎独立进程)。
+     * <p>
+     * 引擎在编译后的字节码上做跨过程 field-sensitive 污点分析,精度高于 {@code /scan/taint}
+     * 的源码级启发式,但要求目标可编译并提供编译产物路径,且引擎跑在带 jmods 的 JDK
+     * (见 repograph.taint.precise 配置)。
+     *
+     * @param projectId    项目 ID
+     * @param classpath    编译后的 classes 目录或 jar(WALA 分析目标)
+     * @param config       source/sink 配置 JSON 文件路径
+     * @param rule         规则名(默认 CWE_78)
+     * @param entryMethods 可选:入口方法名(逗号分隔);省略则用全部 public 方法
+     */
+    @PostMapping("/scan/taint/precise")
+    public ResponseEntity<Map<String, Object>> scanTaintPrecise(
+            @RequestParam String projectId,
+            @RequestParam String classpath,
+            @RequestParam String config,
+            @RequestParam(defaultValue = "CWE_78") String rule,
+            @RequestParam(required = false) String entryMethods) {
+        if (projectId == null || projectId.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "projectId is required"));
+        }
+        if (classpath == null || classpath.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "classpath is required"));
+        }
+        if (config == null || config.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "config is required"));
+        }
+        var summary = preciseTaintScanner.scan(projectId, classpath, config, rule, entryMethods);
+        return ResponseEntity.ok(Map.of(
+                "projectId",   projectId,
+                "flows",       summary.flows(),
+                "newFindings", summary.newFindings()
         ));
     }
 

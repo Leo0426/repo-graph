@@ -13,5 +13,5 @@ import org.springframework.context.annotation.Configuration;
  * @since 0.1.0
  */
 @Configuration
-@EnableConfigurationProperties(IndexProperties.class)
+@EnableConfigurationProperties({IndexProperties.class, com.repograph.vuln.PreciseTaintProperties.class})
 public class AppConfiguration {}
