@@ -5,6 +5,7 @@ import com.repograph.core.model.CodeUnit;
 import com.repograph.core.model.CodeUnitKind;
 import com.repograph.vuln.CodeVulnScanner;
 import com.repograph.vuln.DepsVulnScanner;
+import com.repograph.vuln.PreciseTaintScanService;
 import com.repograph.vuln.TaintVulnScanner;
 import com.repograph.vuln.VulnFinding;
 import com.repograph.vuln.VulnStore;
@@ -49,6 +50,9 @@ class VulnControllerTest {
 
     @MockitoBean
     TaintVulnScanner taintScanner;
+
+    @MockitoBean
+    PreciseTaintScanService preciseTaintScanService;
 
     @MockitoBean
     VulnStore vulnStore;

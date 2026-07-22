@@ -6,6 +6,8 @@ import com.repograph.core.graph.ProjectStats;
 import com.repograph.core.model.CodeUnit;
 import com.repograph.core.model.CodeUnitKind;
 import com.repograph.core.retrieval.GraphRagOptions;
+import com.repograph.core.retrieval.KeywordSearchResult;
+import com.repograph.core.retrieval.KeywordSearchService;
 import com.repograph.core.vector.EmbeddedUnit;
 import com.repograph.core.vector.SearchOptions;
 import com.repograph.core.vector.SearchPage;
@@ -101,6 +103,31 @@ class GraphRagServiceTest {
             assertThat(ranked.securityScore()).isGreaterThan(0f);
             assertThat(ranked.finalScore()).isEqualTo(0.7f);
         });
+    }
+
+    @Test
+    void search_mergesKeywordSeedsWithVectorSeeds() {
+        CodeUnit vectorSeed = unit("seed", "com.example.Auth#login()", Map.of());
+        CodeUnit keywordSeed = unit("keyword", "com.example.Command#exec()", Map.of());
+        RecordingVectorStore vectorStore = new RecordingVectorStore(
+                new SearchPage(List.of(new SearchResult(vectorSeed, 0.7f)), 0, 10, false));
+        KeywordSearchService keyword = (query, options) -> List.of(
+                new KeywordSearchResult(keywordSeed, 0.8f, List.of("cwe-78", "exec")));
+        GraphRagService service = new GraphRagService(
+                vectorStore, new RecordingGraphQueryService(), new SecurityAwareReranker(), keyword);
+
+        var result = service.search("CWE-78 exec",
+                new GraphRagOptions(10, 1, false, false, true,
+                        "project-a", "java", true));
+
+        assertThat(result.keywordSeedCount()).isEqualTo(1);
+        assertThat(result.results())
+                .extracting(ranked -> ranked.source())
+                .contains("VECTOR", "KEYWORD");
+        assertThat(result.results())
+                .filteredOn(ranked -> ranked.source().equals("KEYWORD"))
+                .singleElement()
+                .satisfies(ranked -> assertThat(ranked.securitySignals()).contains("keyword:cwe-78", "keyword:exec"));
     }
 
     private static CodeUnit unit(String id, String qualifiedName, Map<String, String> metadata) {

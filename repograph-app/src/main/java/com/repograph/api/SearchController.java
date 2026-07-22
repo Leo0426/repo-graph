@@ -1,6 +1,9 @@
 package com.repograph.api;
 
 import com.repograph.core.model.CodeUnitKind;
+import com.repograph.core.retrieval.KeywordSearchOptions;
+import com.repograph.core.retrieval.KeywordSearchResult;
+import com.repograph.core.retrieval.KeywordSearchService;
 import com.repograph.core.vector.SearchOptions;
 import com.repograph.core.vector.SearchResult;
 import com.repograph.core.vector.VectorStore;
@@ -8,6 +11,8 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 import com.repograph.core.vector.SearchPage;
 
@@ -26,14 +31,17 @@ import com.repograph.core.vector.SearchPage;
 public class SearchController {
 
     private final VectorStore vectorStore;
+    private final KeywordSearchService keywordSearchService;
 
     /**
      * 通过构造器注入向量存储服务。
      *
-     * @param vectorStore 向量存储服务，不为 {@code null}
+     * @param vectorStore          向量存储服务，不为 {@code null}
+     * @param keywordSearchService 关键词检索服务，不为 {@code null}
      */
-    public SearchController(VectorStore vectorStore) {
+    public SearchController(VectorStore vectorStore, KeywordSearchService keywordSearchService) {
         this.vectorStore = vectorStore;
+        this.keywordSearchService = keywordSearchService;
     }
 
     /** 服务端每页结果上限，防止单次查询过大。 */
@@ -91,6 +99,30 @@ public class SearchController {
             Math.max(1, Math.min(limit, MAX_LIMIT)), offset, lang, parseKind(kind), projectId, false, false
         );
         return vectorStore.codeSearch(snippet, opts);
+    }
+
+    /**
+     * 关键词检索，适用于函数名、规则 ID、CVE/CWE、配置 key 等精确召回场景。
+     *
+     * @param q         关键词查询
+     * @param lang      可选语言过滤
+     * @param kind      可选代码单元类型过滤
+     * @param limit     最大结果数，默认 10，上限 {@value MAX_LIMIT}
+     * @param projectId 可选项目 ID
+     * @param noTest    是否排除测试代码
+     * @return 按关键词分数降序排列的结果
+     */
+    @GetMapping("/keyword")
+    public List<KeywordSearchResult> keyword(
+            @RequestParam String q,
+            @RequestParam(required = false) String lang,
+            @RequestParam(required = false) String kind,
+            @RequestParam(defaultValue = "10") int limit,
+            @RequestParam(required = false) String projectId,
+            @RequestParam(defaultValue = "true") boolean noTest) {
+        KeywordSearchOptions opts = new KeywordSearchOptions(
+                Math.max(1, Math.min(limit, MAX_LIMIT)), lang, parseKind(kind), projectId, noTest);
+        return keywordSearchService.search(q, opts);
     }
 
     private CodeUnitKind parseKind(String kind) {

@@ -1,5 +1,6 @@
 package com.repograph.api;
 
+import com.repograph.finding.ExternalFindingImportException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -69,6 +70,20 @@ public class GlobalExceptionHandler {
         String message = "Invalid value '" + ex.getValue() + "' for parameter '" + ex.getName() + "'";
         log.debug("Type mismatch: {}", message);
         return ResponseEntity.badRequest().body(Map.of("error", message));
+    }
+
+    /**
+     * 处理外部报警导入失败（JSON 无效或格式不兼容），返回 400 Bad Request。
+     *
+     * @param ex 捕获到的 {@link ExternalFindingImportException}
+     * @return 含 {@code error} 字段的 400 响应体
+     */
+    @ExceptionHandler(ExternalFindingImportException.class)
+    public ResponseEntity<Map<String, String>> handleFindingImport(
+            ExternalFindingImportException ex) {
+        log.debug("Finding import failed: {}", ex.getMessage());
+        return ResponseEntity.badRequest()
+                .body(Map.of("error", ex.getMessage() != null ? ex.getMessage() : "Import failed"));
     }
 
     /**

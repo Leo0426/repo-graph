@@ -57,7 +57,9 @@ RepoGraph 的终极方向是成为 **LLM Agent 的上下文提供者**：让 Age
 | 索引 | 多项目管理 | 稳定 ID、隔离存储与统计管理 | 顶部项目选择器 / `repograph projects` |
 | 向量检索 | 语义搜索 | 自然语言 → 代码单元 | 搜索页面 / `search_semantic` |
 | 向量检索 | 代码相似搜索 | 代码片段 → 相似实现 | 搜索页面 / `search_code` |
-| GraphRAG | 调用图展开 | 向量种子 → callers + callees 展开 | `GET /api/v1/search/graphrag` |
+| GraphRAG | Hybrid 种子召回 | 向量种子 + 关键词种子（函数名 / CVE / CWE / 规则 ID / 配置 key） | `GET /api/v1/search/graphrag` |
+| GraphRAG | 关键词检索 | qualifiedName / signature / rawSource 轻量 BM25-like 检索 | `GET /api/v1/search/keyword` |
+| GraphRAG | 调用图展开 | 种子 → callers + callees 展开 | `GET /api/v1/search/graphrag` |
 | GraphRAG | 影响面扩展 | 影响面展开，仅补充安全相关节点 | `GET /api/v1/search/graphrag?impactExpansion=true` |
 | GraphRAG | 安全感知重排序 | 静态安全信号评分，无需 LLM | `GET /api/v1/search/graphrag?rerank=true` |
 | 符号查询 | 符号详情与定位 | 按限定名查询，或按文件行号定位 | 符号页面 / CLI / REST |
@@ -83,7 +85,7 @@ RepoGraph 的终极方向是成为 **LLM Agent 的上下文提供者**：让 Age
 | SBOM | npm | `package.json` → CycloneDX JSON（`pkg:npm`），支持 scoped 包 | `repograph sbom` / 项目工具 |
 | SBOM | pip | `pyproject.toml` + `requirements*.txt` → CycloneDX JSON（`pkg:pypi`） | `repograph sbom` / 项目工具 |
 | 可视化 | Web 控制台 | 搜索、代码图、流分析、统计、索引与健康状态 | `http://localhost:8080` |
-| AI 集成 | MCP stdio 服务 | 18 个 MCP 工具：搜索 / GraphRAG / 调用链 / 污点 / 漏洞 / 索引管理 | `repograph-mcp` |
+| AI 集成 | MCP stdio 服务 | 23 个 MCP 工具：搜索 / GraphRAG / Context Pack / SAST 研判 / 反馈闭环 / 调用链 / 污点 / 漏洞 / 索引管理 | `repograph-mcp` |
 | 质量评测 | 检索 Benchmark | Hit@1/3/5/10、MRR@10、HitScore 及阈值门禁 | Benchmark 页面 / Gradle 测试 |
 | 容错 | 解析降级 | 解析失败自动降级，不阻断整体流程 | 索引管道 |
 
@@ -153,7 +155,7 @@ repograph-app/   Spring Boot 服务 + Picocli CLI（REST API、索引管道、�
   ├─ graph/       Neo4j Bolt 门面（调用链 / 影响面 / 继承图）
   ├─ vector/      Qdrant gRPC（向量存储）+ Ollama（Embedding）
   ├─ flow/        函数内 CFG / PDG / 数据流摘要 + 跨过程污点分析
-  ├─ retrieval/   GraphRAG 检索 + 安全感知重排序
+  ├─ retrieval/   GraphRAG 检索 + 关键词召回 + 安全感知重排序 + Context Pack 上下文组装
   ├─ framework/   Spring / JAX-RS / MyBatis 注解识别，标记入口点
   ├─ sbom/        Maven / Gradle / npm / pip → CycloneDX JSON
   ├─ vuln/        漏洞扫描（代码规则 / 污点 / 依赖 CVE）+ 发现记录状态机
@@ -331,7 +333,9 @@ repograph vuln report <projectId> [--out FILE]    生成漏洞报告
 | `DELETE` | `/api/v1/index/project` | 删除项目索引 |
 | `GET` | `/api/v1/search/semantic` | 自然语言语义检索 |
 | `GET` | `/api/v1/search/code` | 代码片段相似检索 |
+| `GET` | `/api/v1/search/keyword` | 关键词检索（函数名 / CVE / CWE / 规则 ID / 配置 key） |
 | `GET` | `/api/v1/search/graphrag` | GraphRAG 检索（向量 + 调用图 + 影响面 + 安全重排序） |
+| `GET` | `/api/v1/context/pack` | 构建带 citation 的 Agent 上下文包 |
 | `GET` | `/api/v1/symbol/{qualifiedName}` | 查看符号详情 |
 | `GET` | `/api/v1/locate` | 定位行号所在符号 |
 | `GET` | `/api/v1/graph/callers` | 查询调用者 |
@@ -382,8 +386,13 @@ RepoGraph 提供 MCP stdio 服务，可接入 Cursor 等任何支持 MCP 协议�
 | 工具 | 说明 |
 |------|------|
 | `search_semantic` | 自然语言检索代码 |
+| `search_keyword` | 关键词检索（函数名 / CVE / CWE / 规则 ID / 配置 key） |
 | `search_code` | 代码片段相似检索 |
 | `search_graphrag` | GraphRAG 检索（向量 + 调用图 + 影响面 + 安全重排序） |
+| `build_context_pack` | 构建带 citation 的 Agent 上下文包 |
+| `triage_finding` | 导入 Semgrep / SARIF / CodeQL 报警并生成研判报告 |
+| `record_triage_feedback` | 写入人工研判反馈（真实风险 / 误报 / 待复核 / 已修复） |
+| `list_triage_feedback` | 查询项目研判反馈，支持按状态过滤 |
 | `lookup_symbol` | 查看符号完整信息 |
 | `locate_at` | 文件行号 → 符号名 |
 | `find_callers` | 查询调用者（支持深度） |
@@ -563,17 +572,24 @@ repograph vuln report     <projectId> [--out report.md] [--all]
 
 ### 方向
 
-RepoGraph 的终极目标是：**让 LLM 以 Agent 身份在大型代码库中按需定位上下文**——不需要把整个仓库塞进上下文窗口，而是让 Agent 像用工具一样按需查询知识图谱。
+RepoGraph 的后续产品主线收敛为：**面向企业研发安全团队的 AI Native SAST 报警研判与修复 Agent**。
+它不是从零重做一个完整扫描器，而是接入 CodeQL、Semgrep、SonarQube、Fortify、Checkmarx、SCA、CI/CD
+和 Git 仓库中的扫描结果，把报警转化为可解释、可验证、可修复、可闭环的安全研判报告。
+
+长期目标仍是 **AI Native Code Intelligence Platform**，但第一商业化切入点是 SAST 报警之后的智能决策层。
+完整路线见 [roadmap-codesec-triage-agent.md](docs/generated/roadmap-codesec-triage-agent.md)。
 
 路径分两个阶段：
 
 ```
-第一阶段（当前）  独立代码审计平台
-                在平台上完成并验证所有分析能力。
+第一阶段（已完成） 独立代码审计平台
+                 在平台上完成并验证基础分析能力。
 
-第二阶段（下一步） LLM Agent 上下文提供者
-                将验证过的能力暴露为 MCP 工具，
-                让 Agent 以工具调用方式迭代查询。
+第二阶段（当前）  LLM Agent 上下文提供者
+                 将 GraphRAG / Context Pack / 漏洞管理暴露为 MCP 工具。
+
+第三阶段（下一步）SAST 报警研判 Agent
+                 接入外部 SAST 报警，生成证据链、误报判断和修复建议。
 ```
 
 ### 第一阶段 — 审计平台 ✓
@@ -586,7 +602,11 @@ RepoGraph 的终极目标是：**让 LLM 以 Agent 身份在大型代码库中�
 
 | 项目 | 说明 |
 |------|------|
-| `search_graphrag` MCP 工具 ✓ | 四阶段 GraphRAG 管道（向量 → 调用图 → 影响面 → 重排序）已暴露为 MCP 工具 |
+| `search_graphrag` MCP 工具 ✓ | Hybrid GraphRAG 管道（向量 + 关键词 → 调用图 → 影响面 → 重排序）已暴露为 MCP 工具 |
+| `search_keyword` MCP 工具 ✓ | 面向函数名、配置 key、规则 ID、CVE/CWE、API 名称的精确召回 |
+| `build_context_pack` MCP 工具 ✓ | 将 GraphRAG 结果组装为带 citation、预算裁剪和 omittedReasons 的上下文证据包 |
+| `triage_finding` MCP 工具 ✓ | 接入 Semgrep / SARIF / CodeQL JSON，返回 verdict、证据、缺失信息、修复建议和 Markdown 报告 |
+| 研判反馈 MCP 工具 ✓ | `record_triage_feedback` / `list_triage_feedback`，支持把人工确认、误报、待复核、已修复状态写回平台 |
 | 安全 MCP 工具 ✓ | `trace_taint` / `list_vulns` / `scan_vuln_code` / `list_projects` |
 | Agent 定向工具 ✓ | `get_health_report` / `trigger_index` / `index_status`，Agent 可自主判断索引状态并触发 |
 | 精确污点引擎 ✓ | `repograph-taint-engine`（WALA IFDS）以独立进程接入，提供第四条扫描路径 |
@@ -595,9 +615,25 @@ RepoGraph 的终极目标是：**让 LLM 以 Agent 身份在大型代码库中�
 
 | 项目 | 说明 |
 |------|------|
-| MCP 工具结果加 `rawSource` | 现有工具只返回元数据；加入源码文本后 Agent 无需额外读文件即可理解方法实现 |
+| 持久化 BM25 / FTS | 当前是轻量 BM25-like 扫描；后续用 SQLite FTS 或专用倒排索引降低大仓库查询成本 |
+| 分层摘要 | 增加 chunk / 文件 / 包 / 项目级摘要，支撑全局理解与 Wiki 生成 |
+| 引用校验 | 对 Context Pack citation 做行号、片段和答案覆盖性检查 |
 | 跨子项目调用解析 | 改善 monorepo 内跨模块的调用边连接质量 |
 | 更多语言支持 | Go（`go.mod` SBOM；Tree-sitter 解析） |
+
+### 第三阶段 — CodeSec Triage Agent（规划中）
+
+目标：接入现有 SAST / SCA / CI 工具结果，自动分析报警上下文，判断真实风险，生成证据链、修复建议和可审计报告。
+
+| 阶段 | 目标 | 交付物 |
+|------|------|------|
+| P0 报警解释器 | 上传报警 JSON + 仓库，生成研判报告 | Semgrep / SARIF 导入、报警定位、Context Pack、Markdown 报告 |
+| P1 误报研判 | 判断真实漏洞 / 误报 / 需人工确认 | source/sink 证据链、路径可达性、已有防护识别、置信度 |
+| P2 PR / CI 集成 | 进入研发流程 | GitHub/GitLab PR 评论、CI 扫描结果自动研判、状态回写 |
+| P3 修复闭环 | 从研判走向修复 | Patch 草案、构建/测试/规则复扫、状态机闭环 |
+| P4 企业化 | 支持商业化部署 | 团队版、企业规则库、项目知识库、权限、审计日志 |
+
+本阶段本地 PRD 和任务清单见 `.scratch/codesec-triage-agent/`。
 
 ---
 

@@ -5,10 +5,19 @@
 
 ## 项目定位
 
-**终极方向**：让 LLM 以 Agent 身份在大型代码库中按需定位上下文——MCP 工具集 + GraphRAG 检索是核心交付物。
+**终极方向**：AI Native Code Intelligence Platform。近期产品主线收敛为面向企业研发安全团队的
+AI Native SAST 报警研判与修复 Agent：接入现有 SAST / SCA / CI 工具结果，基于 GraphRAG、Context Pack、
+调用图、污点和漏洞管理生成可解释、可验证、可修复、可闭环的安全研判报告。
 
-**当前阶段**：作为独立代码审计平台，在平台上完成所有能力的开发与验证，后续再做迁移。
-待开发阶段目标：`search_graphrag` 暴露为 MCP 工具；工具结果加 `rawSource` 字段。
+**补充定位**：`repograph-mcp` 这层工具本身是面向编码 Agent（Codex、Claude Code、Junie 等）的
+**代码仓库智能层**——预先建立增量语义索引（调用图 + 向量 + 关键词），让编码 Agent 在处理任意
+任务时直接查询项目知识，而不必每次现场 grep/读文件、也不必启动专门的探索子 Agent 重建上下文。
+这条定位和 SAST 报警研判 Agent 共享同一套底层能力，受众和验证方式不同，详见
+`docs/generated/roadmap-codesec-triage-agent.md`"补充定位"一节。
+
+**当前阶段**：独立代码审计平台 + MCP 上下文提供者已具备基础可用能力。下一阶段计划见
+`docs/generated/roadmap-codesec-triage-agent.md` 和 `.scratch/codesec-triage-agent/PRD.md`，重点是外部 SAST
+报警导入、报警上下文组装、误报研判、证据链和修复建议。
 
 本地代码知识图谱，面向静态启发式代码分析。**不做完整编译器语义分析**，粗中粒度够用，支撑：
 - 语义检索（NL → 代码）与代码相似检索
@@ -22,7 +31,7 @@
 
 ## 模块结构
 
-两个可独立部署的 JAR，源码均在对应 Gradle 子项目下：
+三个 Gradle 子项目，源码均在对应子项目下：
 
 ```
 repograph-app/   Spring Boot 服务 + Picocli CLI
@@ -31,9 +40,10 @@ repograph-app/   Spring Boot 服务 + Picocli CLI
     parser/       CodeParser / ParseResult / ParseStrategy / ParseOptions
     graph/        GraphQueryService / GraphDiagnosticsService / ProjectInfo / ProjectStats
     vector/       VectorStore / EmbeddingService / SearchResult / SearchOptions
+    finding/      ExternalFinding / ExternalFindingTraceStep / ExternalFindingSeverity
     flow/         FlowAnalysisService / TaintAnalysisService / TaintSummaryService + 所有流图模型
     pipeline/     IndexPipeline / IndexStore / IndexOptions / IndexProgressEvent
-    retrieval/    GraphRagOptions / GraphRagResult / RankedUnit
+    retrieval/    GraphRagOptions / GraphRagResult / RankedUnit / KeywordSearchService / ContextPack
     util/         ProjectIdUtil / PathUtil / CodeUnitIdUtil
 
   com.repograph.parser/
@@ -47,6 +57,9 @@ repograph-app/   Spring Boot 服务 + Picocli CLI
   com.repograph.flow/        JavaFlowAnalysisService / TreeSitterFlowAnalysisService
                              JavaTaintAnalysisService / JavaFlowTaintSummarizer
   com.repograph.retrieval/   GraphRagService + SecurityAwareReranker
+                              SimpleKeywordSearchService（符号名 / 规则 ID / CVE-CWE / 配置 key 召回）
+                              ContextPackService（GraphRAG → citation-ready context pack）
+  com.repograph.finding/     SemgrepFindingImporter / SarifFindingImporter → ExternalFinding
   com.repograph.framework/   Spring / JAX-RS / MyBatis 注解识别，标记 is_entry_point
   com.repograph.sbom/        DispatchSbomService → Maven / Gradle / npm / pip → CycloneDX JSON
   com.repograph.vuln/        漏洞管理
@@ -115,6 +128,27 @@ repograph-taint-engine/   WALA-based IFDS 精确污点引擎
    （绕开 GlobalCache），供测试与 app 接入使用。
 
 ## 核心领域模型
+
+**ExternalFinding**：外部 SAST / SCA 工具输入报警的统一模型，位于 `com.repograph.core.finding`。
+- 作用：承载 Semgrep / SARIF / CodeQL / SonarQube 等工具的原始报警，作为报警解释器输入。
+- 边界：`ExternalFinding` 是外部输入事实；`VulnFinding` 是 RepoGraph 内部扫描或研判后的发现记录。
+- 字段：tool、ruleId、cwe、severity、message、filePath、startLine、endLine、symbol、trace、raw。
+- 指纹：`fingerprint()` = `SHA256(tool|ruleId|filePath|startLine)[:16]`，跨导入批次关联反馈。
+- 导入器：`SemgrepFindingImporter` 支持 Semgrep JSON；`SarifFindingImporter` 支持 SARIF / CodeQL JSON，
+  通过 HTTP 请求流和 Jackson token 流式解析，单请求最多保留控制器允许的报警数，避免大文件构造完整 JSON 树。
+
+**报警研判管道**（P0 报警解释器，`com.repograph.finding`）：
+- `FindingContextService`：filePath+line 定位 CodeUnit（source=FINDING）→ callers/callees/impact 扩展 →
+  ruleId/cwe/message 关键词补充（source=KEYWORD），复用 `ContextPackService.assemble` 的预算与 citation 规则；
+  定位失败写入 `omittedReasons` 不抛异常。
+- `TriageReportService`：启发式基线（定位 + 安全信号 + 调用方可达性 → TRUE_RISK / LIKELY_FALSE_POSITIVE /
+  NEEDS_REVIEW + 置信度），结论只引用证据链；`ProtectionSignalDetector` 从 FINDING / CALLEE 证据中识别
+  CWE 特定防护候选，发现防护时保守转为 NEEDS_REVIEW，不把启发式匹配视为已验证安全；`toMarkdown`
+  输出可贴 PR 评论的报告。
+- `TriageFeedbackStore`：SQLite `triage_feedback` 表，指纹主键幂等 upsert，状态 TRUE_POSITIVE /
+  FALSE_POSITIVE / NEEDS_REVIEW / FIXED。
+- REST 入口：`POST /api/v1/triage/report?format=semgrep|sarif`（body 为工具 JSON，逐条返回报告 + Markdown）；
+  `POST/GET /api/v1/triage/feedback`。
 
 **CodeUnitKind**：`CLASS | INTERFACE | ENUM | ANNOTATION | METHOD | CONSTRUCTOR | FIELD | LOCAL_VAR | STRUCT | UNION | TYPEDEF | MACRO | FUNCTION | DOCUMENT`
 - `FUNCTION`：C 顶层函数（无所属类）；`STRUCT/UNION/TYPEDEF/MACRO` 仅 C 使用
@@ -257,12 +291,26 @@ Neo4j Docker 启动示例：`-p 7474:7474 -p 7687:7687`（7474 浏览器 UI，76
 ## GraphRAG 检索
 
 - **向量种子**：通过 `VectorStore.semanticSearch` 获取候选，并沿用语言、项目和测试代码过滤。
+- **关键词种子**：通过 `KeywordSearchService` 对 qualifiedName、simpleName、signature、rawSource 做轻量
+  BM25-like 打分，补充函数名、配置 key、规则 ID、CVE/CWE、API 名称等精确召回。
 - **调用图扩展**：按配置沿 callers / callees 展开，结果按 qualifiedName 去重。
 - **影响面扩展**：对前若干种子执行 `impactAnalysis`，仅补充安全启发式命中的节点。
 - **安全重排序**：基于入口点、认证授权、SQL、命令执行、反序列化和加密等静态信号加权。
 - **边界**：影响面扩展不是函数内数据流分析；CFG / PDG 仍通过 `FlowAnalysisService` 按需查询。
 - **查询入口**：`GET /api/v1/search/graphrag?impactExpansion=true`；
   旧参数 `dataFlow` 暂时保留兼容。
+- **关键词入口**：`GET /api/v1/search/keyword?q=CWE-78&kind=METHOD`；MCP 工具为 `search_keyword`。
+
+## Context Pack 上下文组装
+
+- **目标**：将 GraphRAG 排序结果转换为 LLM Agent 可直接消费的证据包，而不是只返回匹配列表。
+- **组装内容**：citationId、qualifiedName、kind、language、filePath、startLine/endLine、source/relation、
+  finalScore、excerpt、truncated、securitySignals。
+- **预算控制**：当前使用 `budgetChars` 做近似字符预算，按 GraphRAG 排序顺序截断和记录 omittedReasons；
+  后续可替换为模型 tokenizer。
+- **查询入口**：`GET /api/v1/context/pack?q=...&taskType=security&budgetChars=12000`。
+- **MCP 工具**：`build_context_pack`，用于 Agent 在回答、审查、研判前获取可溯源上下文。
+- **边界**：Context Pack 不生成答案，不做事实判断；它只负责上下文选择、裁剪和引用编号。
 
 ## projectId 与 filePath 规范
 
@@ -315,6 +363,7 @@ app（JDK 25）以子进程在带 jmods 的 JDK 上运行 `repograph-taint-engin
 | C/Python 解析 | Tree-sitter FFM | 容错强，无 JNI 复杂度 |
 | Markdown 索引 | DOCUMENT CodeUnitKind | 让文档内容参与语义检索，复用现有 embed/store 管道 |
 | Embedding | 双向量 | 两种检索策略 embed 输入不同，共用损失精度 |
+| Hybrid Search 最小版 | 向量种子 + 轻量关键词种子 | 不引入 Lucene 等依赖，先补足符号名、CVE/CWE、规则 ID 的精确召回；后续再替换为 SQLite FTS/BM25 |
 | 增量存储 | SQLite MD5 | 无额外服务依赖 |
 | 图存储 | Neo4j 5.x（Bolt）| 原生图遍历（Cypher 变长路径），跨进程共享，免应用层 BFS 与 JSON 快照 |
 | 行号 | 1-based | 与编辑器对齐 |
@@ -329,3 +378,4 @@ app（JDK 25）以子进程在带 jmods 的 JDK 上运行 `repograph-taint-engin
 | IFDS 引擎运行 JDK | 固定 JDK 21（带 jmods），与 app 的 JDK 25 分离 | WALA 需 jmods 建 JRE 模型，JDK 25 无 jmods |
 | IFDS 引擎接入方式 | **方案 A：独立进程**（installDist + TaintScanCli，app 子进程调用） | 彻底隔离 JDK 冲突（app JDK25 / 引擎 JDK21）；app 无需依赖引擎模块，仅解析其 JSON 输出；契合"精确扫描是要求可编译、按需触发的重路径"定位 |
 | IFDS 引擎共享可变状态 | 每次扫描独立进程（生产）/ 测试 forkEvery=1 + 方法定序 | `DomainElement.ZERO` 被 `TaintDomain.add` 就地合并 Info，同 JVM 连跑多次分析会污染；独立进程天然隔离，测试镜像之 |
+| AI Agent 缺陷发现接口 | `repograph-mcp` 结构化查询工具（调用图/污点/向量），不依赖 Agent 默认 grep/Read | grep 是字符串匹配，无法表达跨函数/跨文件数据流（如参数从入口方法传到 sink 的调用链）；`find_callers`/`find_callees`/`trace_taint`/`scan_vuln_code`/`search_graphrag` 让 Agent 对预建的 CodeUnit 图和污点摘要做结构化查询，代价是需要维护 Neo4j+Qdrant+MCP 进程，换取 grep 结构上做不到的跨过程追踪精度 |

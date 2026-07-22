@@ -1,6 +1,7 @@
 package com.repograph.core.graph;
 
 import com.repograph.core.model.CodeUnit;
+import com.repograph.core.model.CodeUnitKind;
 
 import java.util.List;
 
@@ -24,6 +25,24 @@ public interface GraphDiagnosticsService {
      * @return 可供逐行分析的代码单元列表；无结果时返回空列表，不为 {@code null}
      */
     List<CodeUnit> listScanTargets(String projectId);
+
+    /**
+     * 列出指定项目内可参与检索的代码单元，要求包含非空 {@code rawSource}。
+     *
+     * <p>该接口供关键词检索、Context Pack 和后续摘要构建使用。返回规模由实现侧限制，
+     * 调用方应传入合理 limit，避免一次性拉取过大项目。
+     *
+     * @param projectId 可选项目 ID；为空时查询所有项目
+     * @param language  可选语言过滤
+     * @param kind      可选代码单元类型过滤
+     * @param noTest    是否排除测试代码
+     * @param limit     最大返回数量
+     * @return 可检索代码单元列表；无结果时返回空列表
+     */
+    default List<CodeUnit> listSearchTargets(String projectId, String language, CodeUnitKind kind,
+                                             boolean noTest, int limit) {
+        return List.of();
+    }
 
     /**
      * 返回指定项目内所有跨类调用边，供类级别耦合度分析使用。

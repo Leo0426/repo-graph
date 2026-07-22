@@ -198,6 +198,30 @@ public class CodeGraphQueryService implements GraphQueryService, GraphDiagnostic
     }
 
     @Override
+    public List<CodeUnit> listSearchTargets(String projectId, String language, CodeUnitKind kind,
+                                            boolean noTest, int limit) {
+        if (limit <= 0) return List.of();
+        int safeLimit = Math.min(limit, 10000);
+        String cypher = """
+                MATCH (u:CodeUnit)
+                WHERE ($pid = '' OR u.projectId = $pid)
+                  AND ($lang = '' OR u.language = $lang)
+                  AND ($kind = '' OR u.kind = $kind)
+                  AND ($noTest = false OR u.is_test IS NULL OR u.is_test <> 'true')
+                  AND u.rawSource IS NOT NULL AND trim(u.rawSource) <> ''
+                RETURN u AS unit
+                ORDER BY u.filePath, u.startLine
+                LIMIT $limit
+                """;
+        return queryUnits(cypher, Values.parameters(
+                "pid", normalizeProjectId(projectId),
+                "lang", language == null ? "" : language,
+                "kind", kind == null ? "" : kind.name(),
+                "noTest", noTest,
+                "limit", safeLimit));
+    }
+
+    @Override
     public List<CodeUnit> findTestGaps(String projectId) {
         try (Session session = driver.session()) {
             // 阶段 1：收集从任意测试单元可达的 qualifiedName（深度 ≤ 6）

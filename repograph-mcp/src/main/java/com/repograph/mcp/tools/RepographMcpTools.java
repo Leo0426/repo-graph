@@ -2,6 +2,8 @@ package com.repograph.mcp.tools;
 
 import com.repograph.mcp.client.RepographApiClient;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -14,7 +16,7 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * RepoGraph MCP 工具集，定义 5 个工具的 JSON Schema 并将工具调用转发至 repograph-app REST API。
+ * RepoGraph MCP 工具集，定义工具 JSON Schema 并将工具调用转发至 repograph-app REST API。
  *
  * <p>工具输出为 AI agent 可直接阅读的 Markdown 格式文本。
  *
@@ -25,6 +27,7 @@ import java.util.Optional;
 public class RepographMcpTools {
 
     private static final Logger log = LoggerFactory.getLogger(RepographMcpTools.class);
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     private final RepographApiClient client;
 
@@ -47,6 +50,22 @@ public class RepographMcpTools {
                     "query", strProp("Natural language description of what code to find"),
                     "lang",  strProp("Filter by language: java, c, or python"),
                     "kind",  strProp("Filter by kind: CLASS, METHOD, FUNCTION, INTERFACE, ENUM, CONSTRUCTOR, FIELD"),
+                    "limit", intProp("Max results (default 10)", 1, 50, 10)
+                ),
+                List.of("query")
+            )
+        ),
+
+        tool("search_keyword",
+            "Search code units by exact-ish keyword matching over qualified names, signatures, and raw source. " +
+            "Use this for identifiers, method names, configuration keys, rule IDs, CWE/CVE IDs, package names, " +
+            "or API names where vector search may be unstable.",
+            schema(
+                Map.of(
+                    "query", strProp("Keyword query, e.g. CWE-78 Runtime.exec requestMapping"),
+                    "lang",  strProp("Filter by language: java, c, python, or doc"),
+                    "kind",  strProp("Filter by kind: CLASS, METHOD, FUNCTION, DOCUMENT, INTERFACE, ENUM, CONSTRUCTOR, FIELD"),
+                    "projectId", strProp("12-char project ID to scope the search"),
                     "limit", intProp("Max results (default 10)", 1, 50, 10)
                 ),
                 List.of("query")
@@ -195,6 +214,72 @@ public class RepographMcpTools {
             )
         ),
 
+        tool("build_context_pack",
+            "Build a citation-ready context pack for an LLM Agent. This wraps GraphRAG results into " +
+            "numbered evidence blocks with file paths, line ranges, source/relation metadata, raw source " +
+            "excerpts, budget truncation notes, and retrieval stats. Use this when you need to answer, " +
+            "review, or reason with traceable context instead of just listing matching symbols.",
+            schema(
+                Map.of(
+                    "query",           strProp("Natural language description of the needed context"),
+                    "taskType",        strProp("Task type, e.g. detail, security, summary, compare"),
+                    "budgetChars",     intProp("Total excerpt character budget (default 12000)", 1000, 60000, 12000),
+                    "lang",            strProp("Filter by language: java, c, python, or doc"),
+                    "projectId",       strProp("12-char project ID to scope the context pack"),
+                    "limit",           intProp("Number of vector seed candidates (default 10)", 1, 20, 10),
+                    "depth",           intProp("Call-graph expansion depth (default 1)", 1, 3, 1),
+                    "callGraph",       boolProp("Expand along callers/callees (default true)"),
+                    "impactExpansion", boolProp("Add security-sensitive impact nodes (default true)")
+                ),
+                List.of("query")
+            )
+        ),
+
+        tool("triage_finding",
+            "Analyze external SAST findings and produce citation-backed triage reports. Accepts Semgrep " +
+            "or SARIF/CodeQL JSON, imports findings, builds RepoGraph context, and returns verdicts, " +
+            "confidence, evidence, missing information, remediation guidance, and Markdown suitable for " +
+            "an issue or PR comment. Use this after a scanner has produced alerts.",
+            schema(
+                Map.of(
+                    "format",      strProp("Finding format: semgrep, sarif, or codeql"),
+                    "json",        strProp("Raw JSON output from the SAST tool"),
+                    "projectId",   strProp("Optional 12-char project ID to scope retrieval"),
+                    "budgetChars", intProp("Per-finding context budget (default 12000)", 1000, 60000, 12000),
+                    "maxFindings", intProp("Max findings to triage from this request (default 10)", 1, 50, 10)
+                ),
+                List.of("format", "json")
+            )
+        ),
+
+        tool("record_triage_feedback",
+            "Record human review feedback for a SAST triage report. Use this after a reviewer confirms " +
+            "whether a triaged finding is a true positive, false positive, still needs review, or is fixed. " +
+            "Feedback is keyed by the finding fingerprint returned by triage_finding.",
+            schema(
+                Map.of(
+                    "fingerprint", strProp("Finding fingerprint returned by triage_finding"),
+                    "projectId",   strProp("12-char project ID associated with the finding"),
+                    "status",      strProp("TRUE_POSITIVE, FALSE_POSITIVE, NEEDS_REVIEW, or FIXED"),
+                    "reviewer",    strProp("Reviewer name, handle, or automation ID"),
+                    "reason",      strProp("Short reason or evidence for the feedback decision")
+                ),
+                List.of("fingerprint", "projectId", "status")
+            )
+        ),
+
+        tool("list_triage_feedback",
+            "List recorded SAST triage feedback for a project, optionally filtered by status. Use this " +
+            "to review false positives, confirmed risks, fixed findings, or outstanding manual review work.",
+            schema(
+                Map.of(
+                    "projectId", strProp("12-char project ID"),
+                    "status",    strProp("Optional filter: TRUE_POSITIVE, FALSE_POSITIVE, NEEDS_REVIEW, or FIXED")
+                ),
+                List.of("projectId")
+            )
+        ),
+
         tool("list_projects",
             "List all code projects currently indexed in RepoGraph. " +
             "Returns each project's ID (required by most other tools), root path, node count, and " +
@@ -272,7 +357,7 @@ public class RepographMcpTools {
             "(Java / C / Python / Markdown), builds the Neo4j code graph, and generates vector " +
             "embeddings via Ollama. Returns immediately (async) — large codebases may take " +
             "several minutes due to embedding. Use index_status to poll for completion. " +
-            "After indexing finishes, all 18 tools become available for the new project.",
+            "After indexing finishes, all RepoGraph MCP tools become available for the new project.",
             schema(
                 Map.of(
                     "projectRoot", strProp("Absolute path to the project root directory on the server"),
@@ -323,6 +408,7 @@ public class RepographMcpTools {
         try {
             String text = switch (name) {
                 case "search_semantic" -> runSearchSemantic(args);
+                case "search_keyword"  -> runSearchKeyword(args);
                 case "find_callers"    -> runFindCallers(args);
                 case "get_impact"      -> runGetImpact(args);
                 case "lookup_symbol"   -> runLookupSymbol(args);
@@ -333,6 +419,10 @@ public class RepographMcpTools {
                 case "find_entrypoints" -> runFindEntrypoints(args);
                 case "analyze_flow"      -> runAnalyzeFlow(args);
                 case "search_graphrag"   -> runSearchGraphRag(args);
+                case "build_context_pack" -> runBuildContextPack(args);
+                case "triage_finding"    -> runTriageFinding(args);
+                case "record_triage_feedback" -> runRecordTriageFeedback(args);
+                case "list_triage_feedback"   -> runListTriageFeedback(args);
                 case "list_projects"     -> runListProjects();
                 case "trace_taint"       -> runTraceTaint(args);
                 case "list_vulns"        -> runListVulns(args);
@@ -359,6 +449,18 @@ public class RepographMcpTools {
         var path = new StringBuilder("/api/v1/search/semantic?q=").append(enc(query));
         opt(args, "lang").ifPresent(v -> path.append("&lang=").append(enc(v)));
         opt(args, "kind").ifPresent(v -> path.append("&kind=").append(enc(v)));
+        path.append("&limit=").append(args.path("limit").asInt(10));
+
+        Optional<JsonNode> result = client.get(path.toString());
+        return formatSearchResults("\"" + query + "\"", result.orElse(null));
+    }
+
+    private String runSearchKeyword(JsonNode args) {
+        String query = require(args, "query");
+        var path = new StringBuilder("/api/v1/search/keyword?q=").append(enc(query));
+        opt(args, "lang").ifPresent(v -> path.append("&lang=").append(enc(v)));
+        opt(args, "kind").ifPresent(v -> path.append("&kind=").append(enc(v)));
+        opt(args, "projectId").ifPresent(v -> path.append("&projectId=").append(enc(v)));
         path.append("&limit=").append(args.path("limit").asInt(10));
 
         Optional<JsonNode> result = client.get(path.toString());
@@ -521,6 +623,77 @@ public class RepographMcpTools {
         return formatGraphRagResult(query, result.get());
     }
 
+    private String runBuildContextPack(JsonNode args) {
+        String query = require(args, "query");
+        var path = new StringBuilder("/api/v1/context/pack?q=").append(enc(query));
+        opt(args, "taskType").ifPresent(v -> path.append("&taskType=").append(enc(v)));
+        if (!args.path("budgetChars").isMissingNode()) {
+            path.append("&budgetChars=").append(args.path("budgetChars").asInt(12000));
+        }
+        opt(args, "lang").ifPresent(v -> path.append("&lang=").append(enc(v)));
+        opt(args, "projectId").ifPresent(v -> path.append("&projectId=").append(enc(v)));
+        path.append("&limit=").append(args.path("limit").asInt(10));
+        path.append("&depth=").append(args.path("depth").asInt(1));
+        if (!args.path("callGraph").isMissingNode()) {
+            path.append("&callGraph=").append(args.path("callGraph").asBoolean(true));
+        }
+        if (!args.path("impactExpansion").isMissingNode()) {
+            path.append("&impactExpansion=").append(args.path("impactExpansion").asBoolean(true));
+        }
+
+        Optional<JsonNode> result = client.get(path.toString());
+        if (result.isEmpty()) {
+            return "No context pack for \"" + query + "\".\n\n" +
+                   "Ensure the project is indexed and repograph-app is running.";
+        }
+        return formatContextPack(result.get());
+    }
+
+    private String runTriageFinding(JsonNode args) {
+        String format = require(args, "format");
+        String json = require(args, "json");
+        var path = new StringBuilder("/api/v1/triage/report?format=").append(enc(format));
+        opt(args, "projectId").ifPresent(v -> path.append("&projectId=").append(enc(v)));
+        if (!args.path("budgetChars").isMissingNode()) {
+            path.append("&budgetChars=").append(args.path("budgetChars").asInt(12000));
+        }
+        if (!args.path("maxFindings").isMissingNode()) {
+            path.append("&maxFindings=").append(args.path("maxFindings").asInt(10));
+        }
+
+        JsonNode result = client.postJson(path.toString(), json);
+        return formatTriageReports(format, result);
+    }
+
+    private String runRecordTriageFeedback(JsonNode args) throws Exception {
+        String fingerprint = require(args, "fingerprint");
+        String projectId = require(args, "projectId");
+        String status = require(args, "status");
+
+        ObjectNode body = JSON.createObjectNode();
+        body.put("fingerprint", fingerprint);
+        body.put("projectId", projectId);
+        body.put("status", status);
+        opt(args, "reviewer").ifPresent(v -> body.put("reviewer", v));
+        opt(args, "reason").ifPresent(v -> body.put("reason", v));
+
+        JsonNode result = client.postJson("/api/v1/triage/feedback", JSON.writeValueAsString(body));
+        return "## Triage feedback recorded\n\n" + formatTriageFeedback(result);
+    }
+
+    private String runListTriageFeedback(JsonNode args) {
+        String projectId = require(args, "projectId");
+        var path = new StringBuilder("/api/v1/triage/feedback?projectId=").append(enc(projectId));
+        opt(args, "status").ifPresent(v -> path.append("&status=").append(enc(v)));
+
+        Optional<JsonNode> result = client.get(path.toString());
+        if (result.isEmpty() || !result.get().isArray() || result.get().isEmpty()) {
+            return "No triage feedback for project `" + projectId + "`.\n\n" +
+                   "Use `record_triage_feedback` after reviewing reports from `triage_finding`.";
+        }
+        return formatTriageFeedbackList(projectId, result.get());
+    }
+
     private String runListProjects() {
         Optional<JsonNode> result = client.get("/api/v1/projects");
         if (result.isEmpty() || !result.get().isArray() || result.get().isEmpty()) {
@@ -622,6 +795,7 @@ public class RepographMcpTools {
         }
 
         int seedCount    = r.path("seedCount").asInt(0);
+        int keywordSeeds = r.path("keywordSeedCount").asInt(0);
         int cgExpanded   = r.path("callGraphExpanded").asInt(0);
         int impExpanded  = r.path("impactExpanded").asInt(0);
         int secHighlight = r.path("securityHighlightCount").asInt(0);
@@ -630,6 +804,7 @@ public class RepographMcpTools {
         sb.append("## GraphRAG search: \"").append(query).append("\"\n\n");
         sb.append("**Stats:** ")
           .append(seedCount).append(" vector seed(s)")
+          .append(" + ").append(keywordSeeds).append(" keyword")
           .append(" + ").append(cgExpanded).append(" call-graph")
           .append(" + ").append(impExpanded).append(" impact")
           .append(" = ").append(results.size()).append(" total")
@@ -677,6 +852,157 @@ public class RepographMcpTools {
             sb.append("\n");
         }
 
+        return sb.toString().stripTrailing();
+    }
+
+    private String formatContextPack(JsonNode r) {
+        String query = r.path("query").asText("");
+        String taskType = r.path("taskType").asText("detail");
+        JsonNode evidence = r.path("evidence");
+        if (!evidence.isArray() || evidence.isEmpty()) {
+            return "No context evidence for \"" + query + "\".\n\n" +
+                   "Try broadening the query or increasing budgetChars.";
+        }
+
+        var sb = new StringBuilder();
+        sb.append("## Context Pack: \"").append(query).append("\"\n\n");
+        sb.append("**Task:** `").append(taskType).append("`")
+          .append("  **Budget:** ").append(r.path("usedBudgetChars").asInt(0))
+          .append("/").append(r.path("requestedBudgetChars").asInt(0)).append(" chars")
+          .append("  **Stats:** ").append(r.path("seedCount").asInt(0)).append(" seed(s), ")
+          .append(r.path("keywordSeedCount").asInt(0)).append(" keyword, ")
+          .append(r.path("callGraphExpanded").asInt(0)).append(" call-graph, ")
+          .append(r.path("impactExpanded").asInt(0)).append(" impact\n\n");
+
+        for (JsonNode e : evidence) {
+            sb.append("### [").append(e.path("citationId").asText("?")).append("] `")
+              .append(e.path("qualifiedName").asText("?")).append("`\n");
+            sb.append("**Kind:** ").append(e.path("kind").asText("?"))
+              .append("  **Lang:** ").append(e.path("language").asText("?"))
+              .append("  **Via:** ").append(e.path("source").asText(""))
+              .append("/").append(e.path("relation").asText(""))
+              .append("  **Score:** ").append(String.format("%.3f", e.path("finalScore").asDouble()))
+              .append("\n");
+            sb.append("**File:** `").append(e.path("filePath").asText("?")).append("`")
+              .append("  L").append(e.path("startLine").asInt())
+              .append("–").append(e.path("endLine").asInt());
+            if (e.path("truncated").asBoolean(false)) {
+                sb.append("  **Truncated:** true");
+            }
+            sb.append("\n");
+
+            JsonNode signals = e.path("securitySignals");
+            if (signals.isArray() && !signals.isEmpty()) {
+                sb.append("**Security signals:**");
+                signals.forEach(s -> sb.append(" `").append(s.asText()).append("`"));
+                sb.append("\n");
+            }
+
+            String lang = e.path("language").asText("java");
+            sb.append("\n```").append(lang).append("\n")
+              .append(e.path("excerpt").asText("")).append("\n```\n\n");
+        }
+
+        JsonNode omitted = r.path("omittedReasons");
+        if (omitted.isArray() && !omitted.isEmpty()) {
+            sb.append("### Omitted\n");
+            omitted.forEach(o -> sb.append("- ").append(o.asText()).append("\n"));
+        }
+
+        return sb.toString().stripTrailing();
+    }
+
+    private String formatTriageReports(String format, JsonNode reports) {
+        if (reports == null || !reports.isArray() || reports.isEmpty()) {
+            return "No triage reports generated for `" + format + "` input.\n\n" +
+                   "Check that the JSON contains findings and that the format is supported.";
+        }
+
+        var sb = new StringBuilder();
+        sb.append("## SAST triage reports (`").append(format).append("`)\n\n");
+        sb.append("Generated ").append(reports.size()).append(" report(s).\n\n");
+
+        for (int i = 0; i < reports.size(); i++) {
+            JsonNode item = reports.get(i);
+            JsonNode report = item.path("report");
+            JsonNode finding = report.path("finding");
+            sb.append("### ").append(i + 1).append(". `")
+              .append(finding.path("ruleId").asText("?")).append("`")
+              .append(" → ").append(report.path("verdict").asText("?"))
+              .append(" (confidence ")
+              .append(String.format("%.2f", report.path("confidence").asDouble(0.0)))
+              .append(")\n");
+            sb.append("**Fingerprint:** `").append(item.path("fingerprint").asText("?")).append("`\n");
+            sb.append("**Location:** `").append(finding.path("filePath").asText("?"))
+              .append(":").append(finding.path("startLine").asInt()).append("`");
+            String qn = report.path("locatedQualifiedName").asText("");
+            if (!qn.isBlank()) {
+                sb.append("  **Symbol:** `").append(qn).append("`");
+            }
+            sb.append("\n");
+            String cwe = finding.path("cwe").asText("");
+            if (!cwe.isBlank()) {
+                sb.append("**CWE:** ").append(cwe).append("  ");
+            }
+            sb.append("**Severity:** ").append(finding.path("severity").asText("UNKNOWN")).append("\n\n");
+
+            String summary = report.path("developerSummary").asText("");
+            if (!summary.isBlank()) {
+                sb.append(summary).append("\n\n");
+            }
+
+            JsonNode reasons = report.path("reasons");
+            if (reasons.isArray() && !reasons.isEmpty()) {
+                sb.append("**Reasons:**\n");
+                reasons.forEach(reason -> sb.append("- ").append(reason.asText()).append("\n"));
+                sb.append("\n");
+            }
+
+            JsonNode missing = report.path("missingInfo");
+            if (missing.isArray() && !missing.isEmpty()) {
+                sb.append("**Missing info:**\n");
+                missing.forEach(info -> sb.append("- ").append(info.asText()).append("\n"));
+                sb.append("\n");
+            }
+
+            String remediation = report.path("remediation").asText("");
+            if (!remediation.isBlank()) {
+                sb.append("**Remediation:** ").append(remediation).append("\n\n");
+            }
+
+            String markdown = item.path("markdown").asText("");
+            if (!markdown.isBlank()) {
+                sb.append("<details>\n<summary>Markdown report</summary>\n\n")
+                  .append(markdown).append("\n</details>\n\n");
+            }
+        }
+
+        return sb.toString().stripTrailing();
+    }
+
+    private String formatTriageFeedback(JsonNode feedback) {
+        return "- **Fingerprint:** `" + feedback.path("fingerprint").asText("?") + "`\n" +
+               "- **Project:** `" + feedback.path("projectId").asText("?") + "`\n" +
+               "- **Status:** " + feedback.path("status").asText("?") + "\n" +
+               "- **Reviewer:** " + feedback.path("reviewer").asText("") + "\n" +
+               "- **Reason:** " + feedback.path("reason").asText("") + "\n" +
+               "- **Updated at:** " + feedback.path("updatedAt").asText("?");
+    }
+
+    private String formatTriageFeedbackList(String projectId, JsonNode feedbackItems) {
+        var sb = new StringBuilder();
+        sb.append("## Triage feedback for `").append(projectId).append("` (")
+          .append(feedbackItems.size()).append(")\n\n");
+        sb.append("| fingerprint | status | reviewer | reason | updated at |\n");
+        sb.append("|-------------|--------|----------|--------|------------|\n");
+        for (JsonNode feedback : feedbackItems) {
+            sb.append("| `").append(feedback.path("fingerprint").asText("?")).append("`")
+              .append(" | ").append(feedback.path("status").asText("?"))
+              .append(" | ").append(feedback.path("reviewer").asText(""))
+              .append(" | ").append(feedback.path("reason").asText("").replace("|", "\\|"))
+              .append(" | ").append(feedback.path("updatedAt").asText("?"))
+              .append(" |\n");
+        }
         return sb.toString().stripTrailing();
     }
 
@@ -987,7 +1313,17 @@ public class RepographMcpTools {
             JsonNode r = results.get(i);
             JsonNode u = r.path("unit");
             double score = r.path("score").asDouble();
-            appendUnit(sb, i + 1, u, String.format("score: %.4f", score));
+            String extra = String.format("score: %.4f", score);
+            JsonNode terms = r.path("matchedTerms");
+            if (terms.isArray() && !terms.isEmpty()) {
+                StringBuilder matched = new StringBuilder();
+                terms.forEach(t -> {
+                    if (!matched.isEmpty()) matched.append(", ");
+                    matched.append(t.asText());
+                });
+                extra += " matched: " + matched;
+            }
+            appendUnit(sb, i + 1, u, extra);
         }
         return sb.toString().stripTrailing();
     }

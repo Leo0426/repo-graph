@@ -136,7 +136,7 @@ class McpStdioServerTest {
         assertFalse(resp.has("result"));
     }
 
-    // ── tools/list — all 8 tools registered ──────────────────────────────────
+    // ── tools/list — all tools registered ────────────────────────────────────
 
     @Test
     void tools_list_containsAllTools() {
@@ -148,6 +148,7 @@ class McpStdioServerTest {
 
         List<String> names = list.stream().map(t -> (String) t.get("name")).toList();
         assertTrue(names.contains("search_semantic"),  "Missing search_semantic");
+        assertTrue(names.contains("search_keyword"),   "Missing search_keyword");
         assertTrue(names.contains("find_callers"),     "Missing find_callers");
         assertTrue(names.contains("get_impact"),       "Missing get_impact");
         assertTrue(names.contains("lookup_symbol"),    "Missing lookup_symbol");
@@ -158,6 +159,10 @@ class McpStdioServerTest {
         assertTrue(names.contains("find_entrypoints"), "Missing find_entrypoints");
         assertTrue(names.contains("analyze_flow"),     "Missing analyze_flow");
         assertTrue(names.contains("search_graphrag"),  "Missing search_graphrag");
+        assertTrue(names.contains("build_context_pack"), "Missing build_context_pack");
+        assertTrue(names.contains("triage_finding"),   "Missing triage_finding");
+        assertTrue(names.contains("record_triage_feedback"), "Missing record_triage_feedback");
+        assertTrue(names.contains("list_triage_feedback"), "Missing list_triage_feedback");
         assertTrue(names.contains("list_projects"),    "Missing list_projects");
         assertTrue(names.contains("trace_taint"),      "Missing trace_taint");
         assertTrue(names.contains("list_vulns"),       "Missing list_vulns");
@@ -165,7 +170,41 @@ class McpStdioServerTest {
         assertTrue(names.contains("get_health_report"), "Missing get_health_report");
         assertTrue(names.contains("trigger_index"),     "Missing trigger_index");
         assertTrue(names.contains("index_status"),      "Missing index_status");
-        assertEquals(18, list.size(), "Should have exactly 18 tools");
+        assertEquals(23, list.size(), "Should have exactly 23 tools");
+    }
+
+    // ── search_keyword ───────────────────────────────────────────────────────
+
+    @Test
+    void searchKeyword_returnsMatchedTerms() throws Exception {
+        RepographApiClient mockClient = mock(RepographApiClient.class);
+        String keywordJson = """
+                [{
+                  "unit": {
+                    "qualifiedName": "com.example.Command#exec()",
+                    "kind": "METHOD",
+                    "language": "java",
+                    "filePath": "src/main/java/com/example/Command.java",
+                    "startLine": 10,
+                    "endLine": 20,
+                    "signature": "void exec()"
+                  },
+                  "score": 0.7,
+                  "matchedTerms": ["cwe-78", "exec"]
+                }]""";
+        when(mockClient.get(contains("/api/v1/search/keyword"))).thenReturn(
+                Optional.of(mapper.readTree(keywordJson)));
+
+        RepographMcpTools realTools = new RepographMcpTools(mockClient);
+        McpStdioServer localServer = new McpStdioServer(mapper, realTools, mockClient);
+        JsonNode resp = parse(localServer.dispatch("""
+                {"jsonrpc":"2.0","id":20,"method":"tools/call",\
+                "params":{"name":"search_keyword","arguments":{"query":"CWE-78 exec"}}}"""));
+
+        assertFalse(resp.path("result").path("isError").asBoolean());
+        String text = resp.path("result").path("content").get(0).path("text").asText();
+        assertTrue(text.contains("Command#exec"), "Should contain qualifiedName");
+        assertTrue(text.contains("matched: cwe-78, exec"), "Should contain matched terms");
     }
 
     // ── search_graphrag ───────────────────────────────────────────────────────
@@ -217,6 +256,149 @@ class McpStdioServerTest {
         assertTrue(text.contains("AuthService#login"), "Should contain qualifiedName");
         assertTrue(text.contains("entry_point"), "Should contain security signals");
         assertTrue(text.contains("login(String username)"), "Should contain rawSource");
+    }
+
+    // ── build_context_pack ───────────────────────────────────────────────────
+
+    @Test
+    void buildContextPack_returnsCitationReadyMarkdown() throws Exception {
+        RepographApiClient mockClient = mock(RepographApiClient.class);
+        String contextPackJson = """
+                {
+                  "query": "authentication login",
+                  "taskType": "security",
+                  "evidence": [{
+                    "citationId": "C1",
+                    "qualifiedName": "com.example.AuthService#login(String)",
+                    "kind": "METHOD",
+                    "language": "java",
+                    "filePath": "src/main/java/com/example/AuthService.java",
+                    "startLine": 20,
+                    "endLine": 35,
+                    "source": "VECTOR",
+                    "relation": "SEED",
+                    "finalScore": 0.91,
+                    "excerpt": "public boolean login(String username) { return true; }",
+                    "truncated": false,
+                    "securitySignals": ["entry_point"]
+                  }],
+                  "omittedReasons": [],
+                  "requestedBudgetChars": 12000,
+                  "usedBudgetChars": 54,
+                  "seedCount": 1,
+                  "callGraphExpanded": 0,
+                  "impactExpanded": 0
+                }""";
+        when(mockClient.get(contains("/api/v1/context/pack"))).thenReturn(
+                Optional.of(mapper.readTree(contextPackJson)));
+
+        RepographMcpTools realTools = new RepographMcpTools(mockClient);
+        McpStdioServer localServer = new McpStdioServer(mapper, realTools, mockClient);
+        JsonNode resp = parse(localServer.dispatch("""
+                {"jsonrpc":"2.0","id":19,"method":"tools/call",\
+                "params":{"name":"build_context_pack","arguments":{"query":"authentication login","taskType":"security"}}}"""));
+
+        assertFalse(resp.path("result").path("isError").asBoolean());
+        String text = resp.path("result").path("content").get(0).path("text").asText();
+        assertTrue(text.contains("Context Pack"), "Should contain header");
+        assertTrue(text.contains("[C1]"), "Should contain citation ID");
+        assertTrue(text.contains("AuthService#login"), "Should contain qualifiedName");
+        assertTrue(text.contains("entry_point"), "Should contain security signals");
+    }
+
+    // ── triage_finding ───────────────────────────────────────────────────────
+
+    @Test
+    void triageFinding_returnsTriageMarkdown() throws Exception {
+        RepographApiClient mockClient = mock(RepographApiClient.class);
+        String triageJson = """
+                [{
+                  "fingerprint": "abc123",
+                  "report": {
+                    "finding": {
+                      "tool": "semgrep",
+                      "ruleId": "java.lang.security.audit.command-injection",
+                      "cwe": "CWE-78",
+                      "severity": "HIGH",
+                      "message": "Detected command injection",
+                      "filePath": "src/main/java/App.java",
+                      "startLine": 42
+                    },
+                    "located": true,
+                    "locatedQualifiedName": "com.example.App#run(String)",
+                    "verdict": "TRUE_RISK",
+                    "confidence": 0.75,
+                    "reasons": ["报警定位到 [C1] com.example.App#run(String)"],
+                    "missingInfo": ["外部工具未提供数据流 trace"],
+                    "remediation": "Avoid shell command string concatenation.",
+                    "developerSummary": "该报警大概率是真实风险"
+                  },
+                  "markdown": "## report"
+                }]""";
+        when(mockClient.postJson(contains("/api/v1/triage/report"), contains("\"results\""))).thenReturn(
+                mapper.readTree(triageJson));
+
+        RepographMcpTools realTools = new RepographMcpTools(mockClient);
+        McpStdioServer localServer = new McpStdioServer(mapper, realTools, mockClient);
+        JsonNode resp = parse(localServer.dispatch("""
+                {"jsonrpc":"2.0","id":21,"method":"tools/call",\
+                "params":{"name":"triage_finding","arguments":{"format":"semgrep","json":"{\\\"results\\\":[]}"}}}"""));
+
+        assertFalse(resp.path("result").path("isError").asBoolean());
+        String text = resp.path("result").path("content").get(0).path("text").asText();
+        assertTrue(text.contains("SAST triage reports"), "Should contain header");
+        assertTrue(text.contains("TRUE_RISK"), "Should contain verdict");
+        assertTrue(text.contains("abc123"), "Should contain fingerprint");
+        assertTrue(text.contains("CWE-78"), "Should contain CWE");
+        assertTrue(text.contains("Markdown report"), "Should contain markdown details");
+    }
+
+    @Test
+    void recordTriageFeedback_returnsRecordedFeedback() throws Exception {
+        RepographApiClient mockClient = mock(RepographApiClient.class);
+        when(mockClient.postJson(eq("/api/v1/triage/feedback"), contains("\"FALSE_POSITIVE\""))).thenReturn(
+                mapper.readTree("""
+                        {"fingerprint":"abc123","projectId":"proj123","status":"FALSE_POSITIVE",
+                         "reviewer":"sec-team","reason":"sanitized upstream",
+                         "updatedAt":"2026-07-11T10:00:00Z"}"""));
+
+        RepographMcpTools realTools = new RepographMcpTools(mockClient);
+        McpStdioServer localServer = new McpStdioServer(mapper, realTools, mockClient);
+        JsonNode resp = parse(localServer.dispatch("""
+                {"jsonrpc":"2.0","id":22,"method":"tools/call",\
+                "params":{"name":"record_triage_feedback","arguments":{
+                  "fingerprint":"abc123","projectId":"proj123","status":"FALSE_POSITIVE",
+                  "reviewer":"sec-team","reason":"sanitized upstream"}}}"""));
+
+        assertFalse(resp.path("result").path("isError").asBoolean());
+        String text = resp.path("result").path("content").get(0).path("text").asText();
+        assertTrue(text.contains("Triage feedback recorded"), "Should confirm feedback write");
+        assertTrue(text.contains("abc123"), "Should contain fingerprint");
+        assertTrue(text.contains("FALSE_POSITIVE"), "Should contain feedback status");
+        assertTrue(text.contains("sanitized upstream"), "Should contain reason");
+    }
+
+    @Test
+    void listTriageFeedback_returnsFeedbackTable() throws Exception {
+        RepographApiClient mockClient = mock(RepographApiClient.class);
+        when(mockClient.get(contains("/api/v1/triage/feedback"))).thenReturn(
+                Optional.of(mapper.readTree("""
+                        [{"fingerprint":"abc123","projectId":"proj123","status":"TRUE_POSITIVE",
+                          "reviewer":"sec-team","reason":"source reaches sink",
+                          "updatedAt":"2026-07-11T10:00:00Z"}]""")));
+
+        RepographMcpTools realTools = new RepographMcpTools(mockClient);
+        McpStdioServer localServer = new McpStdioServer(mapper, realTools, mockClient);
+        JsonNode resp = parse(localServer.dispatch("""
+                {"jsonrpc":"2.0","id":23,"method":"tools/call",\
+                "params":{"name":"list_triage_feedback","arguments":{"projectId":"proj123"}}}"""));
+
+        assertFalse(resp.path("result").path("isError").asBoolean());
+        String text = resp.path("result").path("content").get(0).path("text").asText();
+        assertTrue(text.contains("Triage feedback"), "Should contain header");
+        assertTrue(text.contains("abc123"), "Should contain fingerprint");
+        assertTrue(text.contains("TRUE_POSITIVE"), "Should contain feedback status");
+        assertTrue(text.contains("source reaches sink"), "Should contain reason");
     }
 
     // ── list_projects ─────────────────────────────────────────────────────────

@@ -2,6 +2,8 @@ package com.repograph.api;
 
 import com.repograph.core.model.CodeUnit;
 import com.repograph.core.model.CodeUnitKind;
+import com.repograph.core.retrieval.KeywordSearchResult;
+import com.repograph.core.retrieval.KeywordSearchService;
 import com.repograph.core.vector.SearchPage;
 import com.repograph.core.vector.SearchResult;
 import com.repograph.core.vector.VectorStore;
@@ -35,6 +37,9 @@ class SearchControllerTest {
 
     @MockBean
     VectorStore vectorStore;
+
+    @MockBean
+    KeywordSearchService keywordSearchService;
 
     private static CodeUnit sampleUnit() {
         return new CodeUnit("id1", CodeUnitKind.METHOD, "java",
@@ -124,5 +129,18 @@ class SearchControllerTest {
         mvc.perform(get("/api/v1/search/code").param("snippet", "int x = 1;"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.results.length()").value(0));
+    }
+
+    @Test
+    void keyword_returnsResults() throws Exception {
+        when(keywordSearchService.search(eq("CWE-78 exec"), any()))
+                .thenReturn(List.of(new KeywordSearchResult(sampleUnit(), 0.7f, List.of("cwe-78", "exec"))));
+
+        mvc.perform(get("/api/v1/search/keyword")
+                        .param("q", "CWE-78 exec")
+                        .param("kind", "METHOD"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].score").value(0.7f))
+                .andExpect(jsonPath("$[0].matchedTerms[0]").value("cwe-78"));
     }
 }

@@ -4,11 +4,15 @@ import com.repograph.core.graph.GraphQueryService;
 import com.repograph.core.model.CodeUnit;
 import com.repograph.core.retrieval.GraphRagOptions;
 import com.repograph.core.retrieval.GraphRagResult;
+import com.repograph.core.retrieval.KeywordSearchOptions;
+import com.repograph.core.retrieval.KeywordSearchResult;
+import com.repograph.core.retrieval.KeywordSearchService;
 import com.repograph.core.retrieval.RankedUnit;
 import com.repograph.core.vector.SearchOptions;
 import com.repograph.core.vector.SearchPage;
 import com.repograph.core.vector.SearchResult;
 import com.repograph.core.vector.VectorStore;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -48,6 +52,7 @@ public class GraphRagService {
     private final VectorStore vectorStore;
     private final GraphQueryService graphQueryService;
     private final SecurityAwareReranker reranker;
+    private final KeywordSearchService keywordSearchService;
 
     /**
      * 创建 GraphRAG 检索服务。
@@ -58,9 +63,24 @@ public class GraphRagService {
      */
     public GraphRagService(VectorStore vectorStore, GraphQueryService graphQueryService,
                            SecurityAwareReranker reranker) {
+        this(vectorStore, graphQueryService, reranker, (query, options) -> List.of());
+    }
+
+    /**
+     * 创建 GraphRAG 检索服务。
+     *
+     * @param vectorStore          向量检索边界
+     * @param graphQueryService    代码图查询边界
+     * @param reranker             安全信号分析器
+     * @param keywordSearchService 关键词检索服务
+     */
+    @Autowired
+    public GraphRagService(VectorStore vectorStore, GraphQueryService graphQueryService,
+                           SecurityAwareReranker reranker, KeywordSearchService keywordSearchService) {
         this.vectorStore = vectorStore;
         this.graphQueryService = graphQueryService;
         this.reranker = reranker;
+        this.keywordSearchService = keywordSearchService;
     }
 
     /**
@@ -78,6 +98,8 @@ public class GraphRagService {
                 opts.seedLimit(), 0, opts.lang(), null, opts.projectId(), false, opts.noTest());
         SearchPage seedPage = vectorStore.semanticSearch(query, searchOpts);
         List<SearchResult> seeds = seedPage.results();
+        List<KeywordSearchResult> keywordSeeds = keywordSearchService.search(query,
+                new KeywordSearchOptions(opts.seedLimit(), opts.lang(), null, opts.projectId(), opts.noTest()));
 
         // 按 qualifiedName 收集所有结果以去重
         Map<String, RankedUnit> results = new LinkedHashMap<>();
@@ -91,6 +113,19 @@ public class GraphRagService {
             results.put(sr.unit().qualifiedName(), new RankedUnit(
                     sr.unit(), sr.score(), sec.score(), finalScore,
                     "VECTOR", "SEED", sec.signals()));
+        }
+
+        for (KeywordSearchResult kr : keywordSeeds) {
+            if (results.containsKey(kr.unit().qualifiedName())) continue;
+            SecurityAwareReranker.SecurityAnalysis sec = reranker.analyze(kr.unit());
+            float finalScore = kr.score() + securityBonus(opts, sec);
+            List<String> signals = new ArrayList<>(sec.signals());
+            for (String term : kr.matchedTerms()) {
+                signals.add("keyword:" + term);
+            }
+            results.put(kr.unit().qualifiedName(), new RankedUnit(
+                    kr.unit(), 0f, sec.score(), finalScore,
+                    "KEYWORD", "SEED", List.copyOf(signals)));
         }
 
         // ── 第二步：调用图检索 ────────────────────────────────────────────────
@@ -167,6 +202,7 @@ public class GraphRagService {
         return new GraphRagResult(
                 Collections.unmodifiableList(sorted),
                 seeds.size(),
+                keywordSeeds.size(),
                 callGraphExpanded,
                 impactExpanded,
                 (int) secHighlights

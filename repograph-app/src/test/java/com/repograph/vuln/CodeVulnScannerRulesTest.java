@@ -274,6 +274,8 @@ class CodeVulnScannerRulesTest {
 
     private record StubGraphDiagnosticsService(CodeUnit unit) implements GraphDiagnosticsService {
         @Override public List<CodeUnit> listScanTargets(String p) { return List.of(unit); }
+        @Override public List<CodeUnit> listSearchTargets(String p, String l,
+                com.repograph.core.model.CodeUnitKind k, boolean n, int limit) { return List.of(unit); }
         @Override public List<CodeUnit> findDeadCode(String p) { return List.of(); }
         @Override public List<CodeUnit> findTestGaps(String p) { return List.of(); }
         @Override public List<com.repograph.core.graph.ClassEdge> findClassCallEdges(String p) { return List.of(); }
