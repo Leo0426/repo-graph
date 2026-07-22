@@ -84,6 +84,7 @@ MCP 工具、增量索引管道），区别只是包装和验证对象不同：
 | P0 报警解释器 | 上传 SAST 报警 + 本地仓库，生成研判报告 | SARIF / Semgrep / CodeQL JSON 导入，报警定位，Context Pack，Markdown 报告 | 用户是否愿意用报告替代人工初看 |
 | P1 误报研判 | 判断真实漏洞 / 误报 / 需人工确认 | source/sink 证据链、可达性、已有防护识别、置信度 | 是否减少误报处理时间 |
 | P2 PR / CI 集成 | 进入研发流程 | GitHub/GitLab PR 评论、CI 扫描结果自动研判、状态回写 | 是否嵌入真实 DevSecOps 流程 |
+|   └ 第一片：GitHub PR 评论 | 研判报告能自动发到真实 PR 上 | `POST /api/v1/triage/report/pr`（`GitHubPrCommentClient` + `TriageReportService.toMarkdownSummary`），已用真实测试 PR 验证发帖成功 | ✅ 已完成；GitLab/状态回写/CI 触发仍未做 |
 | P3 修复闭环 | 从研判走向修复 | Patch 草案、构建/测试/规则复扫、状态机闭环 | 研发是否采纳修复建议 |
 | P4 企业化 | 商业化与私有化 | 团队版、项目知识库、企业规则库、权限、审计日志 | 是否满足企业采购要求 |
 | P5 平台化 | AI Native Code Intelligence Platform | 代码问答、风险知识库、架构/安全/质量统一分析 | 是否从安全研判扩展为代码智能平台 |
