@@ -95,12 +95,17 @@ final class JavaTypeVisitor extends VoidVisitorAdapter<JavaParseContext> {
             ctx.edges.add(new RelationEdge(id, targetId, EdgeKind.EXTENDS, resolved, ctx.relativePath, start));
         }
         ctx.directSuperTypes.put(fqn, List.copyOf(directSuperTypes));
+        boolean implementsCallbackInterface = false;
         for (ClassOrInterfaceType impl : n.getImplementedTypes()) {
             String targetFqn = ctx.resolveType(impl.getNameAsString());
             String targetId = ctx.localSymbolIds.getOrDefault(targetFqn, targetFqn);
             boolean resolved = ctx.localSymbolIds.containsKey(targetFqn);
             ctx.edges.add(new RelationEdge(id, targetId, EdgeKind.IMPLEMENTS, resolved, ctx.relativePath, start));
+            if (JavaParserHelpers.FRAMEWORK_CALLBACK_INTERFACES.contains(impl.getNameAsString())) {
+                implementsCallbackInterface = true;
+            }
         }
+        ctx.classImplementsCallbackInterface.put(fqn, implementsCallbackInterface);
 
         ctx.classStack.push(fqn);
         super.visit(n, ctx);
@@ -212,6 +217,14 @@ final class JavaTypeVisitor extends VoidVisitorAdapter<JavaParseContext> {
             metadata.put("is_test", "true");
         }
         applyEntryPoint(annotations, metadata);
+        // 注解式入口检测不到框架回调接口方法（如 HandlerInterceptor#preHandle、
+        // AuthenticationProvider#authenticate）：框架直接调用它们，仓库内不会有显式调用方，
+        // 只按调用方数量判断可达性会系统性漏判。用"@Override + 类实现已知回调接口"兜底识别。
+        if (!"true".equals(metadata.get("is_entry_point"))
+                && annotations.contains("@Override")
+                && ctx.classImplementsCallbackInterface.getOrDefault(classFqn, false)) {
+            metadata.put("is_entry_point", "true");
+        }
         applyAnnotationAttributes(n, metadata);
 
         int start = n.getBegin().map(p -> p.line).orElse(0);

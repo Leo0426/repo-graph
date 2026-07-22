@@ -37,6 +37,19 @@ final class JavaParserHelpers {
             "@Path", "@GET", "@POST", "@PUT", "@DELETE"
     );
 
+    /**
+     * 框架回调接口（简单类型名）：实现这些接口的方法由框架直接调用（如 Servlet 容器、
+     * Spring Security 过滤器链），不会在仓库内出现显式调用方，仅靠"未发现调用方"判断
+     * 可达性会系统性误判。启发式匹配 {@code implements} 子句的简单类型名。
+     */
+    static final Set<String> FRAMEWORK_CALLBACK_INTERFACES = Set.of(
+            "Filter", "HandlerInterceptor",
+            "AuthenticationProvider", "AuthenticationEntryPoint", "AuthenticationFailureHandler",
+            "AuthenticationSuccessHandler", "AccessDeniedHandler", "LogoutHandler", "LogoutSuccessHandler",
+            "UserDetailsService", "AuthenticationManager",
+            "ContainerRequestFilter", "ContainerResponseFilter", "ExceptionMapper"
+    );
+
     static final Set<String> TEST_ANNOTATIONS = Set.of(
             "@Test", "@ParameterizedTest", "@RepeatedTest"
     );

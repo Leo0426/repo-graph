@@ -496,6 +496,43 @@ class JavaCodeParserTest {
     }
 
     @Test
+    void parse_frameworkCallbackInterfaceOverride_marksEntryPoint() throws Exception {
+        // Real-world finding from WebGoat validation: HandlerInterceptor#preHandle is invoked
+        // directly by the Spring MVC framework (via addInterceptors registration) with no
+        // explicit in-repo caller and no @RequestMapping-style annotation, so the existing
+        // annotation-only entry-point detection misses it entirely.
+        String source = """
+                package com.example;
+
+                import org.springframework.web.servlet.HandlerInterceptor;
+                import jakarta.servlet.http.HttpServletRequest;
+                import jakarta.servlet.http.HttpServletResponse;
+
+                public class UserInterceptor implements HandlerInterceptor {
+                    @Override
+                    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+                        return true;
+                    }
+
+                    private void helper() {
+                    }
+                }
+                """;
+        Path file = writeSource("UserInterceptor.java", source);
+        ParseResult result = parser.parse(file, ParseOptions.defaults());
+
+        CodeUnit preHandle = findUnitBySimpleName(result.units(), "preHandle");
+        assertNotNull(preHandle);
+        assertEquals("true", preHandle.metadata().get("is_entry_point"),
+                "Override of a known framework callback interface method should be marked as entry point");
+
+        CodeUnit helper = findUnitBySimpleName(result.units(), "helper");
+        assertNotNull(helper);
+        assertNull(helper.metadata().get("is_entry_point"),
+                "Plain private methods in the same class should not be marked as entry points");
+    }
+
+    @Test
     void parse_overrideAnnotation_producesOverridesEdge() throws Exception {
         String source = """
                 package com.example;
@@ -823,6 +860,31 @@ class JavaCodeParserTest {
 
         assertEquals("com.other.Parser#parse(String)", call.targetId());
         assertFalse(call.resolved());
+    }
+
+    @Test
+    void parse_samePackageStaticCall_resolvesToOwnerTypeNotCaller() throws Exception {
+        // Same-package classes need no import (e.g. CowController -> Cowsay in vulnado).
+        // Regression test: Cowsay.run(input) must resolve against Cowsay, not be
+        // misattributed to the caller's own class (com.example.Controller#run).
+        String source = """
+                package com.example;
+                public class Controller {
+                    String cowsay(String input) {
+                        return Cowsay.run(input);
+                    }
+                }
+                """;
+        Path file = writeSource("Controller.java", source);
+        ParseResult result = parser.parse(file, ParseOptions.defaults());
+
+        RelationEdge call = result.edges().stream()
+                .filter(edge -> edge.kind() == EdgeKind.CALLS)
+                .filter(edge -> edge.targetId().contains("run"))
+                .findFirst().orElseThrow();
+
+        assertEquals("com.example.Cowsay#run(String)", call.targetId(),
+                "Same-package static call should resolve against the callee's type, not the caller's own class");
     }
 
     @Test

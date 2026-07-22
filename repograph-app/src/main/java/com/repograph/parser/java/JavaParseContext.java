@@ -71,6 +71,11 @@ final class JavaParseContext {
     final Map<String, String> returnTypeByBase = new HashMap<>();
     /** Type FQN → directly extended type FQNs for same-file inherited call resolution. */
     final Map<String, List<String>> directSuperTypes = new HashMap<>();
+    /**
+     * Type FQN → 是否实现了框架回调接口（{@link JavaParserHelpers#FRAMEWORK_CALLBACK_INTERFACES}）。
+     * 供 {@code @Override} 方法补充 is_entry_point 判断，覆盖注解式入口检测不到的框架回调场景。
+     */
+    final Map<String, Boolean> classImplementsCallbackInterface = new HashMap<>();
 
     JavaParseContext(String source, String relativePath, String projectId, Path projectRoot,
                      boolean isTestFile, Map<String, String> localSymbolIds) {
@@ -152,6 +157,12 @@ final class JavaParseContext {
         String imported = importMap.get(scope);
         if (imported != null) return imported;
         if (scope.contains(".")) return scope.substring(0, scope.lastIndexOf('.'));
+        // 不是变量/字段/显式 import，且形如类型名（首字母大写）：猜测为同包静态调用的接收者
+        // （Java 同包类无需 import）。猜错时下游按 targetBase+arity 匹配不到候选，边被静默丢弃，
+        // 不会产生错误连边——比回退到"当作调用方自身类的方法"更安全。
+        if (!packageName.isEmpty() && Character.isUpperCase(scope.charAt(0))) {
+            return packageName + "." + scope;
+        }
         return null;
     }
 
