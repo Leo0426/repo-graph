@@ -127,6 +127,64 @@ class FindingContextServiceTest {
         assertThat(context.pack().keywordSeedCount()).isZero();
     }
 
+    @Test
+    void build_fieldLocation_markedReachableWhenEnclosingClassHostsEntryPoint() {
+        // Hardcoded secrets / weak-random seeds are commonly flagged on FIELD units, which
+        // never participate in CALLS edges and so can never accumulate CALLER evidence.
+        // If the enclosing class hosts a framework entry point (e.g. a @PostMapping handler
+        // reading this field), treat the field as reachable too.
+        CodeUnit field = new CodeUnit("com.example.JwtUtils#SECRET", CodeUnitKind.FIELD, "java",
+                "com.example.JwtUtils#SECRET", "SECRET", "src/main/java/com/example/JwtUtils.java",
+                10, 10, "public static final String SECRET = \"hardcoded\";", "String SECRET",
+                List.of(), "com.example.JwtUtils", Map.of());
+        CodeUnit entryMethod = new CodeUnit("com.example.JwtUtils#createToken()", CodeUnitKind.METHOD, "java",
+                "com.example.JwtUtils#createToken()", "createToken", "src/main/java/com/example/JwtUtils.java",
+                20, 30, "...", "String createToken()", List.of("@PostMapping"),
+                "com.example.JwtUtils", Map.of("is_entry_point", "true"));
+
+        when(vectorStore.locateByPosition("src/main/java/com/example/JwtUtils.java", 10))
+                .thenReturn(Optional.of(field));
+        when(graphQueryService.findEntryPoints(any())).thenReturn(List.of(entryMethod));
+        when(keywordSearchService.search(anyString(), any(KeywordSearchOptions.class)))
+                .thenReturn(List.of());
+
+        FindingContext context = service.build(fieldFinding(), null);
+
+        assertThat(context.pack().evidence()).singleElement()
+                .satisfies(e -> assertThat(e.securitySignals()).contains("entry_point"));
+    }
+
+    @Test
+    void build_fieldLocation_notMarkedReachableWhenNoEntryPointInEnclosingClass() {
+        CodeUnit field = new CodeUnit("com.example.Util#SECRET", CodeUnitKind.FIELD, "java",
+                "com.example.Util#SECRET", "SECRET", "src/main/java/com/example/JwtUtils.java",
+                10, 10, "public static final String SECRET = \"hardcoded\";", "String SECRET",
+                List.of(), "com.example.Util", Map.of());
+        CodeUnit unrelatedEntryMethod = new CodeUnit("com.example.OtherController#handle()", CodeUnitKind.METHOD,
+                "java", "com.example.OtherController#handle()", "handle", "src/main/java/com/example/Other.java",
+                20, 30, "...", "void handle()", List.of("@GetMapping"),
+                "com.example.OtherController", Map.of("is_entry_point", "true"));
+
+        when(vectorStore.locateByPosition("src/main/java/com/example/JwtUtils.java", 10))
+                .thenReturn(Optional.of(field));
+        when(graphQueryService.findEntryPoints(any())).thenReturn(List.of(unrelatedEntryMethod));
+        when(keywordSearchService.search(anyString(), any(KeywordSearchOptions.class)))
+                .thenReturn(List.of());
+
+        FindingContext context = service.build(fieldFinding(), null);
+
+        assertThat(context.pack().evidence()).singleElement()
+                .satisfies(e -> assertThat(e.securitySignals()).doesNotContain("entry_point"));
+    }
+
+    private static ExternalFinding fieldFinding() {
+        return new ExternalFinding("semgrep", "java.java-jwt.security.jwt-hardcode",
+                "CWE-798", ExternalFindingSeverity.HIGH,
+                "Hardcoded JWT secret",
+                "src/main/java/com/example/JwtUtils.java", 10, 10,
+                "SECRET", List.of(), "{}");
+    }
+
     private static ExternalFinding finding(int line) {
         return new ExternalFinding("semgrep", "java.lang.security.audit.command-injection",
                 "CWE-78", ExternalFindingSeverity.HIGH,

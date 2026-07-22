@@ -4,6 +4,7 @@ import com.repograph.core.finding.ExternalFinding;
 import com.repograph.core.finding.FindingContext;
 import com.repograph.core.graph.GraphQueryService;
 import com.repograph.core.model.CodeUnit;
+import com.repograph.core.model.CodeUnitKind;
 import com.repograph.core.retrieval.ContextPack;
 import com.repograph.core.retrieval.ContextPackOptions;
 import com.repograph.core.retrieval.GraphRagOptions;
@@ -100,9 +101,18 @@ public class FindingContextService {
         } else {
             CodeUnit unit = located.get();
             SecurityAwareReranker.SecurityAnalysis sec = reranker.analyze(unit);
+            List<String> signals = sec.signals();
+            // FIELD 单元不参与 CALLS 边（硬编码密钥/弱随机种子等常落在字段上），永远拿不到
+            // CALLER 证据；若其所属类本身托管框架入口点方法，视同可达，避免可达性证据
+            // 系统性缺失导致这类字段级报警被低估
+            if (unit.kind() == CodeUnitKind.FIELD && !signals.contains("entry_point")
+                    && hasEntryPointSibling(unit, rag.projectId())) {
+                signals = new ArrayList<>(signals);
+                signals.add("entry_point");
+            }
             results.put(unit.qualifiedName(), new RankedUnit(
                     unit, 0f, sec.score(), LOCATION_BASE_SCORE + 0.5f * sec.score(),
-                    "FINDING", "SEED", sec.signals()));
+                    "FINDING", "SEED", signals));
 
             if (rag.callGraph()) {
                 callGraphExpanded += expandCallGraph(results, unit.qualifiedName(), rag, true);
@@ -177,6 +187,18 @@ public class FindingContextService {
             added++;
         }
         return added;
+    }
+
+    /**
+     * 判断某个非可调用单元（如 FIELD）所属的类是否托管了至少一个框架入口点方法。
+     * 字段本身没有 CALLS 边，无法通过调用方数量判断可达性；如果同一个类里存在入口点
+     * （如 {@code @RestController} 方法），该字段大概率被入口点方法读取，视同可达。
+     */
+    private boolean hasEntryPointSibling(CodeUnit unit, String projectId) {
+        String parentQn = unit.parentQualifiedName();
+        if (parentQn == null || parentQn.isBlank()) return false;
+        return graphQueryService.findEntryPoints(projectId).stream()
+                .anyMatch(ep -> parentQn.equals(ep.parentQualifiedName()) || parentQn.equals(ep.qualifiedName()));
     }
 
     private static String buildQuery(ExternalFinding finding) {
