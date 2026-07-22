@@ -76,6 +76,7 @@ roadmap（`docs/generated/roadmap-codesec-triage-agent.md`）P0 阶段的验证�
 | 2 | java-sec-code | 45 条报警 41 条卡 NEEDS_REVIEW，只有 1 条 TRUE_RISK，但大多命中已知真实漏洞 | `TriageReportService` 把"仓库内调用方数量"当唯一可达性证据；漏洞若就在入口点方法自身，其真正调用方是外部 HTTP 请求，天然不在仓库调用图里 | 已修复（`reachable = callers>0 \|\| isEntryPoint`） | `.scratch/codesec-triage-agent/issues/08-entry-point-reachability.md` |
 | 3 | WebGoat | 索引在 embedding 阶段永久卡死在 pct=5，反复轮询不再变化 | `EmbeddingUpsertRunner.extractDocSummary()` 用纯文本 `indexOf` 找注释边界，不理解字符串字面量；SQL 注入测试用例里的 payload 字符串（含 `/**/*/**/`）让开闭标记重叠，`substring(start+2, end)` 越界抛异常，同步循环里未捕获直接中断整个 embedding 阶段 | 已修复（闭合标记搜索从 `start+2` 开始） | `.scratch/codesec-triage-agent/issues/09-doc-summary-crash-on-comment-like-string-literals.md` |
 | 4 | WebGoat（同一份数据，针对性核实缺口） | `HandlerInterceptor#preHandle`/`AuthenticationProvider#authenticate` 等框架回调接口方法无 `is_entry_point`、`find_callers` 为空，本应可达的框架直调方法被当成完全不可达 | 入口点检测（`ENTRY_POINT_ANNOTATIONS`）只认注解式入口，不认"实现框架回调接口"这类入口 | 已修复（`FRAMEWORK_CALLBACK_INTERFACES` + `@Override` 兜底判断） | `.scratch/codesec-triage-agent/issues/10-framework-callback-interface-entry-point.md` |
+| 5 | WebGoat（同一份数据，针对性核实"DI 构造无调用点"缺口） | 系统性核实后确认该缺口结构真实但 3 轮 100+ 报警零命中；顺着排查发现更常见的相关问题：字段级报警（弱随机种子/硬编码密钥）永远拿不到可达性证据 | FIELD 单元不参与 CALLS 边，`is_entry_point` 不会从类/方法传播给同类字段 | DI 构造缺口：确认低影响，暂不修；字段级可达性：已修复（`hasEntryPointSibling` 补 `entry_point` 信号） | `.scratch/codesec-triage-agent/issues/11-field-level-reachability.md` |
 
 **第 3 轮的正向信号**：修复问题 #3 后重新索引，WebGoat 47 条筛选后的报警里 35 条判 `TRUE_RISK`
 （74%），其余 9 条 `NEEDS_REVIEW`（逐条核实：大多是命中"参数化查询"防护候选后的合理保守判断）、
@@ -83,6 +84,16 @@ roadmap（`docs/generated/roadmap-codesec-triage-agent.md`）P0 阶段的验证�
 说明前两轮修复的可达性逻辑在更大、更复杂的项目上依然成立，不是只对小样本凑效的局部修补。
 本轮筛选出的报警集合恰好没有命中下面两个已知缺口（框架回调接口入口、DI 构造的 bean），
 不代表这两个缺口不存在，只是这次样本没触发，仍需专门找会命中它们的代码模式验证。
+
+## 第 5 轮：假设被证伪也是有效产出，顺着排查还能带出新发现
+
+第 5 轮本来是去验证第 2 轮记的"DI 构造无调用点"缺口，结果系统性核实后发现它结构上真实但
+3 轮 100+ 报警零命中——**不是每个"看起来合理的缺口"都值得立刻修**，验证的价值在于把"可能有
+问题"变成"要么确认要修、要么确认可以不修"，而不是盲目地为每条假设都写代码。同时，验证这个
+低优先级假设的过程中，顺着"字段是不是也有可达性问题"这条线深挖，找到了一个更常见、影响更大
+的真实问题（字段级报警）。这再次印证第 3 轮的经验："真实样本验证挖出的问题类型不会重复"——
+但也说明了新的一点：**带着一个假设去验证，即使假设本身被证伪，过程中的深挖往往能带出别的、
+更有价值的发现**，不要验证完一个假设就停下。
 
 ## 第 4 轮：不换新项目，针对性压测已知缺口
 
@@ -96,14 +107,16 @@ roadmap（`docs/generated/roadmap-codesec-triage-agent.md`）P0 阶段的验证�
 ## 已知但尚未验证/修复的缺口（下一轮重点核实）
 
 1. ~~入口点识别不覆盖框架回调接口~~ ——第 4 轮已修复，见上表 #4。
-2. **依赖注入构造的 bean 无显式调用点**：Spring 容器反射创建的 bean，构造方法在源码里没有
-   `new X()` 调用点，`find_callers` 显示"无调用方"，即便实际会被框架实例化。已确认反例：
-   `HijackSessionAuthenticationProvider`（`@Component`）构造方法 `find_callers` 为空
-   （见 issue 10），下一轮可以直接从这个类开始验证。
-3. **`resolveCall` 里 scope 非空但解析失败时的兜底**（`classStack.peek()`）：只修了
+2. ~~依赖注入构造的 bean 无显式调用点~~ ——第 5 轮已核实：结构性真实存在（`HijackSessionAuthenticationProvider`
+   构造方法 `find_callers` 为空），但 3 轮 100+ 报警零命中，**确认低影响，暂不修复**。如果以后
+   出现报警命中构造方法本身的真实案例，再重新评估。
+3. **字段被非入口点方法读取时依然拿不到可达性证据**：第 5 轮的修复只处理了"字段所属类托管
+   入口点方法"这一种代理，没处理"字段被同项目里普通（非入口点）方法读取"的情况——这需要真正的
+   字段读取边才能精确覆盖，工程量更大，等有真实反例再评估。
+4. **`resolveCall` 里 scope 非空但解析失败时的兜底**（`classStack.peek()`）：只修了
    "scope 形如类名"这一种子场景（问题 #1 的根因），其它子场景（如类型未知的局部变量）没验证过，
    遇到"该有调用方但没有"时优先怀疑这条路径。
-4. `FRAMEWORK_CALLBACK_INTERFACES` 目前只覆盖 Spring MVC/Security + JAX-RS 常见回调接口，
+5. `FRAMEWORK_CALLBACK_INTERFACES` 目前只覆盖 Spring MVC/Security + JAX-RS 常见回调接口，
    没覆盖 MyBatis、gRPC 拦截器等其他框架，遇到新框架按同样模式扩充。
 
 ## 给 GitHub Issue 的建议拆分
