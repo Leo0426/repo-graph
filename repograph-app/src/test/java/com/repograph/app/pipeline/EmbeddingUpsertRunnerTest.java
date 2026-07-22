@@ -133,6 +133,16 @@ class EmbeddingUpsertRunnerTest {
                 .isEqualTo("Processes input.");
     }
 
+    @Test
+    void extractDocSummary_stringLiteralWithOverlappingCommentMarkers_doesNotThrow() {
+        // Real crash found indexing WebGoat: a SQLi test payload string literal like
+        // "SELECT/**/*/**/from/**/user_system_data" makes the naive "/*" opener overlap
+        // with the very next "*/" closer, previously causing StringIndexOutOfBoundsException
+        // (searching for "*/" from `start` instead of `start + 2`).
+        String raw = "String payload = \"Smith';SELECT/**/*/**/from/**/user_system_data;--\";\nclass Foo {}";
+        assertThat(EmbeddingUpsertRunner.extractDocSummary(raw)).isNotNull();
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────
 
     private static CodeUnit classUnit(String qn, String ann, String sig) {

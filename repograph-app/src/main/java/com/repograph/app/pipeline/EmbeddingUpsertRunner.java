@@ -192,7 +192,10 @@ class EmbeddingUpsertRunner {
             start = rawSource.indexOf("/*");
         }
         if (start < 0) return "";
-        int end = rawSource.indexOf("*/", start);
+        // 从 start + 2 开始找闭合标记：避免闭合 "*/" 与刚匹配到的开头 "/*" 重叠
+        // （例如源码中出现 "/*/" 时，从 start 搜索会把开头自身的 '*' 当成闭合标记的一部分，
+        // 产生 end < start + 2，导致下面的 substring 抛 StringIndexOutOfBoundsException）
+        int end = rawSource.indexOf("*/", start + 2);
         if (end < 0) return "";
 
         String block = rawSource.substring(start + 2, end); // 去除 /* 前缀和 */ 后缀
