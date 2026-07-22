@@ -1,6 +1,7 @@
 package com.repograph.api;
 
 import com.repograph.finding.ExternalFindingImportException;
+import com.repograph.finding.github.GitHubCommentException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -20,6 +21,7 @@ import java.util.Map;
  *   <li>{@link IllegalArgumentException} → 400 Bad Request（如无效的 ParseStrategy 枚举值）</li>
  *   <li>{@link MissingServletRequestParameterException} → 400 Bad Request（必填参数缺失）</li>
  *   <li>{@link MethodArgumentTypeMismatchException} → 400 Bad Request（参数类型不匹配）</li>
+ *   <li>{@link GitHubCommentException} → 502 Bad Gateway（GitHub token 未配置或调用失败）</li>
  *   <li>其他未捕获的 {@link RuntimeException} → 500 Internal Server Error</li>
  * </ul>
  *
@@ -84,6 +86,20 @@ public class GlobalExceptionHandler {
         log.debug("Finding import failed: {}", ex.getMessage());
         return ResponseEntity.badRequest()
                 .body(Map.of("error", ex.getMessage() != null ? ex.getMessage() : "Import failed"));
+    }
+
+    /**
+     * 处理 GitHub PR 评论发布失败（token 未配置或 GitHub REST API 调用出错），
+     * 返回 502 Bad Gateway——问题在下游/配置，不是调用方请求本身有误。
+     *
+     * @param ex 捕获到的 {@link GitHubCommentException}
+     * @return 含 {@code error} 字段的 502 响应体
+     */
+    @ExceptionHandler(GitHubCommentException.class)
+    public ResponseEntity<Map<String, String>> handleGitHubComment(GitHubCommentException ex) {
+        log.warn("GitHub PR comment failed: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(Map.of("error", ex.getMessage() != null ? ex.getMessage() : "GitHub comment failed"));
     }
 
     /**

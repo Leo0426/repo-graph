@@ -9,6 +9,7 @@ import com.repograph.core.retrieval.ContextPack;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 
@@ -118,6 +119,42 @@ public class TriageReportService {
         return new TriageReport(finding, context.located(), context.locatedQualifiedName(),
                 verdict, confidence, List.copyOf(reasons), List.copyOf(missing),
                 remediation, developerSummary, pack);
+    }
+
+    /**
+     * 将多条研判报告合并渲染为单条 PR / issue 评论：置信度统计概览 + 每条报告的可折叠详情，
+     * 避免每条报警各发一条评论造成刷屏。
+     *
+     * @param reports 研判报告列表，不为 {@code null}；为空时返回"无报警"提示
+     * @return Markdown 文本
+     */
+    public String toMarkdownSummary(List<TriageReport> reports) {
+        StringBuilder md = new StringBuilder();
+        md.append("## RepoGraph SAST 报警研判\n\n");
+        if (reports.isEmpty()) {
+            md.append("本次未发现可研判的报警。\n");
+            return md.toString();
+        }
+
+        Map<TriageVerdict, Long> counts = new EnumMap<>(TriageVerdict.class);
+        for (TriageReport report : reports) {
+            counts.merge(report.verdict(), 1L, Long::sum);
+        }
+        md.append("**").append(reports.size()).append(" 条报警**：");
+        md.append(counts.entrySet().stream()
+                .map(e -> e.getKey() + " × " + e.getValue())
+                .reduce((a, b) -> a + " · " + b).orElse(""));
+        md.append("\n\n");
+
+        for (TriageReport report : reports) {
+            ExternalFinding finding = report.finding();
+            md.append("<details>\n<summary>[").append(report.verdict()).append("] ")
+                    .append(finding.ruleId()).append(" — `").append(finding.filePath())
+                    .append(':').append(finding.startLine()).append("`</summary>\n\n");
+            md.append(toMarkdown(report));
+            md.append("\n</details>\n\n");
+        }
+        return md.toString();
     }
 
     /**

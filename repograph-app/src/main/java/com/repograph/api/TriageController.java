@@ -11,6 +11,7 @@ import com.repograph.finding.ExternalFindingImporter;
 import com.repograph.finding.FindingContextService;
 import com.repograph.finding.TriageFeedbackStore;
 import com.repograph.finding.TriageReportService;
+import com.repograph.finding.github.GitHubPrCommentClient;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -41,6 +42,7 @@ public class TriageController {
     private final FindingContextService findingContextService;
     private final TriageReportService triageReportService;
     private final TriageFeedbackStore feedbackStore;
+    private final GitHubPrCommentClient gitHubPrCommentClient;
 
     /**
      * 创建研判 REST 控制器。
@@ -49,15 +51,18 @@ public class TriageController {
      * @param findingContextService 报警上下文构建服务
      * @param triageReportService   研判报告生成服务
      * @param feedbackStore         反馈存储
+     * @param gitHubPrCommentClient GitHub PR 评论客户端
      */
     public TriageController(List<ExternalFindingImporter> importers,
                             FindingContextService findingContextService,
                             TriageReportService triageReportService,
-                            TriageFeedbackStore feedbackStore) {
+                            TriageFeedbackStore feedbackStore,
+                            GitHubPrCommentClient gitHubPrCommentClient) {
         this.importers = importers;
         this.findingContextService = findingContextService;
         this.triageReportService = triageReportService;
         this.feedbackStore = feedbackStore;
+        this.gitHubPrCommentClient = gitHubPrCommentClient;
     }
 
     /**
@@ -78,6 +83,42 @@ public class TriageController {
             @RequestParam(defaultValue = "12000") int budgetChars,
             @RequestParam(defaultValue = "10") int maxFindings,
             HttpServletRequest request) throws IOException {
+        return buildReports(format, projectId, budgetChars, maxFindings, request);
+    }
+
+    /**
+     * 上传外部工具报警 JSON，生成研判报告并合并发布为一条 GitHub PR 评论。
+     *
+     * @param format      报警格式，如 {@code semgrep}、{@code sarif}
+     * @param projectId   可选项目 ID，限定检索范围
+     * @param budgetChars 单条报告的上下文字符预算
+     * @param maxFindings 单次请求最多处理的报警数
+     * @param owner       仓库所有者（用户名或组织名）
+     * @param repo        仓库名
+     * @param prNumber    PR 编号
+     * @param request     HTTP 请求，报警 JSON 从请求输入流读取
+     * @return 发布结果：评论 URL、报警数与逐条研判报告
+     * @throws IOException 请求体读取失败
+     */
+    @PostMapping("/report/pr")
+    public PrCommentResponse reportToPr(
+            @RequestParam String format,
+            @RequestParam(required = false) String projectId,
+            @RequestParam(defaultValue = "12000") int budgetChars,
+            @RequestParam(defaultValue = "10") int maxFindings,
+            @RequestParam String owner,
+            @RequestParam String repo,
+            @RequestParam int prNumber,
+            HttpServletRequest request) throws IOException {
+        List<TriageReportResponse> responses = buildReports(format, projectId, budgetChars, maxFindings, request);
+        List<TriageReport> reports = responses.stream().map(TriageReportResponse::report).toList();
+        String commentUrl = gitHubPrCommentClient.postComment(
+                owner, repo, prNumber, triageReportService.toMarkdownSummary(reports));
+        return new PrCommentResponse(commentUrl, responses.size(), responses);
+    }
+
+    private List<TriageReportResponse> buildReports(String format, String projectId, int budgetChars,
+                                                     int maxFindings, HttpServletRequest request) throws IOException {
         ExternalFindingImporter importer = importers.stream()
                 .filter(i -> i.supports(format))
                 .findFirst()
@@ -150,6 +191,15 @@ public class TriageController {
      * @param markdown    可直接粘贴到 issue / PR 评论的 Markdown 渲染
      */
     public record TriageReportResponse(String fingerprint, TriageReport report, String markdown) {}
+
+    /**
+     * PR 评论发布结果。
+     *
+     * @param commentUrl    GitHub 返回的评论网页 URL
+     * @param findingsCount 本次研判的报警数
+     * @param reports       逐条研判报告，同 {@link #report}
+     */
+    public record PrCommentResponse(String commentUrl, int findingsCount, List<TriageReportResponse> reports) {}
 
     /**
      * 反馈写入请求。

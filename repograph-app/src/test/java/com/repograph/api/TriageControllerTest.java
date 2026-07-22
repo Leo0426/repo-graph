@@ -13,6 +13,8 @@ import com.repograph.finding.ExternalFindingImporter;
 import com.repograph.finding.FindingContextService;
 import com.repograph.finding.TriageFeedbackStore;
 import com.repograph.finding.TriageReportService;
+import com.repograph.finding.github.GitHubCommentException;
+import com.repograph.finding.github.GitHubPrCommentClient;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -23,7 +25,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -54,6 +56,9 @@ class TriageControllerTest {
 
     @MockitoBean
     TriageFeedbackStore feedbackStore;
+
+    @MockitoBean
+    GitHubPrCommentClient gitHubPrCommentClient;
 
     @Test
     void report_generatesReportPerFinding() throws Exception {
@@ -106,6 +111,68 @@ class TriageControllerTest {
                         .content("not-json"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("invalid semgrep JSON"));
+    }
+
+    @Test
+    void reportToPr_postsCombinedMarkdownAndReturnsCommentUrl() throws Exception {
+        ExternalFinding finding = finding();
+        FindingContext context = new FindingContext(finding, true,
+                "com.example.OrderService#run()", emptyPack());
+        TriageReport report = new TriageReport(finding, true,
+                "com.example.OrderService#run()", TriageVerdict.TRUE_RISK, 0.7f,
+                List.of("报警定位到 [C1]"), List.of(), "使用 ProcessBuilder",
+                "该报警大概率是真实风险", emptyPack());
+
+        when(importer.supports("semgrep")).thenReturn(true);
+        when(importer.importJson(any(java.io.InputStream.class), eq(10))).thenReturn(List.of(finding));
+        when(findingContextService.build(eq(finding), any())).thenReturn(context);
+        when(triageReportService.build(context)).thenReturn(report);
+        when(triageReportService.toMarkdown(report)).thenReturn("## report");
+        when(triageReportService.toMarkdownSummary(List.of(report))).thenReturn("## summary");
+        when(gitHubPrCommentClient.postComment("leo", "demo", 42, "## summary"))
+                .thenReturn("https://github.com/leo/demo/pull/42#issuecomment-1");
+
+        mvc.perform(post("/api/v1/triage/report/pr")
+                        .param("format", "semgrep")
+                        .param("owner", "leo")
+                        .param("repo", "demo")
+                        .param("prNumber", "42")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"results\":[]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.commentUrl").value("https://github.com/leo/demo/pull/42#issuecomment-1"))
+                .andExpect(jsonPath("$.findingsCount").value(1))
+                .andExpect(jsonPath("$.reports[0].fingerprint").value(finding.fingerprint()));
+
+        verify(gitHubPrCommentClient).postComment("leo", "demo", 42, "## summary");
+    }
+
+    @Test
+    void reportToPr_returns502WhenGitHubCommentFails() throws Exception {
+        ExternalFinding finding = finding();
+        FindingContext context = new FindingContext(finding, true,
+                "com.example.OrderService#run()", emptyPack());
+        TriageReport report = new TriageReport(finding, true,
+                "com.example.OrderService#run()", TriageVerdict.TRUE_RISK, 0.7f,
+                List.of(), List.of(), "", "", emptyPack());
+
+        when(importer.supports("semgrep")).thenReturn(true);
+        when(importer.importJson(any(java.io.InputStream.class), eq(10))).thenReturn(List.of(finding));
+        when(findingContextService.build(eq(finding), any())).thenReturn(context);
+        when(triageReportService.build(context)).thenReturn(report);
+        when(triageReportService.toMarkdownSummary(any())).thenReturn("## summary");
+        when(gitHubPrCommentClient.postComment(any(), any(), anyInt(), any()))
+                .thenThrow(new GitHubCommentException("GitHub token not configured"));
+
+        mvc.perform(post("/api/v1/triage/report/pr")
+                        .param("format", "semgrep")
+                        .param("owner", "leo")
+                        .param("repo", "demo")
+                        .param("prNumber", "42")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"results\":[]}"))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.error").value("GitHub token not configured"));
     }
 
     @Test

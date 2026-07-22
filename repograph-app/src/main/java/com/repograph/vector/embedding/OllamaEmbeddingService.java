@@ -6,6 +6,7 @@ import com.repograph.vector.config.OllamaProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -40,9 +41,10 @@ public class OllamaEmbeddingService implements EmbeddingService {
      * 通过构造器注入 Ollama 配置和 HTTP 客户端。
      *
      * @param properties   Ollama 服务配置，不为 {@code null}
-     * @param restTemplate Spring RestTemplate 实例，不为 {@code null}
+     * @param restTemplate Spring RestTemplate 实例（{@code ollamaRestTemplate} bean），不为 {@code null}
      */
-    public OllamaEmbeddingService(OllamaProperties properties, RestTemplate restTemplate) {
+    public OllamaEmbeddingService(OllamaProperties properties,
+                                   @Qualifier("ollamaRestTemplate") RestTemplate restTemplate) {
         this.properties = properties;
         this.restTemplate = restTemplate;
     }

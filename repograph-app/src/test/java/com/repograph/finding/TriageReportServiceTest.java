@@ -132,6 +132,29 @@ class TriageReportServiceTest {
     }
 
     @Test
+    void toMarkdownSummary_combinesReportsWithVerdictCounts() {
+        TriageReport trueRisk = service.build(context(List.of(
+                locationEvidence(List.of("command_execution")), callerEvidence())));
+        TriageReport falsePositive = service.build(context(List.of(locationEvidence(List.of()))));
+
+        String summary = service.toMarkdownSummary(List.of(trueRisk, falsePositive));
+
+        assertThat(summary)
+                .contains("2 条报警")
+                .contains("TRUE_RISK × 1")
+                .contains("LIKELY_FALSE_POSITIVE × 1")
+                .contains("<details>")
+                .contains("</details>");
+    }
+
+    @Test
+    void toMarkdownSummary_emptyListReturnsNoFindingsMessage() {
+        String summary = service.toMarkdownSummary(List.of());
+
+        assertThat(summary).contains("未发现可研判的报警");
+    }
+
+    @Test
     void report_serializesWithStableJsonFields() throws Exception {
         TriageReport report = service.build(context(List.of(
                 locationEvidence(List.of("command_execution")),

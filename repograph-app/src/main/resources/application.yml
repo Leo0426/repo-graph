@@ -26,6 +26,10 @@ repograph:
       engine-lib-dir: ""     # 引擎 installDist 产物 lib 目录
       exclusions: ""         # 可选 WALA 排除文件;空则用引擎打包默认
       timeout-seconds: 600
+  github:
+    token: ""                    # Personal Access Token 或 GitHub App token；留空则发评论时报错
+    api-base-url: https://api.github.com
+    timeout-seconds: 15
 
 server:
   port: 8080
