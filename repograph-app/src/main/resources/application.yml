@@ -2,11 +2,11 @@ repograph:
   qdrant:
     host: localhost
     port: 16334
-    collection: code_units
-    vector-size: 3584
+    collection: code_units_qwen3_embedding
+    vector-size: 4096
   ollama:
-    base-url: http://192.168.4.113:11434
-    model: manutic/nomic-embed-code
+    base-url: http://localhost:11434
+    model: qwen3-embedding:latest
     timeout-seconds: 300
   neo4j:
     uri: bolt://localhost:7687

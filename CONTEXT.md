@@ -319,12 +319,12 @@ repograph:
   qdrant:
     host: localhost
     port: 16334          # Docker: host:16334 → container:6334 (gRPC)
-    collection: code_units
-    vector-size: 3584    # manutic/nomic-embed-code 输出维度
+    collection: code_units_qwen3_embedding
+    vector-size: 4096    # qwen3-embedding:latest 输出维度
   ollama:
-    base-url: http://192.168.4.113:11434
-    model: manutic/nomic-embed-code
-    timeout-seconds: 300  # 7.5GB 模型每批耗时较长
+    base-url: http://localhost:11434
+    model: qwen3-embedding:latest
+    timeout-seconds: 300  # 大模型每批耗时较长
   neo4j:
     uri: bolt://localhost:7687
     user: neo4j
