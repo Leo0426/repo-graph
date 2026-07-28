@@ -150,4 +150,11 @@ P0“报警解释器”主链路已完成：
 4. 已对单条报警生成 Context Pack。
 5. 已输出 Markdown 研判报告。
 6. P1 已开始：研判基线可识别 CWE 特定防护候选，并避免跨 CALLER 证据污染。
-7. 下一步用 3-5 个真实报警样本验证防护识别与研判时间，再推进 source/sink 路径一致性校验。
+7. 已完成与完整代码审计流程的能力对齐，详细缺口和可执行任务见
+   [`next-development-plan-audit-platform.md`](next-development-plan-audit-platform.md)。
+8. 最近执行顺序调整为：
+   - 安全归档接入、资产画像、Semgrep/CodeQL 同步扫描编排和 Spring 路由鉴权证据已完成；
+   - source/sink/保护点路径一致性、版本化历史反馈、规则抑制审计和漏洞变体研判已完成；
+   - 受约束的可选 LLM 辅助复核已完成，默认关闭、仅供参考且不自动确认漏洞；
+   - 下一步建设审核队列、Markdown/JSON/PDF 统一交付和规则效果评估；
+   - 动态验证、OOB 和批量调度放在静态闭环稳定之后，按独立隔离执行边界推进。

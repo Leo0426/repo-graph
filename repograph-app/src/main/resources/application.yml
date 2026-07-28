@@ -19,6 +19,30 @@ repograph:
       upsert: 256
       parallelism: 4   # concurrent embed batches; pool size = 2 × parallelism
     default-strategy: AUTO
+  assets:
+    root-dir: ${user.home}/.repograph/assets
+    max-upload-mb: 200
+    max-extracted-mb: 1024
+    max-entries: 50000
+    max-single-file-mb: 50
+    max-depth: 32
+  scanners:
+    work-dir: ${user.home}/.repograph/scans
+    default-timeout-seconds: 900
+    max-output-mb: 100
+    max-findings: 5000
+    semgrep-command: semgrep
+    semgrep-config: auto
+    codeql-command: codeql
+    codeql-query-suite: security-extended
+  advisory:
+    enabled: false             # 默认关闭；明确提供方和源码出域策略后再启用
+    max-input-chars: 12000
+    max-output-chars: 4000
+    max-estimated-cost-usd: 0.05
+    timeout-millis: 15000
+    max-retries: 1
+    redact: true
   taint:
     precise:                 # 方案 A:WALA IFDS 引擎独立进程(需带 jmods 的 JDK)
       enabled: false         # 配好 java-home 与 engine-lib-dir 后置 true

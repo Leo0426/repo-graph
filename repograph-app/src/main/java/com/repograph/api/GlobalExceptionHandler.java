@@ -1,15 +1,22 @@
 package com.repograph.api;
 
+import com.repograph.asset.ArchiveLimitException;
+import com.repograph.asset.InvalidArchiveException;
+import com.repograph.asset.UnsafeArchiveException;
+import com.repograph.asset.UnsupportedArchiveException;
+import com.repograph.core.asset.AssetBusyException;
+import com.repograph.core.asset.AssetNotReadyException;
 import com.repograph.finding.ExternalFindingImportException;
 import com.repograph.finding.github.GitHubCommentException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import java.util.Map;
 
@@ -32,6 +39,70 @@ import java.util.Map;
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    /**
+     * 处理损坏、空或包含不安全条目的归档。
+     *
+     * @param ex 归档校验异常
+     * @return 400 Bad Request
+     */
+    @ExceptionHandler({InvalidArchiveException.class, UnsafeArchiveException.class})
+    public ResponseEntity<Map<String, String>> handleInvalidArchive(RuntimeException ex) {
+        log.debug("Archive rejected: {}", ex.getMessage());
+        return ResponseEntity.badRequest().body(Map.of(
+                "code", ex instanceof UnsafeArchiveException ? "ARCHIVE_UNSAFE" : "ARCHIVE_INVALID",
+                "error", messageOr(ex, "Archive is invalid")));
+    }
+
+    /**
+     * 处理不支持的归档格式。
+     *
+     * @param ex 格式异常
+     * @return 415 Unsupported Media Type
+     */
+    @ExceptionHandler(UnsupportedArchiveException.class)
+    public ResponseEntity<Map<String, String>> handleUnsupportedArchive(UnsupportedArchiveException ex) {
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+                .body(Map.of("code", "ARCHIVE_UNSUPPORTED",
+                        "error", messageOr(ex, "Archive format is unsupported")));
+    }
+
+    /**
+     * 处理上传或解压资源超限。
+     *
+     * @param ex 限额异常
+     * @return 413 Payload Too Large
+     */
+    @ExceptionHandler({ArchiveLimitException.class, MaxUploadSizeExceededException.class})
+    public ResponseEntity<Map<String, String>> handleArchiveLimit(Exception ex) {
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+                .body(Map.of("code", "ARCHIVE_LIMIT_EXCEEDED",
+                        "error", messageOr(ex, "Archive exceeds configured limit")));
+    }
+
+    /**
+     * 处理索引中资产的冲突操作。
+     *
+     * @param ex 资产忙异常
+     * @return 409 Conflict
+     */
+    @ExceptionHandler(AssetBusyException.class)
+    public ResponseEntity<Map<String, String>> handleAssetBusy(AssetBusyException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(Map.of("code", "ASSET_BUSY", "error", messageOr(ex, "Asset is busy")));
+    }
+
+    /**
+     * 处理尚未完成索引的资产画像请求。
+     *
+     * @param ex 资产未就绪异常
+     * @return 409 Conflict
+     */
+    @ExceptionHandler(AssetNotReadyException.class)
+    public ResponseEntity<Map<String, String>> handleAssetNotReady(AssetNotReadyException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(Map.of("code", "ASSET_NOT_READY", "error", messageOr(ex, "Asset is not ready")));
+    }
 
     /**
      * 处理非法参数异常，返回 400 Bad Request，消息直接透传给调用方。
@@ -115,5 +186,11 @@ public class GlobalExceptionHandler {
         log.error("Unexpected error: {}", ex.getMessage(), ex);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(Map.of("error", "Internal server error"));
+    }
+
+    private static String messageOr(Exception exception, String fallback) {
+        return exception.getMessage() == null || exception.getMessage().isBlank()
+                ? fallback
+                : exception.getMessage();
     }
 }

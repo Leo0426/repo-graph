@@ -33,7 +33,7 @@ final class JavaParserHelpers {
 
     static final Set<String> ENTRY_POINT_ANNOTATIONS = Set.of(
             "@RestController", "@Controller",
-            "@GetMapping", "@PostMapping", "@PutMapping", "@DeleteMapping", "@RequestMapping",
+            "@GetMapping", "@PostMapping", "@PutMapping", "@PatchMapping", "@DeleteMapping", "@RequestMapping",
             "@Path", "@GET", "@POST", "@PUT", "@DELETE"
     );
 

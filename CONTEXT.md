@@ -40,7 +40,11 @@ repograph-app/   Spring Boot 服务 + Picocli CLI
     parser/       CodeParser / ParseResult / ParseStrategy / ParseOptions
     graph/        GraphQueryService / GraphDiagnosticsService / ProjectInfo / ProjectStats
     vector/       VectorStore / EmbeddingService / SearchResult / SearchOptions
-    finding/      ExternalFinding / ExternalFindingTraceStep / ExternalFindingSeverity
+    finding/      外部报警、研判反馈/决策证据、规则抑制、变体候选与相关接口
+    advisory/     LLM 辅助复核、模型适配、审计和离线评估的无依赖契约
+    asset/        归档接入接口、资产状态、ProjectAssetProfile 与扫描器推荐模型
+    scanner/      ScannerAdapter / ExternalScanService / 运行状态和批次结果
+    authorization/ AuthorizationEvidenceService + 路由、约束、资源访问与 citation 模型
     flow/         FlowAnalysisService / TaintAnalysisService / TaintSummaryService + 所有流图模型
     pipeline/     IndexPipeline / IndexStore / IndexOptions / IndexProgressEvent
     retrieval/    GraphRagOptions / GraphRagResult / RankedUnit / KeywordSearchService / ContextPack
@@ -59,7 +63,11 @@ repograph-app/   Spring Boot 服务 + Picocli CLI
   com.repograph.retrieval/   GraphRagService + SecurityAwareReranker
                               SimpleKeywordSearchService（符号名 / 规则 ID / CVE-CWE / 配置 key 召回）
                               ContextPackService（GraphRAG → citation-ready context pack）
-  com.repograph.finding/     SemgrepFindingImporter / SarifFindingImporter → ExternalFinding
+  com.repograph.finding/     报警导入/研判 + 版本化反馈 + 路径防护 + 规则抑制审计 + 变体召回
+  com.repograph.advisory/    默认关闭的 LLM 复核 + citation 校验 + 脱敏/预算/超时/审计 + 离线评估
+  com.repograph.asset/       ZIP/TAR.GZ 安全接入 + SQLite 资产注册 + 异步索引 + 资产画像
+  com.repograph.scanner/     Semgrep/CodeQL CLI 适配 + 失败隔离 + SQLite 运行/报警存储
+  com.repograph.authorization/ Spring 路由 + 鉴权候选合并 + 调用路径资源访问证据
   com.repograph.framework/   Spring / JAX-RS / MyBatis 注解识别，标记 is_entry_point
   com.repograph.sbom/        DispatchSbomService → Maven / Gradle / npm / pip → CycloneDX JSON
   com.repograph.vuln/        漏洞管理
@@ -102,7 +110,8 @@ repograph-taint-engine/   WALA-based IFDS 精确污点引擎
   libs/           vendored 补丁 WALA jar（见下方 ADR）
 ```
 
-> **状态**：203 源文件，0-error 编译。**引擎端到端已跑通并验证**：32 个 JUnit 全绿，含端到端集成测试
+> **状态**：288 个 repograph-app 源文件，0-error 编译。**引擎端到端已跑通并验证**：
+> 32 个 JUnit 全绿，含端到端集成测试
 > （`e2e.TaintAnalysisEndToEndTest` 走 `TaintScanRunner`，即 CLI 内部同一管道）——在编译后的 fixture 上跑
 > 完整 WALA+IFDS 管道，成功检出 `System.getenv → Runtime.exec` 命令注入污点流。
 > **已按方案 A 接入 repograph-app 并通过活体冒烟**：引擎作独立进程（installDist），app（JDK25，Neo4j+Qdrant 在线）
@@ -142,13 +151,78 @@ repograph-taint-engine/   WALA-based IFDS 精确污点引擎
   ruleId/cwe/message 关键词补充（source=KEYWORD），复用 `ContextPackService.assemble` 的预算与 citation 规则；
   定位失败写入 `omittedReasons` 不抛异常。
 - `TriageReportService`：启发式基线（定位 + 安全信号 + 调用方可达性 → TRUE_RISK / LIKELY_FALSE_POSITIVE /
-  NEEDS_REVIEW + 置信度），结论只引用证据链；`ProtectionSignalDetector` 从 FINDING / CALLEE 证据中识别
-  CWE 特定防护候选，发现防护时保守转为 NEEDS_REVIEW，不把启发式匹配视为已验证安全；`toMarkdown`
-  输出可贴 PR 评论的报告。
-- `TriageFeedbackStore`：SQLite `triage_feedback` 表，指纹主键幂等 upsert，状态 TRUE_POSITIVE /
-  FALSE_POSITIVE / NEEDS_REVIEW / FIXED。
+  NEEDS_REVIEW + 置信度），外部 finding 始终作为只读事实；历史反馈、规则抑制和路径防护单独写入
+  `decisionEvidence(source, reference, summary, applied)`，Markdown 使用独立“决策证据”区。
+- `ProtectionSignalDetector`：从 FINDING/CALLEE 识别 CWE 特定防护，但只有外部 trace 明确给出
+  `source → sanitizer/validation/guard → sink`，且保护点位于所有 source 之后和所有 sink 之前时，
+  才能把 TRUE_RISK 降为 NEEDS_REVIEW；路径外保护和后置第二入口均保留风险结论。
+- `TriageFeedbackStore`：SQLite `triage_feedback` 以 `(project_id, fingerprint)` 为复合主键，保存
+  `codeVersion/ruleVersion`；只有同项目、同指纹且两个版本都一致的反馈才能自动影响新报告。
+- `RuleSuppressionStore`：SQLite 保存 `PROJECT / FILE_GLOB` 作用域、理由、创建人、创建/过期时间和
+  active 状态，并为创建、撤销写入独立审计事件；过期或路径不匹配的策略不参与研判。
+- `VulnerabilityVariantService`：仅从 `CONFIRMED` 漏洞种子出发，按规则/CWE、危险 Sink、动态参数特征
+  和源码 token 相似度召回候选；按 `(project, rule, unit)` 指纹去重，状态固定从 `SUSPECTED` 开始，
+  并输出相似依据和源码 citation。
 - REST 入口：`POST /api/v1/triage/report?format=semgrep|sarif`（body 为工具 JSON，逐条返回报告 + Markdown）；
-  `POST/GET /api/v1/triage/feedback`。
+  `POST/GET /api/v1/triage/feedback`；规则抑制使用 `/api/v1/triage/suppressions` 创建、查询、撤销和
+  审计；`GET /api/v1/triage/variants?projectId=...` 查询保守变体候选。
+
+**受约束 LLM 辅助复核**（P1 HITL，`com.repograph.advisory`）：
+- `LlmAdvisoryService` 接收不可变 `TriageReport`，结果固定 `advisoryOnly=true` 并原样携带启发式报告；
+  模型建议不写入 `VulnStore`，不能把发现自动改为 `CONFIRMED`。
+- 默认 `repograph.advisory.enabled=false`，没有真实模型适配器时使用关闭模型，完整退化到启发式结论。
+  当前只固化提供方中立契约，不替部署方决定允许的模型提供方或源码出域策略。
+- 调用前剔除外部报警 raw，按字符预算裁剪，并脱敏 password/token/secret/API key/Bearer 等常见秘密；
+  证据显式标记为 untrusted，供模型适配器隔离提示指令与数据。
+- 调用后只保留输入 `ContextPack` 中存在的 citation；不存在的引用进入 `missingInfo`，不能成为新证据。
+  调用受单次成本预检、超时和有限重试约束。
+- SLF4J 审计只记录请求 ID、报警指纹、提供方/模型、状态、尝试次数、延迟、脱敏次数、token/成本和
+  安全错误码，不记录提示词、源码或异常原文。
+- `LlmAdvisoryEvaluator` 在人工标注固定样本上分别计算启发式与模型建议准确率，以及平均延迟和总成本。
+- REST：`POST /api/v1/triage/advisory` 接收已有 `TriageReport`，返回独立辅助意见。
+
+## 外部扫描器编排
+
+- **领域边界**：`ScannerAdapter` 声明语言、命令、输出格式和前置条件；`ExternalScanService` 负责按工具
+  隔离执行、聚合批次状态和查询运行结果。领域模型位于 `com.repograph.core.scanner`，进程、SQLite 和
+  工具专属命令实现在 `com.repograph.scanner`。
+- **工具适配**：Semgrep 使用 `semgrep scan --json --output` 并复用 `SemgrepFindingImporter`；CodeQL
+  对画像中的每种安全支持语言分别创建数据库、执行查询并复用 `SarifFindingImporter`。
+- **安全执行**：所有命令使用 `ProcessBuilder(List<String>)` 参数数组，不经 shell；工作目录固定为
+  托管项目根，数据库、日志和结果固定写入 `${user.home}/.repograph/scans/<batchId>/<scanner>`。
+  超时后强制终止子进程，单个扫描器失败不影响同批其他工具。
+- **CodeQL 构建边界**：只开放支持 `--build-mode=none` 的 Java/Kotlin、JavaScript/TypeScript、
+  Python、C# 和 Ruby。C/C++、Go、Swift 需要 autobuild/manual build，当前不在主服务执行不可信项目
+  构建脚本；这类语言保留 Semgrep/RepoGraph 推荐，隔离构建将在动态执行或批量调度阶段单独设计。
+- **持久化**：SQLite `scanner_runs` 保存工具版本、退出码、状态、耗时、错误和归一化结果；
+  `external_findings` 以 `(project_id, fingerprint)` 为主键幂等关联重复报警。资产删除同时清理记录和
+  受控扫描工作目录。
+- **状态语义**：`SUCCEEDED / PARTIAL / FAILED / TIMED_OUT / UNAVAILABLE`。命令不存在或版本探测失败
+  必须是 `UNAVAILABLE`，不能解释为“扫描成功且零报警”。
+- **REST**：`GET /api/v1/scanners/capabilities` 探测工具；`POST /api/v1/assets/{assetId}/scans`
+  同步执行；`GET /api/v1/assets/{assetId}/scans`、`GET /api/v1/scans/{scanId}` 和
+  `GET /api/v1/assets/{assetId}/external-findings` 查询历史与去重报警。
+- **当前边界**：T3 为同步单批执行并支持强制超时；主动取消、异步队列、并发配额和重试统一归入 T10，
+  避免先形成两套任务状态机。
+
+## 路由鉴权与资源访问证据
+
+- **领域边界**：`com.repograph.core.authorization` 定义 `AuthorizationEvidenceService` 及无第三方依赖的
+  路由、约束、资源访问和 citation 模型；Spring/调用图实现在 `com.repograph.authorization`。
+- **路由识别**：从 `@RequestMapping` 和 `@Get/Post/Put/Patch/DeleteMapping` 合并控制器级与方法级
+  路径，并提取可静态确认的 HTTP method；非 Spring HTTP 入口不进入结果。
+- **约束合并**：支持 `@PreAuthorize`、`@PostAuthorize`、`@Secured`、`@RolesAllowed`、
+  `@PermitAll`、`@DenyAll`。方法级声明覆盖类级候选；被覆盖候选仍保留 citation 且
+  `effective=false`，便于审计来源。
+- **状态语义**：`LOCAL_CONSTRAINT_CANDIDATE / POLICY_CANDIDATE / NO_LOCAL_EVIDENCE` 只表示静态证据强度。
+  `CONFIRMED_UNAUTHENTICATED` 预留给运行时或人工证据，当前静态服务不会自动产生。未找到本地注解不等于
+  确认未鉴权；过滤器链配置只有明确引用当前路由或声明 `anyRequest()` 时才作为未验证策略候选。
+- **资源证据**：从处理方法沿项目内 `CALLS` 边执行有界 BFS，识别数据库、文件、网络和命令/脚本
+  危险 Sink；每个目标输出从入口到命中单元的有序 qualifiedName 和逐跳 `SourceCitation`。
+- **边界**：不解析运行时 SpEL 结果、动态 `SecurityFilterChain` 匹配、网关/代理策略、元注解组合、
+  反射和动态代理。缺失项必须写入 `missingInfo`，不能据此生成“已确认无鉴权”结论。
+- **REST**：`GET /api/v1/assets/{assetId}/authorization-evidence?depth=6`，仅对 `READY` 托管资产开放；
+  调用深度服务端限制为 0–12，单路由最多展开 200 个方法。
 
 **CodeUnitKind**：`CLASS | INTERFACE | ENUM | ANNOTATION | METHOD | CONSTRUCTOR | FIELD | LOCAL_VAR | STRUCT | UNION | TYPEDEF | MACRO | FUNCTION | DOCUMENT`
 - `FUNCTION`：C 顶层函数（无所属类）；`STRUCT/UNION/TYPEDEF/MACRO` 仅 C 使用
@@ -169,6 +243,33 @@ repograph-taint-engine/   WALA-based IFDS 精确污点引擎
 | `return_type` | 返回类型字符串 |
 | `param_types` | 逗号分隔，如 `"String,int"` |
 | `ann_<AnnotationName>` | 注解的主要属性值，如 `ann_RequestMapping="/api/users"`；仅 `value` / `path` 属性 |
+
+## 归档资产接入与画像
+
+- **入口**：`POST /api/v1/assets/import` 接收 ZIP/TAR.GZ multipart 上传，安全提取后异步复用
+  `IndexPipeline`；`GET/DELETE /api/v1/assets/{assetId}` 查询状态或删除。
+- **领域边界**：`AssetImportService`、`ArchiveExtractor`、`ImportedAsset` 和 `AssetStatus` 位于
+  `com.repograph.core.asset`；Multipart、Commons Compress、SQLite 和文件系统实现在
+  `com.repograph.asset`。
+- **受控目录**：`${user.home}/.repograph/assets/<assetId>/source`。客户端不能指定服务器路径；
+  每次上传生成独立 UUID，因此重复上传得到不同 `projectId`。
+- **项目根**：归档仅含一个顶层目录且根部无文件时自动剥离该层，避免 GitHub 下载包目录前缀影响
+  SARIF/filePath 定位；否则以 `source` 为根。
+- **安全约束**：按魔数识别格式；拒绝路径穿越、绝对路径、重复目标、符号/硬链接和特殊文件；
+  对上传大小、累计解压大小、条目数、单文件大小和目录深度执行可配置限额。
+- **状态**：`INDEXING → READY | FAILED`。索引失败保留源码供诊断；运行中的资产禁止删除。
+- **删除**：先检查资产不在索引中，再清理图、向量、增量缓存、漏洞、历史和文件监听；只有
+  `imported_assets` 注册表确认属于 RepoGraph 的目录才允许递归删除。
+- **画像入口**：`GET /api/v1/assets/{assetId}/profile` 只接受 `READY` 资产，按当前源码和索引结果
+  即时生成 `ProjectAssetProfile`；索引中或失败资产返回 `409 ASSET_NOT_READY`。
+- **文件分类**：逐文件输出 `BUSINESS / TEST / DOCUMENTATION / GENERATED / UNKNOWN` 和分类原因；
+  无可靠规则时保留 `UNKNOWN`，不静默归入业务源码。
+- **资产特征**：聚合语言、Spring/JAX-RS/MyBatis、Maven/Gradle/npm/pip 和 CycloneDX 依赖清单。
+  SBOM 或图谱等可选来源不可用时写入 `omittedReasons`，不伪装为空结果。
+- **风险信号**：聚合公开 HTTP 入口、危险 Sink、敏感配置 key、未关闭的依赖 CVE 和高变更热点。
+  敏感配置证据只返回文件路径，不返回配置值。
+- **扫描计划**：按语言和构建上下文推荐 RepoGraph 内置扫描、Semgrep、CodeQL、Slither 和依赖 CVE
+  扫描；`includeScanner` / `excludeScanner` 可人工覆盖，冲突时排除优先。画像只给计划，不启动外部工具。
 
 **EdgeKind**：`CONTAINS | CALLS | IMPORTS | EXTENDS | IMPLEMENTS | DEFINES_TYPE | OVERRIDES`
 
@@ -379,3 +480,9 @@ app（JDK 25）以子进程在带 jmods 的 JDK 上运行 `repograph-taint-engin
 | IFDS 引擎接入方式 | **方案 A：独立进程**（installDist + TaintScanCli，app 子进程调用） | 彻底隔离 JDK 冲突（app JDK25 / 引擎 JDK21）；app 无需依赖引擎模块，仅解析其 JSON 输出；契合"精确扫描是要求可编译、按需触发的重路径"定位 |
 | IFDS 引擎共享可变状态 | 每次扫描独立进程（生产）/ 测试 forkEvery=1 + 方法定序 | `DomainElement.ZERO` 被 `TaintDomain.add` 就地合并 Info，同 JVM 连跑多次分析会污染；独立进程天然隔离，测试镜像之 |
 | AI Agent 缺陷发现接口 | `repograph-mcp` 结构化查询工具（调用图/污点/向量），不依赖 Agent 默认 grep/Read | grep 是字符串匹配，无法表达跨函数/跨文件数据流（如参数从入口方法传到 sink 的调用链）；`find_callers`/`find_callees`/`trace_taint`/`scan_vuln_code`/`search_graphrag` 让 Agent 对预建的 CodeUnit 图和污点摘要做结构化查询，代价是需要维护 Neo4j+Qdrant+MCP 进程，换取 grep 结构上做不到的跨过程追踪精度 |
+| 不可信源码归档接入 | 独立资产接入层 + 受控持久目录 + 异步复用 IndexPipeline | 不把归档逻辑混入领域索引管道；ZIP 中链接属性从中央目录读取，TAR.GZ 流式解压；主服务只递归删除 SQLite 注册的受控资产目录 |
+| 资产画像生成 | 按需聚合托管源码、图谱、SBOM、漏洞和 Git 热点 | 保持画像为可重算快照，避免复制事实源；可选来源失败写入 omittedReasons；扫描器人工排除优先于包含 |
+| 外部扫描器执行 | 小 ScannerAdapter + 受控 CLI 进程 + SQLite 事实存储 | 工具专属参数不渗透领域模型；失败按扫描器隔离；CodeQL 仅使用 build-mode none，禁止主服务隐式执行项目构建；主动取消和任务队列留给 T10 的统一状态机 |
+| 路由鉴权证据 | 注解约束候选 + 配置候选 + 有界调用图资源访问 | 不把静态注解解释成已验证运行时策略；方法级覆盖类级候选但保留来源；无本地证据与确认无鉴权严格分离 |
+| 研判决策证据 | 外部 finding 只读 + 独立 decisionEvidence | 历史反馈必须匹配项目/指纹/代码版本/规则版本；规则抑制必须有范围、有效期和审计；路径防护必须被外部 trace 证明位于所有 source 与 sink 之间 |
+| 漏洞变体召回 | CONFIRMED 种子 + Sink/动态参数/token 相似度 | 相似性只产生 SUSPECTED 候选，不直接创建或升级为 CONFIRMED；按项目、规则和候选单元指纹去重 |

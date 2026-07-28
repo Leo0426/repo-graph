@@ -4,8 +4,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.repograph.core.finding.ExternalFinding;
 import com.repograph.core.finding.ExternalFindingSeverity;
+import com.repograph.core.finding.ExternalFindingTraceStep;
 import com.repograph.core.finding.FindingContext;
+import com.repograph.core.finding.RuleSuppression;
+import com.repograph.core.finding.RuleSuppressionScope;
+import com.repograph.core.finding.TriageFeedback;
+import com.repograph.core.finding.TriageFeedbackStatus;
 import com.repograph.core.finding.TriageReport;
+import com.repograph.core.finding.TriageReviewContext;
 import com.repograph.core.finding.TriageVerdict;
 import com.repograph.core.retrieval.ContextEvidence;
 import com.repograph.core.retrieval.ContextPack;
@@ -56,7 +62,111 @@ class TriageReportServiceTest {
     }
 
     @Test
-    void build_needsReviewWhenCweSpecificProtectionIsPresent() {
+    void build_matchingVersionFalsePositiveFeedbackIsAppliedWithProvenance() {
+        FindingContext context = context(List.of(
+                locationEvidence(List.of("command_execution", "entry_point"))));
+        TriageFeedback feedback = new TriageFeedback(
+                context.finding().fingerprint(),
+                "project-1",
+                TriageFeedbackStatus.FALSE_POSITIVE,
+                "leo",
+                "该调用参数来自固定枚举",
+                "commit-a",
+                "semgrep-rules-2",
+                "2026-07-26T12:00:00Z");
+
+        TriageReport report = service.build(
+                context,
+                new TriageReviewContext(
+                        "project-1",
+                        "commit-a",
+                        "semgrep-rules-2",
+                        feedback));
+
+        assertThat(report.verdict()).isEqualTo(TriageVerdict.LIKELY_FALSE_POSITIVE);
+        assertThat(report.confidence()).isGreaterThanOrEqualTo(0.9f);
+        assertThat(report.decisionEvidence()).singleElement().satisfies(evidence -> {
+            assertThat(evidence.source()).isEqualTo("HISTORICAL_FEEDBACK");
+            assertThat(evidence.reference()).isEqualTo(context.finding().fingerprint());
+            assertThat(evidence.applied()).isTrue();
+            assertThat(evidence.summary()).contains("leo", "固定枚举", "commit-a", "semgrep-rules-2");
+        });
+        assertThat(report.finding()).isSameAs(context.finding());
+        assertThat(service.toMarkdown(report))
+                .contains("### 决策证据")
+                .contains("HISTORICAL_FEEDBACK")
+                .contains(context.finding().fingerprint())
+                .contains("applied=true");
+    }
+
+    @Test
+    void build_changedCodeVersionDoesNotReuseFalsePositiveFeedback() {
+        FindingContext context = context(List.of(
+                locationEvidence(List.of("command_execution", "entry_point"))));
+        TriageFeedback feedback = new TriageFeedback(
+                context.finding().fingerprint(),
+                "project-1",
+                TriageFeedbackStatus.FALSE_POSITIVE,
+                "leo",
+                "旧版本已有校验",
+                "commit-old",
+                "semgrep-rules-2",
+                "2026-07-25T12:00:00Z");
+
+        TriageReport report = service.build(
+                context,
+                new TriageReviewContext(
+                        "project-1",
+                        "commit-new",
+                        "semgrep-rules-2",
+                        feedback));
+
+        assertThat(report.verdict()).isEqualTo(TriageVerdict.TRUE_RISK);
+        assertThat(report.decisionEvidence()).singleElement().satisfies(evidence -> {
+            assertThat(evidence.source()).isEqualTo("HISTORICAL_FEEDBACK");
+            assertThat(evidence.applied()).isFalse();
+            assertThat(evidence.summary()).contains("version mismatch");
+        });
+        assertThat(report.missingInfo()).anyMatch(info -> info.contains("历史反馈") && info.contains("版本"));
+    }
+
+    @Test
+    void build_activeRuleSuppressionIsAppliedWithoutChangingFindingFact() {
+        FindingContext context = context(List.of(
+                locationEvidence(List.of("command_execution", "entry_point"))));
+        RuleSuppression suppression = new RuleSuppression(
+                "suppression-1",
+                "project-1",
+                context.finding().ruleId(),
+                RuleSuppressionScope.PROJECT,
+                "",
+                "training fixture",
+                "leo",
+                "2026-07-20T00:00:00Z",
+                "2026-08-20T00:00:00Z",
+                true);
+
+        TriageReport report = service.build(
+                context,
+                new TriageReviewContext(
+                        "project-1",
+                        "commit-a",
+                        "rules-2",
+                        null,
+                        suppression));
+
+        assertThat(report.verdict()).isEqualTo(TriageVerdict.LIKELY_FALSE_POSITIVE);
+        assertThat(report.decisionEvidence()).singleElement().satisfies(evidence -> {
+            assertThat(evidence.source()).isEqualTo("RULE_SUPPRESSION");
+            assertThat(evidence.reference()).isEqualTo("suppression-1");
+            assertThat(evidence.summary()).contains("PROJECT", "training fixture", "leo", "2026-08-20");
+            assertThat(evidence.applied()).isTrue();
+        });
+        assertThat(report.finding()).isSameAs(context.finding());
+    }
+
+    @Test
+    void build_protectionWithoutTraceDoesNotReduceRiskConclusion() {
         ContextEvidence protectedLocation = new ContextEvidence(
                 "C1", "com.example.OrderService#run()", "METHOD", "java",
                 "src/main/java/com/example/OrderService.java", 40, 60,
@@ -68,10 +178,73 @@ class TriageReportServiceTest {
 
         TriageReport report = service.build(context);
 
-        assertThat(report.verdict()).isEqualTo(TriageVerdict.NEEDS_REVIEW);
+        assertThat(report.verdict()).isEqualTo(TriageVerdict.TRUE_RISK);
         assertThat(report.reasons())
-                .anyMatch(reason -> reason.contains("输入校验") && reason.contains("[C1]"));
-        assertThat(report.developerSummary()).contains("防护");
+                .anyMatch(reason -> reason.contains("防护") && reason.contains("[C1]"));
+        assertThat(report.decisionEvidence()).singleElement()
+                .satisfies(evidence -> assertThat(evidence.applied()).isFalse());
+        assertThat(report.missingInfo()).anyMatch(info -> info.contains("未降低风险结论"));
+    }
+
+    @Test
+    void build_pathAlignedProtectionCanReduceConclusionToNeedsReview() {
+        ExternalFinding tracedFinding = finding(List.of(
+                traceStep(10, "source", "request parameter"),
+                traceStep(45, "sanitizer", "allowlist validation"),
+                traceStep(52, "sink", "Runtime.exec")));
+        ContextEvidence protectedLocation = new ContextEvidence(
+                "C1", "com.example.OrderService#run()", "METHOD", "java",
+                "src/main/java/com/example/OrderService.java", 40, 60,
+                "FINDING", "SEED", 1.0f,
+                "if (!command.matches(\"[a-z]+\")) { throw new IllegalArgumentException(); }\n"
+                        + "Runtime.getRuntime().exec(command);",
+                false, List.of("command_execution", "entry_point"));
+        FindingContext context = new FindingContext(
+                tracedFinding,
+                true,
+                protectedLocation.qualifiedName(),
+                pack(List.of(protectedLocation), List.of()));
+
+        TriageReport report = service.build(context);
+
+        assertThat(report.verdict()).isEqualTo(TriageVerdict.NEEDS_REVIEW);
+        assertThat(report.decisionEvidence()).singleElement().satisfies(evidence -> {
+            assertThat(evidence.source()).isEqualTo("PATH_PROTECTION");
+            assertThat(evidence.reference()).isEqualTo("C1");
+            assertThat(evidence.applied()).isTrue();
+            assertThat(evidence.summary()).contains("source", "sanitizer", "sink");
+        });
+        assertThat(report.reasons()).anyMatch(reason -> reason.contains("路径") && reason.contains("[C1]"));
+    }
+
+    @Test
+    void build_secondSourceAfterProtectionIsTreatedAsBypass() {
+        ExternalFinding tracedFinding = finding(List.of(
+                traceStep(10, "source", "request parameter"),
+                traceStep(45, "sanitizer", "allowlist validation"),
+                traceStep(48, "source", "message queue payload"),
+                traceStep(52, "sink", "Runtime.exec")));
+        ContextEvidence protectedLocation = new ContextEvidence(
+                "C1", "com.example.OrderService#run()", "METHOD", "java",
+                "src/main/java/com/example/OrderService.java", 40, 60,
+                "FINDING", "SEED", 1.0f,
+                "if (!command.matches(\"[a-z]+\")) { throw new IllegalArgumentException(); }\n"
+                        + "Runtime.getRuntime().exec(command);",
+                false, List.of("command_execution", "entry_point"));
+        FindingContext context = new FindingContext(
+                tracedFinding,
+                true,
+                protectedLocation.qualifiedName(),
+                pack(List.of(protectedLocation), List.of()));
+
+        TriageReport report = service.build(context);
+
+        assertThat(report.verdict()).isEqualTo(TriageVerdict.TRUE_RISK);
+        assertThat(report.decisionEvidence()).singleElement().satisfies(evidence -> {
+            assertThat(evidence.source()).isEqualTo("PATH_PROTECTION");
+            assertThat(evidence.applied()).isFalse();
+            assertThat(evidence.summary()).contains("not between every source and sink");
+        });
     }
 
     @Test
@@ -164,7 +337,8 @@ class TriageReportServiceTest {
 
         assertThat(json.fieldNames()).toIterable().containsExactlyInAnyOrder(
                 "finding", "located", "locatedQualifiedName", "verdict", "confidence",
-                "reasons", "missingInfo", "remediation", "developerSummary", "pack");
+                "reasons", "missingInfo", "remediation", "developerSummary", "pack",
+                "decisionEvidence");
         assertThat(json.get("verdict").asText()).isEqualTo("TRUE_RISK");
     }
 
@@ -191,10 +365,24 @@ class TriageReportServiceTest {
     }
 
     private static ExternalFinding finding() {
+        return finding(List.of());
+    }
+
+    private static ExternalFinding finding(List<ExternalFindingTraceStep> trace) {
         return new ExternalFinding("semgrep", "java.lang.security.audit.command-injection",
                 "CWE-78", ExternalFindingSeverity.HIGH,
                 "Detected command injection via Runtime.exec",
                 "src/main/java/com/example/OrderService.java", 42, 42,
-                "run", List.of(), "{}");
+                "run", trace, "{}");
+    }
+
+    private static ExternalFindingTraceStep traceStep(int line, String kind, String message) {
+        return new ExternalFindingTraceStep(
+                "src/main/java/com/example/OrderService.java",
+                line,
+                line,
+                kind,
+                "run",
+                message);
     }
 }

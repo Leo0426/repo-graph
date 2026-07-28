@@ -130,6 +130,20 @@ java -jar repograph-app.jar serve &
 curl -X POST "http://localhost:8080/api/v1/index/project?projectRoot=/path/to/your/project"
 ```
 
+也可以上传 ZIP/TAR.GZ 源码包。服务会在受控目录安全解压并异步索引：
+
+```bash
+curl -X POST "http://localhost:8080/api/v1/assets/import" \
+  -F "file=@my-project.zip" \
+  -F "lang=java"
+```
+
+轮询至 `READY` 后可生成资产画像和扫描器建议：
+
+```bash
+curl "http://localhost:8080/api/v1/assets/{assetId}/profile"
+```
+
 ### 3.4 开始搜索
 
 ```bash
@@ -186,7 +200,52 @@ open http://localhost:8080
 > 图存储已迁移到 Neo4j 5.x（外部服务）。重启 repograph serve 不会丢图，无需启动加载步骤。
 > 索引时数据直接写入 Neo4j；查询时通过 Cypher 实时遍历。
 
-### 4.5 服务器
+### 4.5 归档资产
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `repograph.assets.root-dir` | `~/.repograph/assets` | RepoGraph 托管源码根目录 |
+| `repograph.assets.max-upload-mb` | `200` | 最大归档上传大小，同时用于 multipart 限制 |
+| `repograph.assets.max-extracted-mb` | `1024` | 最大累计解压大小 |
+| `repograph.assets.max-entries` | `50000` | 最大归档条目数 |
+| `repograph.assets.max-single-file-mb` | `50` | 最大单文件解压大小 |
+| `repograph.assets.max-depth` | `32` | 最大归档目录深度 |
+
+仅支持按文件内容识别的 ZIP 和 TAR.GZ。包含路径穿越、绝对路径、重复目标、符号链接、硬链接或
+特殊文件的归档会被拒绝。
+
+### 4.6 外部扫描器
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `repograph.scanners.work-dir` | `~/.repograph/scans` | 受控数据库、日志和结果根目录 |
+| `repograph.scanners.default-timeout-seconds` | `900` | 单阶段扫描超时及客户端可请求的最大值 |
+| `repograph.scanners.max-output-mb` | `100` | 单个 JSON/SARIF 输出文件上限 |
+| `repograph.scanners.max-findings` | `5000` | 单次工具运行最多导入报警数 |
+| `repograph.scanners.semgrep-command` | `semgrep` | Semgrep 可执行文件或绝对路径 |
+| `repograph.scanners.semgrep-config` | `auto` | Semgrep `--config` 参数 |
+| `repograph.scanners.codeql-command` | `codeql` | CodeQL 可执行文件或绝对路径 |
+| `repograph.scanners.codeql-query-suite` | `security-extended` | CodeQL 查询套件名或完整查询标识 |
+
+工具命令必须是单个可执行文件，不支持 shell 片段。CodeQL 当前只自动执行支持
+`--build-mode=none` 的语言，不会调用项目构建脚本。
+
+### 4.7 LLM 辅助复核
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `repograph.advisory.enabled` | `false` | 是否允许调用已安装的模型适配器 |
+| `repograph.advisory.max-input-chars` | `12000` | 脱敏后最大输入字符数 |
+| `repograph.advisory.max-output-chars` | `4000` | 模型最大输出字符数 |
+| `repograph.advisory.max-estimated-cost-usd` | `0.05` | 单次调用最大预估美元成本 |
+| `repograph.advisory.timeout-millis` | `15000` | 单次尝试超时 |
+| `repograph.advisory.max-retries` | `1` | 可重试异常或超时的最大重试次数 |
+| `repograph.advisory.redact` | `true` | 是否脱敏常见密码、令牌和 API key |
+
+默认发行版只注册关闭模型，不会向外部服务发送源码。部署方必须先明确允许的模型提供方、数据出域和
+脱敏策略，再实现 `LlmAdvisoryModel` 适配器；仅将 `enabled` 改为 `true` 不会启用外部调用。
+
+### 4.8 服务器
 
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
@@ -450,6 +509,186 @@ POST /api/v1/index/file
   &projectRoot=/path/to/project
   &strategy=auto
 ```
+
+#### `POST /api/v1/assets/import` — 上传并索引源码归档
+
+请求为 `multipart/form-data`：
+
+```bash
+curl -X POST "http://localhost:8080/api/v1/assets/import" \
+  -F "file=@my-project.tar.gz" \
+  -F "lang=java,python" \
+  -F "strategy=auto"
+```
+
+成功返回 `202 Accepted`：
+
+```json
+{
+  "assetId": "622a7e55-271f-499d-b21f-f98d04fe9822",
+  "projectId": "a1b2c3d4e5f6",
+  "archiveType": "TAR_GZ",
+  "projectRoot": "/home/user/.repograph/assets/622a7e55-271f-499d-b21f-f98d04fe9822/source/project",
+  "status": "INDEXING",
+  "pollUrl": "/api/v1/assets/622a7e55-271f-499d-b21f-f98d04fe9822"
+}
+```
+
+#### `GET /api/v1/assets/{assetId}` — 查询归档资产状态
+
+`status` 取值为 `INDEXING / READY / FAILED`。`READY` 时返回 `indexResult`，`FAILED` 时返回
+错误摘要并保留源码供诊断。
+
+#### `GET /api/v1/assets/{assetId}/profile` — 生成资产画像
+
+仅对 `READY` 资产开放；`INDEXING` 或 `FAILED` 返回 `409 ASSET_NOT_READY`。画像包含逐文件分类及原因、
+语言分布、框架、构建系统、CycloneDX 依赖、风险信号和扫描器推荐。文件分类为：
+`BUSINESS / TEST / DOCUMENTATION / GENERATED / UNKNOWN`。
+
+```bash
+curl "http://localhost:8080/api/v1/assets/{assetId}/profile\
+?includeScanner=SLITHER&excludeScanner=SEMGREP"
+```
+
+`includeScanner` 和 `excludeScanner` 可重复传入；冲突时排除优先。支持的扫描器标识为
+`REPOGRAPH_CODE`、`REPOGRAPH_TAINT`、`REPOGRAPH_PRECISE_TAINT`、`SEMGREP`、`CODEQL`、
+`SLITHER`、`DEPENDENCY_CVE`。画像只生成执行建议，不会启动外部扫描器。
+
+风险信号可能包含公开 HTTP 入口、危险 Sink、敏感配置、依赖 CVE 和高变更热点。敏感配置证据仅返回
+文件路径，不返回密码、令牌等配置值。SBOM、图谱或 Git 信息不可用时，原因记录在 `omittedReasons`。
+
+#### `GET /api/v1/assets/{assetId}/authorization-evidence` — 查询路由鉴权证据
+
+仅对 `READY` 资产开放。当前支持 Java/Spring，从控制器和处理方法提取 HTTP 路径、方法及
+`@PreAuthorize`、`@PostAuthorize`、`@Secured`、`@RolesAllowed`、`@PermitAll`、`@DenyAll`
+约束候选，并沿调用图关联数据库、文件、网络和危险 Sink：
+
+```bash
+curl "http://localhost:8080/api/v1/assets/{assetId}/authorization-evidence?depth=6"
+```
+
+`depth` 默认为 6，服务端限制为 0–12。每条结果包含：
+
+- `route`：合并后的路径、HTTP 方法、处理器和源码 citation；
+- `constraints`：类级、方法级或配置级候选及 `effective` 标记；
+- `resourceAccesses`：目标类型、匹配 API、有序调用路径和逐跳 citation；
+- `missingInfo`：过滤器、网关、代理和动态策略等当前无法确认的信息。
+
+`status` 取值为 `LOCAL_CONSTRAINT_CANDIDATE / POLICY_CANDIDATE / NO_LOCAL_EVIDENCE`。
+这些状态只描述静态证据强度；`NO_LOCAL_EVIDENCE` 不表示已确认端点未鉴权，配置候选也不表示已确认
+覆盖当前路由。领域模型另保留 `CONFIRMED_UNAUTHENTICATED` 给运行时验证或人工证据，当前静态接口
+不会自动产生该状态。
+
+#### `DELETE /api/v1/assets/{assetId}` — 删除归档资产
+
+删除图、向量、增量缓存、漏洞记录、索引历史、外部扫描记录、受控扫描输出和受控源码。
+资产仍在索引时返回 `409 Conflict`；不存在时返回 `404 Not Found`。
+
+#### `GET /api/v1/scanners/capabilities` — 探测外部扫描器
+
+返回 Semgrep/CodeQL 支持语言、所需命令、输出格式、版本和当前可用性。命令未安装时
+`available=false` 并返回原因，不表示扫描成功或零报警。
+
+#### `POST /api/v1/assets/{assetId}/scans` — 执行外部扫描
+
+仅允许扫描 `READY` 的 RepoGraph 托管资产。请求为空时使用资产画像推荐的 Semgrep/CodeQL：
+
+```bash
+curl -X POST "http://localhost:8080/api/v1/assets/{assetId}/scans" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+也可显式选择工具和更短超时：
+
+```json
+{
+  "scanners": ["SEMGREP", "CODEQL"],
+  "timeoutSeconds": 300
+}
+```
+
+响应为同步批次结果，状态为 `SUCCEEDED / PARTIAL / FAILED`；每个运行独立返回
+`SUCCEEDED / PARTIAL / FAILED / TIMED_OUT / UNAVAILABLE`、工具版本、退出码、耗时、错误和报警。
+单个工具失败不会丢弃其他工具结果。
+
+当前 T3 不提供主动取消；异步队列、取消、并发配额和重试统一在 T10 实现。服务端仍会在超时后
+强制终止子进程。
+
+#### 外部扫描结果查询
+
+```text
+GET /api/v1/assets/{assetId}/scans
+GET /api/v1/scans/{scanId}
+GET /api/v1/assets/{assetId}/external-findings
+```
+
+最后一个接口返回按项目和指纹去重后的 `ExternalFinding`。重复扫描同一报警只更新时间和最近运行关联，
+不会重复创建报警。
+
+#### 版本化历史反馈与研判报告
+
+报告请求可提供当前代码和规则版本。只有同项目、同报警指纹且两个版本完全一致的历史反馈才会参与结论：
+
+```text
+POST /api/v1/triage/report
+  ?format=semgrep
+  &projectId=<projectId>
+  &codeVersion=<commit-sha>
+  &ruleVersion=<ruleset-version>
+```
+
+写入反馈时同时保存版本：
+
+```json
+{
+  "fingerprint": "a1b2c3d4e5f6a7b8",
+  "projectId": "project-1",
+  "status": "FALSE_POSITIVE",
+  "reviewer": "leo",
+  "reason": "参数来自固定枚举",
+  "codeVersion": "commit-a",
+  "ruleVersion": "semgrep-rules-2"
+}
+```
+
+版本不一致的反馈会以 `applied=false` 保留在 `decisionEvidence`，不会自动覆盖新一轮结果。
+防护代码同样只有在外部 trace 明确证明其位于所有 source 与 sink 之间时才会影响结论。
+
+#### 规则抑制策略
+
+```text
+POST /api/v1/triage/suppressions
+GET  /api/v1/triage/suppressions?projectId=<id>&ruleId=<rule>
+POST /api/v1/triage/suppressions/{id}/revoke
+GET  /api/v1/triage/suppressions/{id}/audit
+```
+
+创建请求必须提供 `PROJECT` 或 `FILE_GLOB` 作用域、理由、创建人和 ISO-8601 过期时间。策略过期、
+撤销或文件路径不匹配后不再参与研判；创建和撤销操作均保存审计事件。
+
+#### 漏洞变体候选
+
+```text
+GET /api/v1/triage/variants?projectId=<id>&limit=100
+```
+
+该接口从项目中状态为 `CONFIRMED` 的漏洞出发，按规则/CWE、危险 Sink、动态参数形态和源码 token
+相似度召回代码变体。结果包含相似依据和源码 citation，并按指纹去重；候选状态始终为 `SUSPECTED`
+或 `NEEDS_REVIEW`，不会因相似性自动确认漏洞。
+
+#### LLM 辅助复核
+
+```text
+POST /api/v1/triage/advisory
+Content-Type: application/json
+
+<已有 TriageReport JSON>
+```
+
+响应原样携带 `heuristicReport`，并固定返回 `advisoryOnly=true`。未安装或未启用模型时状态为
+`DISABLED`，`suggestedVerdict` 为空。模型可用时，服务只接受输入 Context Pack 中已有的 citation；
+非法引用会进入 `missingInfo`。该接口不写入漏洞状态，不能自动生成 `CONFIRMED` 记录。
 
 ---
 

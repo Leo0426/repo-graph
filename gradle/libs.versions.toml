@@ -13,6 +13,7 @@ spring-dep-mgmt   = "1.1.7"
 picocli           = "4.7.6"
 jackson           = "2.17.2"
 protobuf          = "3.24.0"
+commons-compress  = "1.28.0"
 
 [libraries]
 javaparser        = { module = "com.github.javaparser:javaparser-symbol-solver-core", version.ref = "javaparser" }
@@ -30,6 +31,7 @@ protobuf-java     = { module = "com.google.protobuf:protobuf-java",             
 sootup-core          = { module = "org.soot-oss:sootup.core",          version.ref = "sootup" }
 sootup-java-core     = { module = "org.soot-oss:sootup.java.core",     version.ref = "sootup" }
 sootup-java-bytecode = { module = "org.soot-oss:sootup.java.bytecode", version.ref = "sootup" }
+commons-compress     = { module = "org.apache.commons:commons-compress", version.ref = "commons-compress" }
 
 [plugins]
 spring-boot      = { id = "org.springframework.boot",          version.ref = "spring-boot" }

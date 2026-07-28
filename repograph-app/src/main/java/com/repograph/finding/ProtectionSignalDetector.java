@@ -1,6 +1,7 @@
 package com.repograph.finding;
 
 import com.repograph.core.finding.ExternalFinding;
+import com.repograph.core.finding.ExternalFindingTraceStep;
 import com.repograph.core.retrieval.ContextEvidence;
 
 import java.util.ArrayList;
@@ -44,7 +45,12 @@ final class ProtectionSignalDetector {
             String excerpt = item.excerpt().toLowerCase(Locale.ROOT);
             for (ProtectionPattern pattern : patterns) {
                 if (pattern.markers().stream().anyMatch(excerpt::contains)) {
-                    detected.add(new ProtectionSignal(item.citationId(), pattern.description()));
+                    PathAlignment alignment = pathAlignment(finding.trace(), item);
+                    detected.add(new ProtectionSignal(
+                            item.citationId(),
+                            pattern.description(),
+                            alignment.aligned(),
+                            alignment.summary()));
                 }
             }
         }
@@ -55,9 +61,79 @@ final class ProtectionSignalDetector {
         return "FINDING".equals(evidence.source()) || "CALLEE".equals(evidence.relation());
     }
 
-    record ProtectionSignal(String citationId, String description) {
+    private static PathAlignment pathAlignment(
+            List<ExternalFindingTraceStep> trace,
+            ContextEvidence evidence) {
+        if (trace.isEmpty()) {
+            return new PathAlignment(false, "external finding has no source/sink trace");
+        }
+        List<Integer> sourceIndexes = indexesOf(trace, "source");
+        List<Integer> sinkIndexes = indexesOf(trace, "sink");
+        if (sourceIndexes.isEmpty() || sinkIndexes.isEmpty()) {
+            return new PathAlignment(false, "trace does not identify both source and sink");
+        }
+        for (int index = 0; index < trace.size(); index++) {
+            ExternalFindingTraceStep step = trace.get(index);
+            if (!isProtectionStep(step) || !matchesEvidence(step, evidence)) {
+                continue;
+            }
+            int protectionIndex = index;
+            boolean afterAllSources = sourceIndexes.stream().allMatch(source -> source < protectionIndex);
+            boolean beforeAllSinks = sinkIndexes.stream().allMatch(sink -> protectionIndex < sink);
+            if (afterAllSources && beforeAllSinks) {
+                return new PathAlignment(
+                        true,
+                        "trace source" + sourceIndexes + " -> sanitizer[" + protectionIndex
+                                + "] -> sink" + sinkIndexes);
+            }
+        }
+        return new PathAlignment(false, "protection candidate is not between every source and sink");
+    }
+
+    private static List<Integer> indexesOf(List<ExternalFindingTraceStep> trace, String kind) {
+        List<Integer> result = new ArrayList<>();
+        for (int index = 0; index < trace.size(); index++) {
+            if (kind.equalsIgnoreCase(trace.get(index).kind())) {
+                result.add(index);
+            }
+        }
+        return result;
+    }
+
+    private static boolean isProtectionStep(ExternalFindingTraceStep step) {
+        String kind = step.kind().toLowerCase(Locale.ROOT);
+        return kind.equals("sanitizer")
+                || kind.equals("validation")
+                || kind.equals("guard")
+                || kind.equals("barrier");
+    }
+
+    private static boolean matchesEvidence(
+            ExternalFindingTraceStep step,
+            ContextEvidence evidence) {
+        if (!step.filePath().equals(evidence.filePath())) {
+            return false;
+        }
+        if (step.startLine() > 0
+                && step.startLine() >= evidence.startLine()
+                && step.startLine() <= evidence.endLine()) {
+            return true;
+        }
+        return !step.symbol().isBlank()
+                && evidence.qualifiedName().toLowerCase(Locale.ROOT)
+                .contains(step.symbol().toLowerCase(Locale.ROOT));
+    }
+
+    record ProtectionSignal(
+            String citationId,
+            String description,
+            boolean pathAligned,
+            String pathSummary) {
     }
 
     private record ProtectionPattern(String description, List<String> markers) {
+    }
+
+    private record PathAlignment(boolean aligned, String summary) {
     }
 }

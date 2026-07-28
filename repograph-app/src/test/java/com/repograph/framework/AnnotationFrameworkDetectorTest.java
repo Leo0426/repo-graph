@@ -11,7 +11,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * AnnotationFrameworkDetector 单元测试，验证 Spring 和 JAX-RS 框架注解识别。
+ * AnnotationFrameworkDetector 单元测试，验证 Spring、MyBatis 和 JAX-RS 框架注解识别。
  *
  * @author leolu
  * @since 0.1.0
@@ -78,6 +78,12 @@ class AnnotationFrameworkDetectorTest {
         assertThat(detector.detect(unit)).containsEntry("framework", "spring");
     }
 
+    @Test
+    void detect_mapper_returnsMybatis() {
+        CodeUnit unit = unitWithAnnotations(List.of("@Mapper"));
+        assertThat(detector.detect(unit)).containsEntry("framework", "mybatis");
+    }
+
     // ── JAX-RS detection ──────────────────────────────────────────────────────
 
     @Test
@@ -125,6 +131,12 @@ class AnnotationFrameworkDetectorTest {
     @Test
     void detect_putMapping_returnsSpring() {
         assertThat(detector.detect(unitWithAnnotations(List.of("@PutMapping"))))
+                .containsEntry("framework", "spring");
+    }
+
+    @Test
+    void detect_patchMapping_returnsSpring() {
+        assertThat(detector.detect(unitWithAnnotations(List.of("@PatchMapping"))))
                 .containsEntry("framework", "spring");
     }
 

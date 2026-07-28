@@ -581,6 +581,37 @@ class JavaCodeParserTest {
     }
 
     @Test
+    void parse_springAuthorizationAnnotationsAndPatchRoute_preserveEvidence() throws Exception {
+        String source = """
+                package com.example;
+
+                import org.springframework.security.access.prepost.PreAuthorize;
+                import org.springframework.web.bind.annotation.PatchMapping;
+                import org.springframework.web.bind.annotation.RequestMapping;
+
+                @RequestMapping("/api/users")
+                @PreAuthorize("hasRole('ADMIN')")
+                public class UserController {
+                    @PatchMapping("/{id}")
+                    @PreAuthorize("#id == authentication.name")
+                    public String update(String id) { return id; }
+                }
+                """;
+        Path file = writeSource("UserController.java", source);
+        ParseResult result = parser.parse(file, ParseOptions.defaults());
+
+        CodeUnit controller = findUnit(result.units(), CodeUnitKind.CLASS);
+        CodeUnit method = findUnitBySimpleName(result.units(), "update");
+
+        assertNotNull(controller);
+        assertNotNull(method);
+        assertEquals("hasRole('ADMIN')", controller.metadata().get("ann_PreAuthorize"));
+        assertEquals("#id == authentication.name", method.metadata().get("ann_PreAuthorize"));
+        assertEquals("/{id}", method.metadata().get("ann_PatchMapping"));
+        assertEquals("true", method.metadata().get("is_entry_point"));
+    }
+
+    @Test
     void parse_staticImport_resolvesCall() throws Exception {
         String source = """
                 package com.example;

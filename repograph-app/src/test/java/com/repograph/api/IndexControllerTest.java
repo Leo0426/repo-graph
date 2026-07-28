@@ -6,6 +6,9 @@ import com.repograph.core.pipeline.IndexProgressEvent;
 import com.repograph.core.pipeline.IndexResult;
 import com.repograph.core.pipeline.IndexStore;
 import com.repograph.vuln.VulnStore;
+import com.repograph.core.asset.AssetImportService;
+import com.repograph.core.asset.AssetBusyException;
+import com.repograph.core.finding.TriageDataCleanup;
 import java.util.concurrent.CountDownLatch;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,6 +24,8 @@ import java.util.Optional;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -51,6 +56,12 @@ class IndexControllerTest {
 
     @MockBean
     VulnStore vulnStore;
+
+    @MockBean
+    AssetImportService assetImportService;
+
+    @MockBean
+    TriageDataCleanup triageDataCleanup;
 
     private static IndexResult sampleResult(int files, int units) {
         return new IndexResult(files, files, 0, 0, units, 0, 100L, List.of());
@@ -153,5 +164,19 @@ class IndexControllerTest {
                 .andExpect(jsonPath("$.projectId").value("abc123def456"));
 
         verify(indexStore).removeProject("abc123def456");
+        verify(assetImportService).validateProjectDeletion("abc123def456");
+        verify(assetImportService).cleanupManagedProject("abc123def456");
+    }
+
+    @Test
+    void deleteProject_rejectsRunningManagedAssetBeforeDeletingIndexes() throws Exception {
+        doThrow(new AssetBusyException("still indexing"))
+                .when(assetImportService).validateProjectDeletion("abc123def456");
+
+        mvc.perform(delete("/api/v1/index/project").param("projectId", "abc123def456"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ASSET_BUSY"));
+
+        verifyNoInteractions(indexStore);
     }
 }

@@ -2,7 +2,12 @@ package com.repograph.finding;
 
 import com.repograph.core.finding.ExternalFinding;
 import com.repograph.core.finding.FindingContext;
+import com.repograph.core.finding.RuleSuppression;
+import com.repograph.core.finding.TriageDecisionEvidence;
+import com.repograph.core.finding.TriageFeedback;
+import com.repograph.core.finding.TriageFeedbackStatus;
 import com.repograph.core.finding.TriageReport;
+import com.repograph.core.finding.TriageReviewContext;
 import com.repograph.core.finding.TriageVerdict;
 import com.repograph.core.retrieval.ContextEvidence;
 import com.repograph.core.retrieval.ContextPack;
@@ -42,10 +47,22 @@ public class TriageReportService {
      * @return 研判报告
      */
     public TriageReport build(FindingContext context) {
+        return build(context, TriageReviewContext.empty());
+    }
+
+    /**
+     * 基于报警上下文及带版本的历史决策输入生成研判报告。
+     *
+     * @param context       报警研判上下文
+     * @param reviewContext 当前代码/规则版本和历史反馈
+     * @return 研判报告
+     */
+    public TriageReport build(FindingContext context, TriageReviewContext reviewContext) {
         ExternalFinding finding = context.finding();
         ContextPack pack = context.pack();
         List<String> reasons = new ArrayList<>();
         List<String> missing = new ArrayList<>();
+        List<TriageDecisionEvidence> decisionEvidence = new ArrayList<>();
 
         ContextEvidence location = pack.evidence().stream()
                 .filter(e -> "FINDING".equals(e.source()))
@@ -59,6 +76,9 @@ public class TriageReportService {
         boolean isEntryPoint = signals.contains("entry_point");
         boolean reachable = callers > 0 || isEntryPoint;
         List<ProtectionSignal> protections = ProtectionSignalDetector.detect(finding, pack.evidence());
+        List<ProtectionSignal> pathProtections = protections.stream()
+                .filter(ProtectionSignal::pathAligned)
+                .toList();
 
         TriageVerdict verdict;
         float confidence;
@@ -74,20 +94,38 @@ public class TriageReportService {
             String reachabilityReason = callers > 0
                     ? "发现 " + callers + " 个调用方，报警代码在调用图中可达"
                     : "定位单元本身是框架识别的入口点（entry_point），视为可从外部请求直接触达";
-            if (!signals.isEmpty() && reachable && !protections.isEmpty()) {
+            if (!signals.isEmpty() && reachable && !pathProtections.isEmpty()) {
                 verdict = TriageVerdict.NEEDS_REVIEW;
-                confidence = 0.65f;
+                confidence = 0.75f;
                 reasons.add("定位单元存在安全信号: " + String.join(", ", signals));
                 reasons.add(reachabilityReason);
-                protections.forEach(protection -> reasons.add("[" + protection.citationId() + "] 发现候选防护: "
-                        + protection.description() + "；需确认其是否覆盖报警数据流"));
-                missing.add("已发现防护代码，但尚未验证该防护是否支配 sink "
-                        + "且覆盖所有输入路径");
+                pathProtections.forEach(protection -> {
+                    reasons.add("[" + protection.citationId() + "] 路径内防护候选: "
+                            + protection.description() + "；" + protection.pathSummary());
+                    decisionEvidence.add(new TriageDecisionEvidence(
+                            "PATH_PROTECTION",
+                            protection.citationId(),
+                            protection.pathSummary(),
+                            true));
+                });
+                missing.add("外部 trace 支持路径一致性，但仍需确认运行时防护语义和条件分支");
             } else if (!signals.isEmpty() && reachable) {
                 verdict = TriageVerdict.TRUE_RISK;
                 confidence = Math.min(0.9f, 0.5f + 0.1f * signals.size() + 0.05f * callers);
                 reasons.add("定位单元存在安全信号: " + String.join(", ", signals));
                 reasons.add(reachabilityReason);
+                protections.forEach(protection -> {
+                    reasons.add("[" + protection.citationId() + "] 发现防护代码候选，但未证明覆盖 "
+                            + "source → sink 路径");
+                    decisionEvidence.add(new TriageDecisionEvidence(
+                            "PATH_PROTECTION",
+                            protection.citationId(),
+                            protection.pathSummary(),
+                            false));
+                });
+                if (!protections.isEmpty()) {
+                    missing.add("防护候选不在外部 trace 的所有 source 与 sink 之间，本次未降低风险结论");
+                }
             } else if (signals.isEmpty() && !reachable) {
                 verdict = TriageVerdict.LIKELY_FALSE_POSITIVE;
                 confidence = 0.6f;
@@ -114,11 +152,97 @@ public class TriageReportService {
         String remediation = CWE_REMEDIATIONS.getOrDefault(finding.cwe(),
                 "参照规则 " + finding.ruleId() + " 的官方说明，结合证据链中定位代码修复；"
                         + "无法立即修复时优先补充输入校验并收敛调用入口。");
-        String developerSummary = buildDeveloperSummary(finding, verdict, location, callers, !protections.isEmpty());
+        RuleSuppression suppression = reviewContext == null ? null : reviewContext.activeSuppression();
+        boolean suppressionApplied = matchesFinding(suppression, finding, reviewContext);
+        if (suppressionApplied) {
+            String summary = "scope=" + suppression.scope()
+                    + (suppression.scopeValue().isBlank() ? "" : ":" + suppression.scopeValue())
+                    + ", reason=" + suppression.reason()
+                    + ", createdBy=" + suppression.createdBy()
+                    + ", expiresAt=" + suppression.expiresAt();
+            verdict = TriageVerdict.LIKELY_FALSE_POSITIVE;
+            confidence = Math.max(confidence, 0.9f);
+            reasons.add("活动规则抑制策略与当前报警匹配（" + summary + "）");
+            decisionEvidence.add(new TriageDecisionEvidence(
+                    "RULE_SUPPRESSION",
+                    suppression.id(),
+                    summary,
+                    true));
+        }
+
+        TriageFeedback feedback = reviewContext == null ? null : reviewContext.historicalFeedback();
+        boolean feedbackApplied = matchesCurrentVersion(finding, feedback, reviewContext);
+        if (feedbackApplied) {
+            String summary = "reviewer=" + feedback.reviewer()
+                    + ", reason=" + feedback.reason()
+                    + ", codeVersion=" + feedback.codeVersion()
+                    + ", ruleVersion=" + feedback.ruleVersion();
+            decisionEvidence.add(new TriageDecisionEvidence(
+                    "HISTORICAL_FEEDBACK",
+                    feedback.fingerprint(),
+                    summary,
+                    true));
+            reasons.add("历史人工反馈（" + summary + "）与当前代码和规则版本一致");
+            switch (feedback.status()) {
+                case FALSE_POSITIVE -> {
+                    verdict = TriageVerdict.LIKELY_FALSE_POSITIVE;
+                    confidence = Math.max(confidence, 0.9f);
+                }
+                case TRUE_POSITIVE -> {
+                    verdict = TriageVerdict.TRUE_RISK;
+                    confidence = Math.max(confidence, 0.95f);
+                }
+                case NEEDS_REVIEW, FIXED -> {
+                    verdict = TriageVerdict.NEEDS_REVIEW;
+                    confidence = Math.max(confidence, 0.9f);
+                }
+            }
+        } else if (feedback != null) {
+            decisionEvidence.add(new TriageDecisionEvidence(
+                    "HISTORICAL_FEEDBACK",
+                    feedback.fingerprint(),
+                    "version mismatch: feedback code/rule="
+                            + feedback.codeVersion() + "/" + feedback.ruleVersion()
+                            + ", current=" + reviewContext.codeVersion() + "/" + reviewContext.ruleVersion(),
+                    false));
+            missing.add("存在同指纹历史反馈，但项目、代码版本或规则版本不一致，本次未自动复用");
+        }
+
+        String developerSummary = feedbackApplied
+                ? "本次结论采用了同项目、同指纹且代码/规则版本一致的历史人工反馈；"
+                        + "外部工具报警事实保持不变，审核人仍可提交新反馈改写结论。"
+                : suppressionApplied
+                        ? "本次结论采用了当前有效且作用域匹配的规则抑制策略；"
+                                + "外部工具报警事实保持不变，策略撤销或过期后将恢复自动研判。"
+                        : buildDeveloperSummary(
+                                finding, verdict, location, callers, !pathProtections.isEmpty());
 
         return new TriageReport(finding, context.located(), context.locatedQualifiedName(),
                 verdict, confidence, List.copyOf(reasons), List.copyOf(missing),
-                remediation, developerSummary, pack);
+                remediation, developerSummary, pack, decisionEvidence);
+    }
+
+    private static boolean matchesCurrentVersion(
+            ExternalFinding finding,
+            TriageFeedback feedback,
+            TriageReviewContext reviewContext) {
+        return feedback != null
+                && feedback.fingerprint().equals(finding.fingerprint())
+                && feedback.projectId().equals(reviewContext.projectId())
+                && !reviewContext.codeVersion().isBlank()
+                && !reviewContext.ruleVersion().isBlank()
+                && feedback.codeVersion().equals(reviewContext.codeVersion())
+                && feedback.ruleVersion().equals(reviewContext.ruleVersion());
+    }
+
+    private static boolean matchesFinding(
+            RuleSuppression suppression,
+            ExternalFinding finding,
+            TriageReviewContext reviewContext) {
+        return suppression != null
+                && suppression.active()
+                && suppression.projectId().equals(reviewContext.projectId())
+                && suppression.ruleId().equals(finding.ruleId());
     }
 
     /**
@@ -197,6 +321,17 @@ public class TriageReportService {
                     .append('/').append(e.relation()).append("）\n");
         }
         md.append('\n');
+
+        if (!report.decisionEvidence().isEmpty()) {
+            md.append("### 决策证据\n\n");
+            for (TriageDecisionEvidence evidence : report.decisionEvidence()) {
+                md.append("- **").append(evidence.source()).append("** `")
+                        .append(evidence.reference()).append("`（applied=")
+                        .append(evidence.applied()).append("）：")
+                        .append(evidence.summary()).append('\n');
+            }
+            md.append('\n');
+        }
 
         if (!report.missingInfo().isEmpty()) {
             md.append("### 缺失信息\n\n");

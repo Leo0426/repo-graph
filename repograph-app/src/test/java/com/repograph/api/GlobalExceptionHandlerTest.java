@@ -1,6 +1,8 @@
 package com.repograph.api;
 
 import com.repograph.app.pipeline.IndexHistoryStore;
+import com.repograph.core.asset.AssetImportService;
+import com.repograph.core.finding.TriageDataCleanup;
 import com.repograph.core.pipeline.IndexPipeline;
 import com.repograph.core.pipeline.IndexStore;
 import com.repograph.core.vector.VectorStore;
@@ -46,6 +48,12 @@ class GlobalExceptionHandlerTest {
 
     @MockBean
     VectorStore vectorStore;
+
+    @MockBean
+    AssetImportService assetImportService;
+
+    @MockBean
+    TriageDataCleanup triageDataCleanup;
 
     @Test
     void invalidStrategy_returns400() throws Exception {

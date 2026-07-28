@@ -6,6 +6,8 @@ import com.repograph.core.pipeline.IndexPipeline;
 import com.repograph.core.pipeline.IndexProgressEvent;
 import com.repograph.core.pipeline.IndexResult;
 import com.repograph.core.pipeline.IndexStore;
+import com.repograph.core.finding.TriageDataCleanup;
+import com.repograph.core.asset.AssetImportService;
 import com.repograph.core.parser.ParseStrategy;
 import com.repograph.vuln.VulnStore;
 import org.slf4j.Logger;
@@ -67,6 +69,8 @@ public class IndexController {
     private final IndexStore indexStore;
     private final IndexHistoryStore indexHistoryStore;
     private final VulnStore vulnStore;
+    private final AssetImportService assetImportService;
+    private final TriageDataCleanup triageDataCleanup;
 
     /**
      * 通过构造器注入索引管道、存储协调器和历史持久化服务。
@@ -75,13 +79,19 @@ public class IndexController {
      * @param indexStore        存储协调器（用于 DELETE 端点），不为 {@code null}
      * @param indexHistoryStore 索引历史持久化，不为 {@code null}
      * @param vulnStore         漏洞发现持久化（项目删除时一并清理），不为 {@code null}
+     * @param assetImportService 托管归档资产清理边界
+     * @param triageDataCleanup 研判反馈和规则策略清理边界
      */
     public IndexController(IndexPipeline indexPipeline, IndexStore indexStore,
-                           IndexHistoryStore indexHistoryStore, VulnStore vulnStore) {
+                           IndexHistoryStore indexHistoryStore, VulnStore vulnStore,
+                           AssetImportService assetImportService,
+                           TriageDataCleanup triageDataCleanup) {
         this.indexPipeline = indexPipeline;
         this.indexStore = indexStore;
         this.indexHistoryStore = indexHistoryStore;
         this.vulnStore = vulnStore;
+        this.assetImportService = assetImportService;
+        this.triageDataCleanup = triageDataCleanup;
     }
 
     /**
@@ -225,8 +235,11 @@ public class IndexController {
             @RequestParam String projectId,
             @RequestParam(required = false) String projectRoot) {
         log.info("DELETE project '{}'", projectId);
+        assetImportService.validateProjectDeletion(projectId);
         indexStore.removeProject(projectId);
         vulnStore.removeProject(projectId);
+        triageDataCleanup.removeProject(projectId);
+        assetImportService.cleanupManagedProject(projectId);
         if (projectRoot != null) {
             indexHistoryStore.remove(projectRoot);
             statusMap.remove(projectRoot);

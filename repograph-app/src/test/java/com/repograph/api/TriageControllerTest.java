@@ -6,11 +6,13 @@ import com.repograph.core.finding.FindingContext;
 import com.repograph.core.finding.TriageFeedback;
 import com.repograph.core.finding.TriageFeedbackStatus;
 import com.repograph.core.finding.TriageReport;
+import com.repograph.core.finding.TriageReviewContext;
 import com.repograph.core.finding.TriageVerdict;
 import com.repograph.core.retrieval.ContextPack;
 import com.repograph.finding.ExternalFindingImportException;
 import com.repograph.finding.ExternalFindingImporter;
 import com.repograph.finding.FindingContextService;
+import com.repograph.finding.RuleSuppressionStore;
 import com.repograph.finding.TriageFeedbackStore;
 import com.repograph.finding.TriageReportService;
 import com.repograph.finding.github.GitHubCommentException;
@@ -58,6 +60,9 @@ class TriageControllerTest {
     TriageFeedbackStore feedbackStore;
 
     @MockitoBean
+    RuleSuppressionStore ruleSuppressionStore;
+
+    @MockitoBean
     GitHubPrCommentClient gitHubPrCommentClient;
 
     @Test
@@ -84,6 +89,42 @@ class TriageControllerTest {
                 .andExpect(jsonPath("$[0].fingerprint").value(finding.fingerprint()))
                 .andExpect(jsonPath("$[0].report.verdict").value("TRUE_RISK"))
                 .andExpect(jsonPath("$[0].markdown").value("## report"));
+    }
+
+    @Test
+    void report_loadsProjectScopedFeedbackWhenVersionsAreProvided() throws Exception {
+        ExternalFinding finding = finding();
+        FindingContext context = new FindingContext(finding, true,
+                "com.example.OrderService#run()", emptyPack());
+        TriageFeedback feedback = new TriageFeedback(
+                finding.fingerprint(), "p1", TriageFeedbackStatus.FALSE_POSITIVE,
+                "leo", "fixed enum", "commit-a", "rules-2", "2026-07-26T12:00:00Z");
+        TriageReviewContext reviewContext = new TriageReviewContext(
+                "p1", "commit-a", "rules-2", feedback);
+        TriageReport report = new TriageReport(finding, true,
+                "com.example.OrderService#run()", TriageVerdict.LIKELY_FALSE_POSITIVE, 0.9f,
+                List.of("历史反馈"), List.of(), "review", "history", emptyPack());
+
+        when(importer.supports("semgrep")).thenReturn(true);
+        when(importer.importJson(any(java.io.InputStream.class), eq(10))).thenReturn(List.of(finding));
+        when(findingContextService.build(eq(finding), any())).thenReturn(context);
+        when(feedbackStore.findByFingerprint("p1", finding.fingerprint()))
+                .thenReturn(java.util.Optional.of(feedback));
+        when(triageReportService.build(context, reviewContext)).thenReturn(report);
+        when(triageReportService.toMarkdown(report)).thenReturn("## history");
+
+        mvc.perform(post("/api/v1/triage/report")
+                        .param("format", "semgrep")
+                        .param("projectId", "p1")
+                        .param("codeVersion", "commit-a")
+                        .param("ruleVersion", "rules-2")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"results\":[]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].report.verdict").value("LIKELY_FALSE_POSITIVE"));
+
+        verify(feedbackStore).findByFingerprint("p1", finding.fingerprint());
+        verify(triageReportService).build(context, reviewContext);
     }
 
     @Test
@@ -213,6 +254,53 @@ class TriageControllerTest {
                         .param("status", "TRUE_POSITIVE"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].fingerprint").value("fp-1"));
+    }
+
+    @Test
+    void suppressionApiRequiresScopeReasonCreatorAndExpiry() throws Exception {
+        mvc.perform(post("/api/v1/triage/suppressions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "projectId":"p1",
+                                  "ruleId":"java.command-injection",
+                                  "scope":"FILE_GLOB",
+                                  "scopeValue":"src/test/**",
+                                  "reason":"training fixtures",
+                                  "createdBy":"leo",
+                                  "expiresAt":"2027-01-01T00:00:00Z"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.projectId").value("p1"))
+                .andExpect(jsonPath("$.scope").value("FILE_GLOB"))
+                .andExpect(jsonPath("$.reason").value("training fixtures"))
+                .andExpect(jsonPath("$.createdBy").value("leo"))
+                .andExpect(jsonPath("$.expiresAt").value("2027-01-01T00:00:00Z"))
+                .andExpect(jsonPath("$.active").value(true));
+
+        verify(ruleSuppressionStore).create(any());
+    }
+
+    @Test
+    void suppressionRevokeReturnsNotFoundOrRevoked() throws Exception {
+        when(ruleSuppressionStore.revoke(eq("suppression-1"), eq("leo"), eq("obsolete"), any()))
+                .thenReturn(true);
+
+        mvc.perform(post("/api/v1/triage/suppressions/suppression-1/revoke")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"actor":"leo","reason":"obsolete"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REVOKED"));
+
+        mvc.perform(post("/api/v1/triage/suppressions/missing/revoke")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"actor":"leo","reason":"obsolete"}
+                                """))
+                .andExpect(status().isNotFound());
     }
 
     private static ContextPack emptyPack() {

@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.sql.DriverManager;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -64,6 +65,62 @@ class TriageFeedbackStoreTest {
             assertThat(f.reviewer()).isEqualTo("leo");
         });
         assertThat(store.findByFingerprint("missing")).isEmpty();
+    }
+
+    @Test
+    void sameFingerprintIsProjectScopedAndVersionsArePersisted() {
+        store.upsert(new TriageFeedback(
+                "fp-shared", "p1", TriageFeedbackStatus.FALSE_POSITIVE,
+                "leo", "p1 feedback", "commit-1", "rules-1", "2026-07-10T12:00:00Z"));
+        store.upsert(new TriageFeedback(
+                "fp-shared", "p2", TriageFeedbackStatus.TRUE_POSITIVE,
+                "alice", "p2 feedback", "commit-2", "rules-2", "2026-07-10T13:00:00Z"));
+
+        assertThat(store.findByFingerprint("p1", "fp-shared")).hasValueSatisfying(feedback -> {
+            assertThat(feedback.status()).isEqualTo(TriageFeedbackStatus.FALSE_POSITIVE);
+            assertThat(feedback.codeVersion()).isEqualTo("commit-1");
+            assertThat(feedback.ruleVersion()).isEqualTo("rules-1");
+        });
+        assertThat(store.findByFingerprint("p2", "fp-shared")).hasValueSatisfying(feedback -> {
+            assertThat(feedback.status()).isEqualTo(TriageFeedbackStatus.TRUE_POSITIVE);
+            assertThat(feedback.codeVersion()).isEqualTo("commit-2");
+            assertThat(feedback.ruleVersion()).isEqualTo("rules-2");
+        });
+    }
+
+    @Test
+    void legacyFingerprintPrimaryKeyIsMigratedWithoutLosingFeedback() throws Exception {
+        Path legacyDb = tempDir.resolve("legacy.db");
+        try (var connection = DriverManager.getConnection("jdbc:sqlite:" + legacyDb);
+             var statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE triage_feedback (
+                        fingerprint TEXT PRIMARY KEY,
+                        project_id TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        reviewer TEXT NOT NULL,
+                        reason TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    )
+                    """);
+            statement.execute("""
+                    INSERT INTO triage_feedback
+                    VALUES ('legacy-fp', 'p1', 'FALSE_POSITIVE', 'leo', 'legacy', '2026-07-01T00:00:00Z')
+                    """);
+        }
+
+        TriageFeedbackStore migrated = new TriageFeedbackStore(legacyDb.toString());
+
+        assertThat(migrated.findByFingerprint("p1", "legacy-fp")).hasValueSatisfying(feedback -> {
+            assertThat(feedback.reason()).isEqualTo("legacy");
+            assertThat(feedback.codeVersion()).isEmpty();
+            assertThat(feedback.ruleVersion()).isEmpty();
+        });
+        migrated.upsert(new TriageFeedback(
+                "legacy-fp", "p2", TriageFeedbackStatus.TRUE_POSITIVE,
+                "alice", "other project", "commit-2", "rules-2", "2026-07-02T00:00:00Z"));
+        assertThat(migrated.list("p1", null)).hasSize(1);
+        assertThat(migrated.list("p2", null)).hasSize(1);
     }
 
     @Test

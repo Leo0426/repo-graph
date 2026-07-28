@@ -16,6 +16,7 @@ dependencies {
     implementation(libs.sqlite.jdbc)
     implementation(libs.neo4j.driver)
     implementation(libs.jackson.databind)
+    implementation(libs.commons.compress)
 
     // Parser — AST (JavaParser) + bytecode (SootUp) + tree-sitter
     implementation(libs.javaparser)
