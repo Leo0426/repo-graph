@@ -3,6 +3,10 @@ plugins {
     id("io.spring.dependency-management")
 }
 
+springBoot {
+    buildInfo()
+}
+
 dependencies {
     // Spring Boot
     implementation("org.springframework.boot:spring-boot-starter")

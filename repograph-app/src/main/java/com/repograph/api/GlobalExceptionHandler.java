@@ -6,6 +6,7 @@ import com.repograph.asset.UnsafeArchiveException;
 import com.repograph.asset.UnsupportedArchiveException;
 import com.repograph.core.asset.AssetBusyException;
 import com.repograph.core.asset.AssetNotReadyException;
+import com.repograph.core.finding.ReviewQueueEntryNotFoundException;
 import com.repograph.finding.ExternalFindingImportException;
 import com.repograph.finding.github.GitHubCommentException;
 import org.slf4j.Logger;
@@ -171,6 +172,20 @@ public class GlobalExceptionHandler {
         log.warn("GitHub PR comment failed: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                 .body(Map.of("error", ex.getMessage() != null ? ex.getMessage() : "GitHub comment failed"));
+    }
+
+    /**
+     * 处理审核队列条目或报告快照不存在，返回 404 Not Found。
+     *
+     * @param ex 捕获到的 {@link ReviewQueueEntryNotFoundException}
+     * @return 含 {@code error} 字段的 404 响应体
+     */
+    @ExceptionHandler(ReviewQueueEntryNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleReviewQueueEntryNotFound(
+            ReviewQueueEntryNotFoundException ex) {
+        log.debug("Review queue entry not found: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(Map.of("error", messageOr(ex, "Review queue entry not found")));
     }
 
     /**

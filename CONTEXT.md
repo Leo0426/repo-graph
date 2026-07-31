@@ -181,6 +181,22 @@ repograph-taint-engine/   WALA-based IFDS 精确污点引擎
 - `LlmAdvisoryEvaluator` 在人工标注固定样本上分别计算启发式与模型建议准确率，以及平均延迟和总成本。
 - REST：`POST /api/v1/triage/advisory` 接收已有 `TriageReport`，返回独立辅助意见。
 
+**审核队列与报告快照**（P1 T9 第一片，`com.repograph.finding`）：
+- `ReportSnapshot`：生成后即冻结的批量研判结果，携带 `schemaVersion/toolVersion/codeVersion/
+  ruleVersion/generatedAt`，Markdown 和 JSON 导出均由同一份快照派生，天然保证报警数、结论和
+  citation 一致；`toolVersion` 取自 Spring Boot `BuildProperties`（`build.gradle.kts` 的
+  `springBoot { buildInfo() }`）。
+- `ReviewQueueStore`：每条快照内的 `TriageReport` 对应一条 `ReviewQueueEntry`，状态机
+  `PENDING -> IN_REVIEW ->（CONFIRMED / REJECTED）`，`IN_REVIEW` 也可 `return` 退回
+  `PENDING`；认领仅允许从 `PENDING` 发起（避免静默改派他人正在复核的条目），所有迁移在
+  SQLite 事务内做条件 `UPDATE`，仅当真正发生迁移才追加 `ReviewQueueAuditEvent`（认领/
+  退回/确认/驳回均记录操作者、时间、理由）。
+- 边界：只做静态状态机记录和导出，不做通知、权限体系或认领超时自动释放；PDF 导出、分页
+  和批量导出多个快照留给下一片（见 `docs/user-manual.md` "已知局限"）。
+- REST：`POST /api/v1/review-queue/snapshots`、`GET /api/v1/review-queue`（按项目/严重程度/
+  结论/状态/规则/更新时间筛选）、`POST /{entryId}/claim|return|confirm|reject`、
+  `GET /{entryId}/audit`、`GET /snapshots/{snapshotId}/export?format=markdown|json`。
+
 ## 外部扫描器编排
 
 - **领域边界**：`ScannerAdapter` 声明语言、命令、输出格式和前置条件；`ExternalScanService` 负责按工具

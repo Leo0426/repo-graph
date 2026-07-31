@@ -201,15 +201,22 @@ RepoGraph 已经具备“多语言源码索引 → 外部 SAST 报警导入 → 
 - **优先级**：P1
 - **类型**：AFK
 - **被阻塞于**：T5
+- **状态**：第一片（审核队列 + Markdown/JSON）已完成（2026-07-28）；PDF 导出留待下一片
+  （需先确定 openhtmltopdf/PDFBox 等渲染方案和 CJK 字体来源）。
 - **要构建什么**：将报警、证据、研判、动态验证（若有）和人工决策固化为版本化报告快照，
   提供审核队列及 Markdown、JSON、PDF 三种一致输出。
 - **验收标准**：
-  - [ ] 审核队列支持按项目、严重程度、结论、状态、规则和更新时间筛选。
-  - [ ] 认领、复核、退回、确认、驳回均记录操作者、时间和理由。
-  - [ ] 三种格式来自同一报告模型，finding 数、严重程度、结论和 citation 一致。
-  - [ ] PDF 支持中文字体、分页、代码换行和长路径，不丢失证据编号。
-  - [ ] 导出包含 Schema/报告版本、工具版本、项目版本和生成时间。
-- **验证方式**：状态流转集成测试、JSON Schema 校验、Markdown 快照和 PDF 文本/视觉回归。
+  - [x] 审核队列支持按项目、严重程度、结论、状态、规则和更新时间筛选。
+  - [x] 认领、退回、确认、驳回均记录操作者、时间和理由（`ReviewQueueStore`，
+    参照 `RuleSuppressionStore` 的状态表 + 追加审计表模式）。
+  - [x] Markdown 和 JSON 两种格式来自同一 `ReportSnapshot`，finding 数、结论和 citation 一致。
+  - [ ] PDF 支持中文字体、分页、代码换行和长路径，不丢失证据编号——`export?format=pdf`
+    当前显式返回 400，不假装支持。
+  - [x] 导出包含 Schema/报告版本、工具版本、项目版本和生成时间。
+- **验证方式**：`ReviewQueueStoreTest`（真实 SQLite 临时文件，覆盖认领/退回/确认/驳回的
+  合法与非法状态迁移及审计事件）、`ReviewQueueControllerTest`（`@WebMvcTest` 契约测试）、
+  以及一次真实 curl 闭环验证（提交 → 筛选 → 非法迁移返回 404 → 认领 → 确认 → 审计 →
+  Markdown/JSON 导出一致 → PDF 返回 400）。
 
 ### T10 批量扫描任务编排和 Slither 接入
 

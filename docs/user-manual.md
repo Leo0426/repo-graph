@@ -690,6 +690,28 @@ Content-Type: application/json
 `DISABLED`，`suggestedVerdict` 为空。模型可用时，服务只接受输入 Context Pack 中已有的 citation；
 非法引用会进入 `missingInfo`。该接口不写入漏洞状态，不能自动生成 `CONFIRMED` 记录。
 
+#### 审核队列
+
+```text
+POST /api/v1/review-queue/snapshots?format=semgrep&projectId=<id>&codeVersion=<sha>&ruleVersion=<v>
+GET  /api/v1/review-queue?projectId=<id>&severity=&verdict=&status=&ruleId=&updatedAfter=&updatedBefore=
+POST /api/v1/review-queue/{entryId}/claim    {"actor":"..."}
+POST /api/v1/review-queue/{entryId}/return   {"actor":"...","reason":"..."}
+POST /api/v1/review-queue/{entryId}/confirm  {"actor":"...","reason":"..."}
+POST /api/v1/review-queue/{entryId}/reject   {"actor":"...","reason":"..."}
+GET  /api/v1/review-queue/{entryId}/audit
+GET  /api/v1/review-queue/snapshots/{snapshotId}/export?format=markdown|json
+```
+
+`POST /snapshots` 研判一批外部报警后，把结果连同 schema/工具/项目版本和生成时间一起
+冻结为一份不可变 `ReportSnapshot`，并为每条报警生成一条 `PENDING` 队列条目。状态机为
+`PENDING -> IN_REVIEW ->（CONFIRMED / REJECTED）`，`IN_REVIEW` 也可 `return` 退回
+`PENDING`；不合法的迁移（如未认领直接 `confirm`）返回 404，不会静默生效。认领、退回、
+确认、驳回均记录操作者、时间和理由，可通过 `/audit` 查询完整历史。
+
+`export` 的 Markdown 和 JSON 均来自同一份快照，因此报警数、结论和证据编号天然一致；
+`format=pdf` 当前显式返回 400，尚未实现（见"已知局限"）。
+
 ---
 
 ### 6.2 搜索
@@ -1127,6 +1149,14 @@ echo -n "/path/to/project" | sha256sum | cut -c1-12
 |------|------|
 | 外部服务依赖 | 图存储托管在 Neo4j，repograph serve 无法连接 Neo4j 时图相关接口不可用 |
 | 无时序语义 | 所有边无时间信息，不区分初始化/销毁顺序 |
+
+### 10.5 审核队列
+
+| 局限 | 说明 |
+|------|------|
+| 无 PDF 导出 | `export?format=pdf` 显式返回 400；PDF 渲染方案和中文字体来源待下一片确定 |
+| 无认领超时释放 | 长期 `IN_REVIEW` 且无人跟进的条目不会自动退回 `PENDING` |
+| 无分页 | `GET /api/v1/review-queue` 一次返回全部匹配条目 |
 
 ---
 
