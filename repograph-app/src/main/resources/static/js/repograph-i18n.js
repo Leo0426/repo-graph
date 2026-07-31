@@ -144,6 +144,10 @@ const I18N = {
     'sbom.search.ph':'搜索组件…','sbom.noResults':'无匹配组件',
     'sbom.showing':(n,total)=>n===total?`${n} 个组件`:`显示 ${n} / ${total} 个组件`,
     'sbom.empty':'选择项目并点击"生成并查看"',
+    'sbom.legend.root':'项目',
+    'sbom.node.selected':'已选组件','sbom.node.name':'项目名称',
+    'sbom.graph.hint.empty':'该筛选条件下无匹配依赖',
+    'sbom.graph.hint.result':(n)=>`${n} 个直接依赖 · 拖拽平移 / 滚轮缩放`,
   },
   en: {
     'nav.search':'Search','nav.graph':'Graph','nav.symbol':'Symbol','nav.stats':'Stats','nav.index':'Index','nav.tools':'Tools','nav.sbom':'SBOM','nav.vulns':'Vulns','nav.metrics':'Quality','nav.health':'Health','nav.benchmark':'Eval',
@@ -289,6 +293,10 @@ const I18N = {
     'sbom.search.ph':'Search components…','sbom.noResults':'No matching components',
     'sbom.showing':(n,total)=>n===total?`${n} component${n===1?'':'s'}`:`Showing ${n} of ${total} components`,
     'sbom.empty':'Select a project and click "Generate & View"',
+    'sbom.legend.root':'project',
+    'sbom.node.selected':'Selected component','sbom.node.name':'Project name',
+    'sbom.graph.hint.empty':'No matching dependencies for this filter',
+    'sbom.graph.hint.result':(n)=>`${n} direct dependenc${n===1?'y':'ies'} · drag to pan / scroll to zoom`,
   }
 };
 
