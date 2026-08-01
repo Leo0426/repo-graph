@@ -14,10 +14,12 @@ import com.repograph.core.retrieval.ContextPackOptions;
 import com.repograph.core.retrieval.GraphRagOptions;
 import com.repograph.finding.ExternalFindingImporter;
 import com.repograph.finding.FindingContextService;
+import com.repograph.finding.ReportPdfRenderer;
 import com.repograph.finding.ReviewQueueStore;
 import com.repograph.finding.TriageReportService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.boot.info.BuildProperties;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,6 +31,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RequestMapping;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -55,6 +58,7 @@ public class ReviewQueueController {
     private final ReviewQueueStore reviewQueueStore;
     private final BuildProperties buildProperties;
     private final ObjectMapper objectMapper;
+    private final ReportPdfRenderer reportPdfRenderer;
 
     /**
      * 创建审核队列 REST 控制器。
@@ -65,6 +69,7 @@ public class ReviewQueueController {
      * @param reviewQueueStore      审核队列及快照存储
      * @param buildProperties       应用构建信息，用于填充快照的工具版本
      * @param objectMapper          快照 JSON 导出使用的 Jackson mapper
+     * @param reportPdfRenderer     报告 PDF 渲染器
      */
     public ReviewQueueController(
             List<ExternalFindingImporter> importers,
@@ -72,13 +77,15 @@ public class ReviewQueueController {
             TriageReportService triageReportService,
             ReviewQueueStore reviewQueueStore,
             BuildProperties buildProperties,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            ReportPdfRenderer reportPdfRenderer) {
         this.importers = importers;
         this.findingContextService = findingContextService;
         this.triageReportService = triageReportService;
         this.reviewQueueStore = reviewQueueStore;
         this.buildProperties = buildProperties;
         this.objectMapper = objectMapper;
+        this.reportPdfRenderer = reportPdfRenderer;
     }
 
     /**
@@ -240,14 +247,14 @@ public class ReviewQueueController {
     }
 
     /**
-     * 导出一份报告快照。
+     * 导出一份报告快照。三种格式派生自同一份快照，保证 finding 数、结论与 citation 一致。
      *
      * @param snapshotId 快照标识
-     * @param format     导出格式，当前支持 {@code markdown}、{@code json}
+     * @param format     导出格式，支持 {@code markdown}、{@code json}、{@code pdf}
      * @return 渲染结果
      */
     @GetMapping("/snapshots/{snapshotId}/export")
-    public ResponseEntity<String> export(
+    public ResponseEntity<byte[]> export(
             @PathVariable String snapshotId,
             @RequestParam String format) {
         ReportSnapshot snapshot = reviewQueueStore.getSnapshot(snapshotId)
@@ -256,10 +263,15 @@ public class ReviewQueueController {
         return switch (format.trim().toLowerCase()) {
             case "markdown" -> ResponseEntity.ok()
                     .contentType(MediaType.TEXT_MARKDOWN)
-                    .body(renderMarkdown(snapshot));
+                    .body(renderMarkdown(snapshot).getBytes(StandardCharsets.UTF_8));
             case "json" -> ResponseEntity.ok()
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(writeJson(snapshot));
+                    .body(writeJson(snapshot).getBytes(StandardCharsets.UTF_8));
+            case "pdf" -> ResponseEntity.ok()
+                    .contentType(MediaType.APPLICATION_PDF)
+                    .header(HttpHeaders.CONTENT_DISPOSITION,
+                            "attachment; filename=\"report-" + snapshot.id() + ".pdf\"")
+                    .body(reportPdfRenderer.render(renderMarkdown(snapshot)));
             default -> throw new IllegalArgumentException("Unsupported format: " + format);
         };
     }

@@ -35,6 +35,10 @@ dependencies {
     implementation(libs.qdrant)
     implementation(libs.protobuf.java)  // Qdrant gRPC API exposes protobuf MessageOrBuilder at compile time
 
+    // Report PDF export — Markdown → HTML (flexmark) → PDF (openhtmltopdf on PDFBox)
+    implementation(libs.flexmark)
+    implementation(libs.openhtmltopdf.pdfbox)
+
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation(libs.neo4j.harness)
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

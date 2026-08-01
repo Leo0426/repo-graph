@@ -38,7 +38,7 @@ RepoGraph 已经具备“多语言源码索引 → 外部 SAST 报警导入 → 
 | 3. 数据流、权限分析与证据融合 | 部分实现，基础较强 | CFG/PDG、调用图、源码级污点、WALA IFDS、GraphRAG、Context Pack、影响面、Spring 路由鉴权资源证据、trace 路径防护一致性和保守漏洞变体召回 | 动态过滤器/网关策略仅能报告缺失信息；变体召回仍是启发式而非完整语义克隆检测 | 后续精度迭代 |
 | 4. 智能降噪分诊 | 已实现（受控基线） | 启发式分诊；版本化反馈；规则抑制；路径一致性；默认关闭、提供方中立的 LLM 辅助复核；引用白名单、脱敏、预算、超时/重试、无源码审计和离线评估 | 真实模型提供方及源码出域策略需部署方人工决策后另行适配 | T6 |
 | 5. 动态验证套件 | 未实现 | WALA 子进程是静态字节码分析；Docker Compose 只承载 Neo4j/Qdrant 等基础服务 | 无目标构建与运行时隔离、载荷模板、HTTP 请求上下文、无回显/OOB、上传链路分析、动态证据关联 | T7、T8 |
-| 6. 标准化交付管理 | 部分实现 | REST JSON；漏洞和研判 Markdown；GitHub PR 评论；漏洞状态机和反馈查询 | 无持久化人工审核队列；无统一报告快照/Schema；无 PDF；缺少可审计的审核历史与批量导出 | T9 |
+| 6. 标准化交付管理 | 部分实现 | REST JSON；漏洞和研判 Markdown；GitHub PR 评论；漏洞状态机和反馈查询；持久化审核队列 + 版本化报告快照 + Markdown/JSON/PDF 同源导出 + 可审计审核历史 | 缺少分页与批量导出多个快照；PDF 仅文本抽取回归、无视觉回归 | T9 |
 | 7. 检测规则迭代优化闭环 | 部分实现 | 9 条内置规则；source/sink JSON/XML；离线 Advisory 导入；反馈数据可作为评估原料 | 无漏洞情报采集/审核/版本化发布流程；规则多数硬编码；无 precision、命中率、抑制率、回归集等效果指标 | T11 |
 | 底层通用支撑 | 部分实现 | REST API、CLI、MCP、Java/C/Python 适配、路径规范化、安全归档、受控文件遍历、Docker Compose、异步索引 | 无面向批量扫描的任务队列、配额、取消、重试和租户隔离 | T10 |
 
@@ -201,22 +201,25 @@ RepoGraph 已经具备“多语言源码索引 → 外部 SAST 报警导入 → 
 - **优先级**：P1
 - **类型**：AFK
 - **被阻塞于**：T5
-- **状态**：第一片（审核队列 + Markdown/JSON）已完成（2026-07-28）；PDF 导出留待下一片
-  （需先确定 openhtmltopdf/PDFBox 等渲染方案和 CJK 字体来源）。
+- **状态**：全部验收完成（第一片审核队列 + Markdown/JSON 于 2026-07-28；第二片 PDF 导出于
+  2026-08-01）。渲染方案定为 openhtmltopdf（on PDFBox），CJK 字体定为内嵌 Noto Sans SC（OFL 静态实例）。
 - **要构建什么**：将报警、证据、研判、动态验证（若有）和人工决策固化为版本化报告快照，
   提供审核队列及 Markdown、JSON、PDF 三种一致输出。
 - **验收标准**：
   - [x] 审核队列支持按项目、严重程度、结论、状态、规则和更新时间筛选。
   - [x] 认领、退回、确认、驳回均记录操作者、时间和理由（`ReviewQueueStore`，
     参照 `RuleSuppressionStore` 的状态表 + 追加审计表模式）。
-  - [x] Markdown 和 JSON 两种格式来自同一 `ReportSnapshot`，finding 数、结论和 citation 一致。
-  - [ ] PDF 支持中文字体、分页、代码换行和长路径，不丢失证据编号——`export?format=pdf`
-    当前显式返回 400，不假装支持。
+  - [x] Markdown、JSON、PDF 三种格式来自同一 `ReportSnapshot`（PDF 由 controller 的同一份
+    `renderMarkdown` 文本经 flexmark→openhtmltopdf 渲染），finding 数、结论和 citation 一致。
+  - [x] PDF 支持中文字体、分页、代码换行和长路径，不丢失证据编号——`ReportPdfRenderer` 内嵌
+    Noto Sans SC，`pre-wrap` + `word-break` 强制换行；`export?format=pdf` 返回 `application/pdf`。
   - [x] 导出包含 Schema/报告版本、工具版本、项目版本和生成时间。
 - **验证方式**：`ReviewQueueStoreTest`（真实 SQLite 临时文件，覆盖认领/退回/确认/驳回的
-  合法与非法状态迁移及审计事件）、`ReviewQueueControllerTest`（`@WebMvcTest` 契约测试）、
-  以及一次真实 curl 闭环验证（提交 → 筛选 → 非法迁移返回 404 → 认领 → 确认 → 审计 →
-  Markdown/JSON 导出一致 → PDF 返回 400）。
+  合法与非法状态迁移及审计事件）、`ReviewQueueControllerTest`（`@WebMvcTest` 契约测试，含 PDF
+  返回 `application/pdf` 与 Content-Disposition）、`ReportPdfRendererTest`（PDFBox 抽取文本断言
+  中文与证据编号不丢失），以及一次真实 curl 闭环验证（提交 → 筛选 → 非法迁移返回 404 → 认领 →
+  确认 → 审计 → Markdown/JSON/PDF 导出同源一致）。
+- **遗留下一片**：分页、批量导出多个快照、PDF 真正的视觉回归（当前只做文本抽取断言）。
 
 ### T10 批量扫描任务编排和 Slither 接入
 

@@ -13,6 +13,7 @@ import com.repograph.core.finding.TriageVerdict;
 import com.repograph.core.retrieval.ContextPack;
 import com.repograph.finding.ExternalFindingImporter;
 import com.repograph.finding.FindingContextService;
+import com.repograph.finding.ReportPdfRenderer;
 import com.repograph.finding.ReviewQueueStore;
 import com.repograph.finding.TriageReportService;
 import org.junit.jupiter.api.Test;
@@ -61,6 +62,9 @@ class ReviewQueueControllerTest {
 
     @MockitoBean
     BuildProperties buildProperties;
+
+    @MockitoBean
+    ReportPdfRenderer reportPdfRenderer;
 
     @Autowired
     ObjectMapper objectMapper;
@@ -165,9 +169,28 @@ class ReviewQueueControllerTest {
                 "2026-07-28T00:00:00Z", List.of());
         when(reviewQueueStore.getSnapshot("snap-1")).thenReturn(Optional.of(snapshot));
 
-        mvc.perform(get("/api/v1/review-queue/snapshots/snap-1/export").param("format", "pdf"))
+        mvc.perform(get("/api/v1/review-queue/snapshots/snap-1/export").param("format", "docx"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("pdf")));
+                .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("docx")));
+    }
+
+    @Test
+    void export_rendersPdfFromSameSnapshotMarkdown() throws Exception {
+        ReportSnapshot snapshot = new ReportSnapshot(
+                "snap-1", "p1", "1", "0.5.0", "abc", "rules-1",
+                "2026-07-28T00:00:00Z", List.of());
+        when(reviewQueueStore.getSnapshot("snap-1")).thenReturn(Optional.of(snapshot));
+        when(triageReportService.toMarkdownSummary(List.of())).thenReturn("## summary");
+        when(reportPdfRenderer.render(org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn("%PDF-1.4\n stub".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+
+        mvc.perform(get("/api/v1/review-queue/snapshots/snap-1/export").param("format", "pdf"))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .header().string("Content-Type", MediaType.APPLICATION_PDF_VALUE))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .header().string("Content-Disposition",
+                                org.hamcrest.Matchers.containsString("report-snap-1.pdf")));
     }
 
     @Test

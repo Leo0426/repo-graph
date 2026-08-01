@@ -700,7 +700,7 @@ POST /api/v1/review-queue/{entryId}/return   {"actor":"...","reason":"..."}
 POST /api/v1/review-queue/{entryId}/confirm  {"actor":"...","reason":"..."}
 POST /api/v1/review-queue/{entryId}/reject   {"actor":"...","reason":"..."}
 GET  /api/v1/review-queue/{entryId}/audit
-GET  /api/v1/review-queue/snapshots/{snapshotId}/export?format=markdown|json
+GET  /api/v1/review-queue/snapshots/{snapshotId}/export?format=markdown|json|pdf
 ```
 
 `POST /snapshots` 研判一批外部报警后，把结果连同 schema/工具/项目版本和生成时间一起
@@ -709,8 +709,9 @@ GET  /api/v1/review-queue/snapshots/{snapshotId}/export?format=markdown|json
 `PENDING`；不合法的迁移（如未认领直接 `confirm`）返回 404，不会静默生效。认领、退回、
 确认、驳回均记录操作者、时间和理由，可通过 `/audit` 查询完整历史。
 
-`export` 的 Markdown 和 JSON 均来自同一份快照，因此报警数、结论和证据编号天然一致；
-`format=pdf` 当前显式返回 400，尚未实现（见"已知局限"）。
+`export` 的 Markdown、JSON、PDF 三种格式均来自同一份快照，因此报警数、结论和证据编号天然一致。
+`format=pdf` 返回 `application/pdf`（带 `Content-Disposition` 附件名），PDF 内嵌 Noto Sans SC 中文字体，
+缺系统中文字体的容器/CI 环境也不会乱码；代码块与长路径自动换行，不丢失证据编号。
 
 ---
 
@@ -1154,7 +1155,8 @@ echo -n "/path/to/project" | sha256sum | cut -c1-12
 
 | 局限 | 说明 |
 |------|------|
-| 无 PDF 导出 | `export?format=pdf` 显式返回 400；PDF 渲染方案和中文字体来源待下一片确定 |
+| PDF 无视觉回归 | `export?format=pdf` 已可用（内嵌 Noto Sans SC）；测试仅做 PDFBox 文本抽取断言，未做像素级视觉回归 |
+| 无批量导出 | 一次只能导出单个快照，尚不支持跨快照批量打包 |
 | 无认领超时释放 | 长期 `IN_REVIEW` 且无人跟进的条目不会自动退回 `PENDING` |
 | 无分页 | `GET /api/v1/review-queue` 一次返回全部匹配条目 |
 

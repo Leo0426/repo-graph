@@ -183,9 +183,13 @@ repograph-taint-engine/   WALA-based IFDS 精确污点引擎
 
 **审核队列与报告快照**（P1 T9 第一片，`com.repograph.finding`）：
 - `ReportSnapshot`：生成后即冻结的批量研判结果，携带 `schemaVersion/toolVersion/codeVersion/
-  ruleVersion/generatedAt`，Markdown 和 JSON 导出均由同一份快照派生，天然保证报警数、结论和
+  ruleVersion/generatedAt`，Markdown、JSON 和 PDF 导出均由同一份快照派生，天然保证报警数、结论和
   citation 一致；`toolVersion` 取自 Spring Boot `BuildProperties`（`build.gradle.kts` 的
   `springBoot { buildInfo() }`）。
+- `ReportPdfRenderer`：PDF 导出管道 Markdown →（flexmark）HTML →（openhtmltopdf on PDFBox）PDF，
+  与 Markdown 导出同源于 controller 的同一份 `renderMarkdown` 文本。CJK 字体 Noto Sans SC（OFL，
+  静态 regular 实例，`resources/fonts/`）随 jar 打包并在 PDF 中内嵌，缺系统中文字体的容器/CI 也确定性
+  渲染；代码块与长路径用 `pre-wrap` + `word-break` 强制换行，不丢证据编号。
 - `ReviewQueueStore`：每条快照内的 `TriageReport` 对应一条 `ReviewQueueEntry`，状态机
   `PENDING -> IN_REVIEW ->（CONFIRMED / REJECTED）`，`IN_REVIEW` 也可 `return` 退回
   `PENDING`；认领仅允许从 `PENDING` 发起（避免静默改派他人正在复核的条目），所有迁移在
