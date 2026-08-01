@@ -54,7 +54,9 @@ class DefaultScanTaskServiceTest {
         store = new ScanTaskStore(tempDir.resolve("tasks.db").toString(), new ObjectMapper());
         externalScanService = mock(ExternalScanService.class);
         assetImportService = mock(AssetImportService.class);
-        service = new DefaultScanTaskService(store, externalScanService, assetImportService, DIRECT);
+        // 高配额 + 同步 executor：调度不成为瓶颈，submit 内联执行以便确定性断言。
+        ScanTaskScheduler scheduler = new ScanTaskScheduler(DIRECT, 100, 100, 100);
+        service = new DefaultScanTaskService(store, externalScanService, assetImportService, scheduler);
     }
 
     @Test

@@ -13,7 +13,6 @@ import com.repograph.core.scanner.ScanTaskStatus;
 import com.repograph.core.scanner.ScanTaskNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -22,7 +21,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executor;
 
 /**
  * {@link ScanTaskService} 默认实现：提交时持久化 {@code QUEUED} 任务并交给 executor 异步执行，
@@ -40,7 +38,7 @@ public class DefaultScanTaskService implements ScanTaskService {
     private final ScanTaskStore store;
     private final ExternalScanService externalScanService;
     private final AssetImportService assetImportService;
-    private final Executor executor;
+    private final ScanTaskScheduler scheduler;
 
     /** 正在执行的任务 → 执行线程，供取消 {@code RUNNING} 任务时中断以终止子进程。 */
     private final Map<String, Thread> running = new ConcurrentHashMap<>();
@@ -51,17 +49,17 @@ public class DefaultScanTaskService implements ScanTaskService {
      * @param store               任务存储
      * @param externalScanService 现有同步外部扫描编排
      * @param assetImportService  资产接入服务，重跑时据此重新定位托管资产
-     * @param executor            任务执行 executor
+     * @param scheduler           并发配额准入调度器
      */
     public DefaultScanTaskService(
             ScanTaskStore store,
             ExternalScanService externalScanService,
             AssetImportService assetImportService,
-            @Qualifier("scanTaskExecutor") Executor executor) {
+            ScanTaskScheduler scheduler) {
         this.store = store;
         this.externalScanService = externalScanService;
         this.assetImportService = assetImportService;
-        this.executor = executor;
+        this.scheduler = scheduler;
     }
 
     @Override
@@ -82,7 +80,7 @@ public class DefaultScanTaskService implements ScanTaskService {
                 now);
         store.create(task);
         String taskId = task.id();
-        executor.execute(() -> runTask(taskId));
+        scheduler.submit(taskId, task.projectId(), task.scanners(), () -> runTask(taskId));
         return task;
     }
 

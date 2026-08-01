@@ -232,9 +232,12 @@ repograph-taint-engine/   WALA-based IFDS 精确污点引擎
   `ScanTask/ScanTaskStatus/ScanTaskService` 在 `com.repograph.core.scanner`，`ScanTaskStore`（SQLite
   `scan_tasks` + batch_json 快照）、`DefaultScanTaskService`（`running` 注册表支持取消中断）、
   `ScannerAsyncConfig`（executor bean）在 `com.repograph.scanner`。
-- **当前边界**：T3 为同步单批执行；T10-1/T10-2 增量叠加异步任务（提交/状态/分页/取消），同步端点
-  保留不破坏。全局/项目/扫描器级并发配额（T10-3）、幂等重试（T10-4）、Slither 接入（T10-5）待后续
-  切片；当前 executor 为有界固定线程池，尚无配额调度。
+- **并发配额（T10-3）**：`ScanTaskScheduler` 准入门在全局、项目、扫描器三维限制在飞任务数
+  （`repograph.scanner.quota.{global:4,project:2,scanner:2}`）；超额任务留待队列，配额释放后按入队顺序
+  工作保守准入（跳过被阻塞项，避免项目/扫描器间饿死），任务计入其包含的每个扫描器。`submit` 只入队，
+  准入后才 `markRunning`。executor 池线程数应 ≥ 全局配额。
+- **当前边界**：T3 为同步单批执行；T10-1/T10-2/T10-3 增量叠加异步任务（提交/状态/分页/取消/配额调度），
+  同步端点保留不破坏。幂等重试（T10-4）、Slither 接入（T10-5）待后续切片。
 
 ## 路由鉴权与资源访问证据
 

@@ -636,8 +636,11 @@ curl -X POST "http://localhost:8080/api/v1/scan-tasks/{taskId}/cancel"
 任务态 `QUEUED → RUNNING → SUCCEEDED / PARTIAL / FAILED`：单个扫描器失败任务进入 `PARTIAL`，
 其余结果仍可查询；任务级异常进入 `FAILED` 并带结构化失败原因。`cancel` 将 `QUEUED` 任务标记
 `CANCELLED` 使其永不启动，`RUNNING` 任务则中断执行线程并强制终止在跑的扫描器子进程（已完成
-扫描器的结果仍保留），终态任务取消为幂等 no-op。并发配额、重试和 Slither 接入为 T10 后续切片
-（见 `docs/generated/t10-scan-orchestration-breakdown.md`），当前 executor 为有界固定线程池，尚无配额调度。
+扫描器的结果仍保留），终态任务取消为幂等 no-op。
+
+任务提交受**并发配额**约束（`repograph.scanner.quota.global`=4、`project`=2、`scanner`=2）：超额任务留在
+`QUEUED`，配额释放后按入队顺序准入（工作保守，项目/扫描器达上限不饿死其他任务），任务计入其包含的每个
+扫描器。重试和 Slither 接入为 T10 后续切片（见 `docs/generated/t10-scan-orchestration-breakdown.md`）。
 
 #### 外部扫描结果查询
 

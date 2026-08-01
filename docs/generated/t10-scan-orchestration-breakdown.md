@@ -66,17 +66,21 @@
   注册表（taskId→Thread）+ `cancel()`，`runTask` finally 清中断标志；`ScanTaskService.cancel`；
   `ScannerController` 增 `POST /scan-tasks/{id}/cancel`。
 
-### T10-3　并发配额与调度（全局 / 项目 / 扫描器级）
+### T10-3　并发配额与调度（全局 / 项目 / 扫描器级）✅ 已完成（2026-08-01）
 
 - **类型**：AFK
 - **被阻塞于**：T10-1
 - **覆盖验收**：全局/项目/扫描器级并发限制
-- **要构建什么**：有界 worker 池 + 全局并发上限；项目级、扫描器级在飞上限；超额任务留在 QUEUED
-  直到有空位，按入队顺序排空。配额可配（`repograph.scanner.quota.*`）。
+- **要构建什么**：`ScanTaskScheduler` 准入门：全局并发上限 + 项目级、扫描器级在飞上限；超额任务留在
+  待队列直到配额释放，按入队顺序（工作保守，跳过被阻塞项）排空。配额可配（`repograph.scanner.quota.
+  {global:4,project:2,scanner:2}`）。任务计入其包含的每个扫描器。
 - **验收标准**：
-  - [ ] 提交 N > 上限 的任务，同时 RUNNING ≤ 上限，其余 QUEUED
-  - [ ] 项目级、扫描器级上限独立生效，不互相饿死
-- **验证方式**：并发提交计数断言（RUNNING 峰值不超限，最终全部排空）
+  - [x] 提交 N > 上限 的任务，同时在飞 ≤ 上限，其余留待队列（任务保持 QUEUED，准入后才 markRunning）
+  - [x] 项目级、扫描器级上限独立生效，不互相饿死（工作保守准入）
+- **验证方式**（已实现）：`ScanTaskSchedulerTest`（阻塞任务体 + latch：全局上限封顶并发且其余入队、
+  项目上限下不同项目仍并发不饿死、释放后全部排空）。
+- **落点**：`ScanTaskScheduler`（锁内准入 + 三维在飞计数 + 完成释放重排空）；`DefaultScanTaskService.
+  submit` 改走 `scheduler.submit(...,()->runTask(id))`；`ScannerAsyncConfig` executor 池 ≥ 全局配额。
 
 ### T10-4　幂等重试
 
