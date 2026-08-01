@@ -34,13 +34,13 @@ RepoGraph 已经具备“多语言源码索引 → 外部 SAST 报警导入 → 
 | 审计阶段 | 对齐状态 | RepoGraph 已有能力 | 主要缺口 | 规划归属 |
 |---|---|---|---|---|
 | 1. 靶标资产接入 | 已实现 | ZIP/TAR.GZ 安全接入；SQLite 资产清单；异步索引；业务/测试/文档/生成/未知文件分类；语言、框架、构建、依赖和风险画像；可人工覆盖的扫描计划 | 暂无资产版本合并、断点续传和画像历史快照 | T1、T2 |
-| 2. 多语言静态检测引擎 | 部分实现 | Java/C/Python 解析；内置规则与两级污点；Semgrep/CodeQL 受控 CLI 编排、能力探测、超时、失败隔离和归一化持久化；SBOM/SCA | 无异步队列、主动取消、配额和重试；无 Slither/Solidity 上下文定位；需构建的 CodeQL 语言尚未进入隔离执行环境 | T10 |
+| 2. 多语言静态检测引擎 | 部分实现 | Java/C/Python 解析；内置规则与两级污点；Semgrep/CodeQL/Slither 受控 CLI 编排、能力探测、超时、失败隔离和归一化持久化；异步任务队列 + 取消 + 全局/项目/扫描器级配额 + 幂等重试；SBOM/SCA | Slither 报警不可定位到 CodeUnit（不索引 Solidity）；需构建的 CodeQL 语言尚未进入隔离执行环境；无租户隔离 | T10（切片完成） |
 | 3. 数据流、权限分析与证据融合 | 部分实现，基础较强 | CFG/PDG、调用图、源码级污点、WALA IFDS、GraphRAG、Context Pack、影响面、Spring 路由鉴权资源证据、trace 路径防护一致性和保守漏洞变体召回 | 动态过滤器/网关策略仅能报告缺失信息；变体召回仍是启发式而非完整语义克隆检测 | 后续精度迭代 |
 | 4. 智能降噪分诊 | 已实现（受控基线） | 启发式分诊；版本化反馈；规则抑制；路径一致性；默认关闭、提供方中立的 LLM 辅助复核；引用白名单、脱敏、预算、超时/重试、无源码审计和离线评估 | 真实模型提供方及源码出域策略需部署方人工决策后另行适配 | T6 |
 | 5. 动态验证套件 | 未实现 | WALA 子进程是静态字节码分析；Docker Compose 只承载 Neo4j/Qdrant 等基础服务 | 无目标构建与运行时隔离、载荷模板、HTTP 请求上下文、无回显/OOB、上传链路分析、动态证据关联 | T7、T8 |
 | 6. 标准化交付管理 | 部分实现 | REST JSON；漏洞和研判 Markdown；GitHub PR 评论；漏洞状态机和反馈查询；持久化审核队列 + 版本化报告快照 + Markdown/JSON/PDF 同源导出 + 可审计审核历史 | 缺少分页与批量导出多个快照；PDF 仅文本抽取回归、无视觉回归 | T9 |
 | 7. 检测规则迭代优化闭环 | 部分实现 | 9 条内置规则；source/sink JSON/XML；离线 Advisory 导入；反馈数据可作为评估原料 | 无漏洞情报采集/审核/版本化发布流程；规则多数硬编码；无 precision、命中率、抑制率、回归集等效果指标 | T11 |
-| 底层通用支撑 | 部分实现 | REST API、CLI、MCP、Java/C/Python 适配、路径规范化、安全归档、受控文件遍历、Docker Compose、异步索引 | 无面向批量扫描的任务队列、配额、取消、重试和租户隔离 | T10 |
+| 底层通用支撑 | 部分实现 | REST API、CLI、MCP、Java/C/Python 适配、路径规范化、安全归档、受控文件遍历、Docker Compose、异步索引；异步扫描任务队列 + 配额 + 取消 + 重试 | 无多租户隔离、跨节点分布式队列 | T10（切片完成） |
 
 ## 架构边界
 
@@ -229,17 +229,19 @@ RepoGraph 已经具备“多语言源码索引 → 外部 SAST 报警导入 → 
 - **状态**：拆分见 `docs/generated/t10-scan-orchestration-breakdown.md`（5 片垂直切片）。
   T10-1 异步任务骨架（提交→状态→分页结果，PARTIAL 容错，结构化失败原因）、T10-2 取消
   （QUEUED 永不启动 / RUNNING 中断杀子进程）、T10-3 并发配额调度（全局4/项目2/扫描器2，工作保守准入）
-  、T10-4 幂等重试（只重跑未成功扫描器，指纹去重不重复写）已完成（2026-08-01）；
-  T10-5 Slither 待后续切片。
+  、T10-4 幂等重试（只重跑未成功扫描器，指纹去重不重复写）、T10-5 Slither 适配器
+  （归一化 + 无 Solidity 索引标记不可定位，缺工具 UNAVAILABLE）已完成（2026-08-01）。**T10 全部切片完成。**
 - **要构建什么**：把单项目扫描扩展为可取消、可重试、有并发和资源配额的批量任务；按资产画像选择
   适配器，并增加 Slither 结果导入。
 - **验收标准**：
-  - [ ] 任务状态至少覆盖 `QUEUED/RUNNING/SUCCEEDED/PARTIAL/FAILED/CANCELLED`。
-  - [ ] 支持全局、项目和扫描器级并发限制；重试不会重复写入 finding。
-  - [ ] 单个扫描器失败使任务进入 `PARTIAL`，其他结果仍可研判和导出。
-  - [ ] Slither 报警能归一化为 `ExternalFinding`；缺少 Solidity 索引时明确标记上下文不可定位。
-  - [ ] API 支持状态查询、取消、分页结果和结构化失败原因。
-- **验证方式**：多项目队列、取消、超时、部分失败、幂等重试和 Slither 样例导入测试。
+  - [x] 任务状态至少覆盖 `QUEUED/RUNNING/SUCCEEDED/PARTIAL/FAILED/CANCELLED`。
+  - [x] 支持全局、项目和扫描器级并发限制；重试不会重复写入 finding。
+  - [x] 单个扫描器失败使任务进入 `PARTIAL`，其他结果仍可研判和导出。
+  - [x] Slither 报警能归一化为 `ExternalFinding`；缺少 Solidity 索引时明确标记上下文不可定位。
+  - [x] API 支持状态查询、取消、分页结果和结构化失败原因。
+- **验证方式**：`ScanTaskStoreTest`/`DefaultScanTaskServiceTest`/`ScanTaskSchedulerTest`/
+  `ScannerControllerTest`/`SlitherFindingImporterTest`/`SlitherScannerAdapterTest`
+  覆盖状态机、取消、配额、幂等重试、分页与 Slither 归一化。真跑 Slither 需装 slither/solc（手动验证）。
 
 ### T11 建立规则情报、回归集和效果评估闭环
 

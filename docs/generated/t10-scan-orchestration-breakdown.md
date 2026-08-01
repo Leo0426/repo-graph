@@ -100,19 +100,25 @@
   统一 `execute(task, scanners, keptRuns)`（首次 keptRuns 空、重试保留已成功 run）；
   `ScannerController` 增 `POST /scan-tasks/{id}/retry`。
 
-### T10-5　Slither 适配器 + 无 Solidity 索引时标记上下文不可定位
+### T10-5　Slither 适配器 + 无 Solidity 索引时标记上下文不可定位 ✅ 已完成（2026-08-01）
 
 - **类型**：AFK（归一化/标记逻辑 fixture 驱动；真跑 slither 需装 slither/solc，同 CodeQL 走 UNAVAILABLE 语义）
-- **被阻塞于**：无（可与 T10-1 并行；适配器直接插现有 `ExternalScanService`）
+- **被阻塞于**：无（适配器直接插现有 `ExternalScanService`）
 - **覆盖验收**：Slither 归一化为 `ExternalFinding`；缺 Solidity 索引明确标记不可定位
-- **要构建什么**：`SlitherScannerAdapter`（`ScannerAdapter`）：跑 slither JSON → 归一化为 `ExternalFinding`；
-  项目无 Solidity 索引时给报警打「上下文不可定位」标记（写 `omittedReasons`/标志），不伪造定位；
-  能力探测缺工具 → `UNAVAILABLE`。
+- **要构建什么**：`SlitherFindingImporter` 解析 `results.detectors[]` → `ExternalFinding`（check→ruleId、
+  impact→severity、description→message、`elements[0].source_mapping` 的 `filename_relative` + `lines`
+  → 文件/行、name→symbol，cwe 空——Slither 不产 CWE）；每条附一条 `context-unavailable` 标记步，
+  复用 Slither 自带的真实文件/行号，不编造定位。`SlitherScannerAdapter` 跑 `slither . --json`，缺工具
+  能力探测 `UNAVAILABLE`。
 - **验收标准**：
-  - [ ] slither 样例 JSON → `ExternalFinding`（tool/ruleId/cwe/severity/位置/指纹）
-  - [ ] 无 Solidity 索引 → 明确标记不可定位，不编造 filePath/line
-  - [ ] slither/solc 缺失 → 能力探测 `UNAVAILABLE`（非「零报警成功」）
-- **验证方式**：`SlitherFindingImporterTest`（样例 JSON）+ 无索引路径的标记断言
+  - [x] slither 样例 JSON → `ExternalFinding`（tool/ruleId/severity/位置/symbol/指纹；cwe 空）
+  - [x] 无 Solidity 索引 → 每条打 `context-unavailable` 标记，位置沿用 Slither，不编造 filePath/line
+  - [x] slither 缺失 → 能力探测 `UNAVAILABLE`（非「零报警成功」）
+- **验证方式**（已实现）：`SlitherFindingImporterTest`（fixture JSON：归一化 + 标记 + 无 detectors 抛异常）、
+  `SlitherScannerAdapterTest`（假 slither 脚本产 JSON → SUCCEEDED + 标记；缺命令 → UNAVAILABLE）。
+- **落点**：`com.repograph.finding.SlitherFindingImporter`（`context-unavailable` 标记）、
+  `com.repograph.scanner.SlitherScannerAdapter`（SLITHER/solidity，`repograph.scanners.slither-command`）。
+- **边界**：RepoGraph 仍不解析 Solidity；Slither 报警始终不可定位到 CodeUnit，不进入调用图/污点证据。
 
 ---
 

@@ -644,8 +644,11 @@ curl -X POST "http://localhost:8080/api/v1/scan-tasks/{taskId}/retry"
 任务提交受**并发配额**约束（`repograph.scanner.quota.global`=4、`project`=2、`scanner`=2）：超额任务留在
 `QUEUED`，配额释放后按入队顺序准入（工作保守，项目/扫描器达上限不饿死其他任务），任务计入其包含的每个
 扫描器。`retry` 对 `FAILED/PARTIAL` 任务只重跑未成功的扫描器（已成功的跳过），合并结果重算状态并
-`attempt+1`；靠指纹幂等与去重，报警不会重复。Slither 接入为 T10 后续切片
-（见 `docs/generated/t10-scan-orchestration-breakdown.md`）。
+`attempt+1`；靠指纹幂等与去重，报警不会重复。
+
+Slither（Solidity）可通过 `{"scanners":["SLITHER"]}` 显式请求（需本机安装 `slither`，否则运行状态为
+`UNAVAILABLE`）。RepoGraph 不索引 Solidity，Slither 报警沿用其自带的文件/行号但带 `context-unavailable`
+标记、不关联 CodeUnit 或调用图，研判据此不假装拥有可达性证据。
 
 #### 外部扫描结果查询
 

@@ -35,6 +35,7 @@ repograph:
     semgrep-config: auto
     codeql-command: codeql
     codeql-query-suite: security-extended
+    slither-command: slither
   advisory:
     enabled: false             # 默认关闭；明确提供方和源码出域策略后再启用
     max-input-chars: 12000

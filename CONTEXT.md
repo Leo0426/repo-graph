@@ -239,8 +239,13 @@ repograph-taint-engine/   WALA-based IFDS 精确污点引擎
 - **幂等重试（T10-4）**：`POST /api/v1/scan-tasks/{id}/retry` 对 `FAILED/PARTIAL` 任务只重跑未成功的
   扫描器，保留已成功扫描器的 run，合并后重算状态并 `attempt+1`；靠 `(project_id, fingerprint)` 幂等 +
   findings 页按指纹去重保证不重复。`runTask` 与重试统一到 `execute(task, scanners, keptRuns)`。
+- **Slither 接入（T10-5）**：`SlitherFindingImporter` 解析 `results.detectors[]` → `ExternalFinding`
+  （check→ruleId、impact→severity、`source_mapping` 文件/行、cwe 空），每条附 `context-unavailable`
+  标记步——RepoGraph 不索引 Solidity，报警沿用 Slither 自带定位但不关联 CodeUnit/调用图，研判据此不
+  假装有可达性证据。`SlitherScannerAdapter`（SLITHER/solidity，`repograph.scanners.slither-command`）
+  跑 `slither . --json`，缺工具能力探测 `UNAVAILABLE`。
 - **当前边界**：T3 为同步单批执行；T10-1~T10-4 增量叠加异步任务（提交/状态/分页/取消/配额调度/重试），
-  同步端点保留不破坏。Slither 接入（T10-5）待后续切片。
+  T10-5 增 Slither 适配器，同步端点保留不破坏。T10 全部切片完成。
 
 ## 路由鉴权与资源访问证据
 
