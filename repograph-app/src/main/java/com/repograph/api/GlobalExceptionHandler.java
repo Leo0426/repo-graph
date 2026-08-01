@@ -7,6 +7,7 @@ import com.repograph.asset.UnsupportedArchiveException;
 import com.repograph.core.asset.AssetBusyException;
 import com.repograph.core.asset.AssetNotReadyException;
 import com.repograph.core.finding.ReviewQueueEntryNotFoundException;
+import com.repograph.core.scanner.ScanTaskNotFoundException;
 import com.repograph.finding.ExternalFindingImportException;
 import com.repograph.finding.github.GitHubCommentException;
 import org.slf4j.Logger;
@@ -186,6 +187,19 @@ public class GlobalExceptionHandler {
         log.debug("Review queue entry not found: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(Map.of("error", messageOr(ex, "Review queue entry not found")));
+    }
+
+    /**
+     * 处理扫描任务不存在，返回 404 Not Found。
+     *
+     * @param ex 捕获到的 {@link ScanTaskNotFoundException}
+     * @return 含 {@code error} 字段的 404 响应体
+     */
+    @ExceptionHandler(ScanTaskNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleScanTaskNotFound(ScanTaskNotFoundException ex) {
+        log.debug("Scan task not found: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(Map.of("error", messageOr(ex, "Scan task not found")));
     }
 
     /**

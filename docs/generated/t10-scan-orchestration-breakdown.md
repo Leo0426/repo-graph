@@ -26,7 +26,7 @@
 
 ## 任务拆分
 
-### T10-1　异步扫描任务骨架：提交 → 轮询状态 → 分页取结果（MVP 脊柱）
+### T10-1　异步扫描任务骨架：提交 → 轮询状态 → 分页取结果（MVP 脊柱）✅ 已完成（2026-08-01）
 
 - **类型**：AFK
 - **被阻塞于**：无
@@ -36,12 +36,16 @@
   （PARTIAL 复用 `ScanBatchStatus`）。`GET /api/v1/scan-tasks/{id}` 返回结构化状态 + 每扫描器失败原因；
   `GET /api/v1/scan-tasks/{id}/findings?page=&size=` 分页取归一化报警。同步老端点保留不破坏。
 - **验收标准**：
-  - [ ] 提交返回 taskId，状态从 QUEUED 走到终态
-  - [ ] 单扫描器失败 → 任务 PARTIAL，其余结果仍可查询/导出
-  - [ ] findings 分页；失败原因结构化（非纯堆栈文本）
-- **验证方式**：
-  - `ScanTaskStoreTest`（真实 SQLite 临时文件，状态迁移与 attempt）
-  - `ScanTaskControllerTest`（`@WebMvcTest` 契约，含分页与 PARTIAL）
+  - [x] 提交返回 taskId，状态从 QUEUED 走到终态
+  - [x] 单扫描器失败 → 任务 PARTIAL，其余结果仍可查询/导出
+  - [x] findings 分页；失败原因结构化（非纯堆栈文本）
+- **验证方式**（已实现）：
+  - `ScanTaskStoreTest`（真实 SQLite，状态迁移 + 去重分页）
+  - `DefaultScanTaskServiceTest`（同步 executor 驱动 submit/runTask，含 asset 缺失与 scan 抛异常路径）
+  - `ScannerControllerTest`（`@WebMvcTest` 契约：202 提交、状态每扫描器摘要、分页、404）
+- **落点**：`com.repograph.core.scanner.{ScanTask,ScanTaskStatus,ScanTaskService,ScanTaskFindingsPage,
+  ScanTaskNotFoundException}`；`com.repograph.scanner.{ScanTaskStore,DefaultScanTaskService,ScannerAsyncConfig}`；
+  端点并入 `ScannerController`（复用其 option 解析），`ScanTaskNotFoundException → 404`。
 
 ### T10-2　任务取消
 

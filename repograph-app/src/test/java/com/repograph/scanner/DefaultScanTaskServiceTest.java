@@ -1,0 +1,123 @@
+package com.repograph.scanner;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.repograph.core.asset.AssetImportService;
+import com.repograph.core.asset.AssetStatus;
+import com.repograph.core.asset.ImportedAsset;
+import com.repograph.core.scanner.ExternalScanBatchResult;
+import com.repograph.core.scanner.ExternalScanOptions;
+import com.repograph.core.scanner.ExternalScanService;
+import com.repograph.core.scanner.ScanBatchStatus;
+import com.repograph.core.scanner.ScanTask;
+import com.repograph.core.scanner.ScanTaskNotFoundException;
+import com.repograph.core.scanner.ScanTaskStatus;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.Executor;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+/**
+ * {@link DefaultScanTaskService} 提交与执行行为测试，使用真实 SQLite 存储 + 同步 executor。
+ *
+ * @author leolu
+ */
+class DefaultScanTaskServiceTest {
+
+    @TempDir
+    Path tempDir;
+
+    private ScanTaskStore store;
+    private ExternalScanService externalScanService;
+    private AssetImportService assetImportService;
+    private DefaultScanTaskService service;
+
+    /** 同步 executor：使 submit 内联执行 runTask，便于确定性断言。 */
+    private static final Executor DIRECT = Runnable::run;
+
+    @BeforeEach
+    void setUp() {
+        store = new ScanTaskStore(tempDir.resolve("tasks.db").toString(), new ObjectMapper());
+        externalScanService = mock(ExternalScanService.class);
+        assetImportService = mock(AssetImportService.class);
+        service = new DefaultScanTaskService(store, externalScanService, assetImportService, DIRECT);
+    }
+
+    @Test
+    void submitCreatesQueuedThenRunsToTerminalStatus() {
+        ImportedAsset asset = asset("asset-1", "p1");
+        when(assetImportService.find("asset-1")).thenReturn(Optional.of(asset));
+        when(externalScanService.scan(any(), any())).thenReturn(new ExternalScanBatchResult(
+                "batch-1", "p1", ScanBatchStatus.PARTIAL, List.of()));
+
+        ScanTask submitted = service.submit(asset, options());
+
+        assertThat(submitted.status()).isEqualTo(ScanTaskStatus.QUEUED);
+        ScanTask stored = store.find(submitted.id()).orElseThrow();
+        assertThat(stored.status()).isEqualTo(ScanTaskStatus.PARTIAL);
+        assertThat(stored.batchId()).isEqualTo("batch-1");
+        verify(externalScanService).scan(any(), any());
+    }
+
+    @Test
+    void runTaskFailsWhenAssetMissing() {
+        ImportedAsset asset = asset("asset-gone", "p1");
+        store.create(new ScanTask("t1", "p1", "asset-gone",
+                List.of("SEMGREP"), List.of("java"), 300,
+                ScanTaskStatus.QUEUED, 1, "", "", now(), now()));
+        when(assetImportService.find("asset-gone")).thenReturn(Optional.empty());
+
+        service.runTask("t1");
+
+        ScanTask failed = store.find("t1").orElseThrow();
+        assertThat(failed.status()).isEqualTo(ScanTaskStatus.FAILED);
+        assertThat(failed.error()).contains("asset not found");
+    }
+
+    @Test
+    void runTaskFailsWhenScanThrows() {
+        ImportedAsset asset = asset("asset-1", "p1");
+        store.create(new ScanTask("t1", "p1", "asset-1",
+                List.of("SEMGREP"), List.of("java"), 300,
+                ScanTaskStatus.QUEUED, 1, "", "", now(), now()));
+        when(assetImportService.find("asset-1")).thenReturn(Optional.of(asset));
+        when(externalScanService.scan(any(), any()))
+                .thenThrow(new IllegalStateException("engine boom"));
+
+        service.runTask("t1");
+
+        ScanTask failed = store.find("t1").orElseThrow();
+        assertThat(failed.status()).isEqualTo(ScanTaskStatus.FAILED);
+        assertThat(failed.error()).contains("engine boom");
+    }
+
+    @Test
+    void findingsThrowsForUnknownTask() {
+        assertThatThrownBy(() -> service.findings("nope", 0, 10))
+                .isInstanceOf(ScanTaskNotFoundException.class);
+    }
+
+    private static ExternalScanOptions options() {
+        return new ExternalScanOptions(Set.of("SEMGREP", "CODEQL"), List.of("java"), 300);
+    }
+
+    private static ImportedAsset asset(String assetId, String projectId) {
+        return new ImportedAsset(assetId, projectId, "a.zip", "zip",
+                null, AssetStatus.READY, "", now(), now(), null);
+    }
+
+    private static String now() {
+        return "2026-08-01T00:00:00Z";
+    }
+}

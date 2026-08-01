@@ -8,10 +8,16 @@ import com.repograph.core.asset.ClassifiedAssetFile;
 import com.repograph.core.asset.ImportedAsset;
 import com.repograph.core.asset.ProjectAssetProfile;
 import com.repograph.core.asset.ScannerPlanItem;
+import com.repograph.core.finding.ExternalFinding;
+import com.repograph.core.finding.ExternalFindingSeverity;
 import com.repograph.core.scanner.ExternalScanBatchResult;
 import com.repograph.core.scanner.ExternalScanOptions;
 import com.repograph.core.scanner.ExternalScanService;
 import com.repograph.core.scanner.ScanBatchStatus;
+import com.repograph.core.scanner.ScanTask;
+import com.repograph.core.scanner.ScanTaskFindingsPage;
+import com.repograph.core.scanner.ScanTaskService;
+import com.repograph.core.scanner.ScanTaskStatus;
 import com.repograph.core.scanner.ScannerAvailability;
 import com.repograph.core.scanner.ScannerCapability;
 import com.repograph.core.scanner.ScannerRunResult;
@@ -59,6 +65,79 @@ class ScannerControllerTest {
 
     @MockBean
     ExternalScanService externalScanService;
+
+    @MockBean
+    ScanTaskService scanTaskService;
+
+    @Test
+    void submitScanTask_returns202WithQueuedTaskId() throws Exception {
+        when(assetImportService.find("asset-1")).thenReturn(Optional.of(asset()));
+        when(assetProfileService.build(any(), any())).thenReturn(profile());
+        when(scanTaskService.submit(any(), any())).thenReturn(new ScanTask(
+                "task-1", "project-1", "asset-1", List.of("SEMGREP", "CODEQL"),
+                List.of("java"), 300, ScanTaskStatus.QUEUED, 1, "", "",
+                "2026-08-01T00:00:00Z", "2026-08-01T00:00:00Z"));
+
+        mvc.perform(post("/api/v1/assets/asset-1/scan-tasks")
+                        .contentType("application/json").content("{}"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.taskId").value("task-1"))
+                .andExpect(jsonPath("$.status").value("QUEUED"));
+        verify(scanTaskService).submit(any(), any());
+    }
+
+    @Test
+    void submitScanTask_returns404ForUnknownAsset() throws Exception {
+        when(assetImportService.find("missing")).thenReturn(Optional.empty());
+
+        mvc.perform(post("/api/v1/assets/missing/scan-tasks")
+                        .contentType("application/json").content("{\"scanners\":[\"SEMGREP\"]}"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void scanTaskStatus_projectsPerScannerSummaries() throws Exception {
+        when(scanTaskService.find("task-1")).thenReturn(Optional.of(new ScanTask(
+                "task-1", "project-1", "asset-1", List.of("SEMGREP", "CODEQL"),
+                List.of("java"), 300, ScanTaskStatus.PARTIAL, 1, "", "",
+                "2026-08-01T00:00:00Z", "2026-08-01T00:00:09Z")));
+        when(scanTaskService.result("task-1")).thenReturn(Optional.of(batch()));
+
+        mvc.perform(get("/api/v1/scan-tasks/task-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PARTIAL"))
+                .andExpect(jsonPath("$.scanners[0].scanner").value("SEMGREP"))
+                .andExpect(jsonPath("$.scanners[0].status").value("SUCCEEDED"))
+                .andExpect(jsonPath("$.scanners[1].scanner").value("CODEQL"))
+                .andExpect(jsonPath("$.scanners[1].status").value("FAILED"))
+                .andExpect(jsonPath("$.scanners[1].error").value("analysis failed"));
+    }
+
+    @Test
+    void scanTaskStatus_returns404ForUnknownTask() throws Exception {
+        when(scanTaskService.find("nope")).thenReturn(Optional.empty());
+
+        mvc.perform(get("/api/v1/scan-tasks/nope"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void scanTaskFindings_returnsPage() throws Exception {
+        when(scanTaskService.find("task-1")).thenReturn(Optional.of(new ScanTask(
+                "task-1", "project-1", "asset-1", List.of("SEMGREP"),
+                List.of("java"), 300, ScanTaskStatus.SUCCEEDED, 1, "", "",
+                "2026-08-01T00:00:00Z", "2026-08-01T00:00:09Z")));
+        ExternalFinding finding = new ExternalFinding("SEMGREP", "rule-a", "CWE-79",
+                ExternalFindingSeverity.MEDIUM, "msg", "A.java", 10, 10, "sym", List.of(), "{}");
+        when(scanTaskService.findings("task-1", 0, 50))
+                .thenReturn(new ScanTaskFindingsPage(List.of(finding), 0, 50, 3));
+
+        mvc.perform(get("/api/v1/scan-tasks/task-1/findings").param("page", "0").param("size", "50"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(3))
+                .andExpect(jsonPath("$.findings", org.hamcrest.Matchers.hasSize(1)))
+                .andExpect(jsonPath("$.findings[0].ruleId").value("rule-a"));
+    }
 
     @Test
     void scan_usesReadyAssetProfileAndReturnsIndependentRuns() throws Exception {

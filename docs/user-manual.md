@@ -612,8 +612,28 @@ curl -X POST "http://localhost:8080/api/v1/assets/{assetId}/scans" \
 `SUCCEEDED / PARTIAL / FAILED / TIMED_OUT / UNAVAILABLE`、工具版本、退出码、耗时、错误和报警。
 单个工具失败不会丢弃其他工具结果。
 
-当前 T3 不提供主动取消；异步队列、取消、并发配额和重试统一在 T10 实现。服务端仍会在超时后
-强制终止子进程。
+同步端点适合小项目即时扫描；批量或长扫描请用下面的异步任务端点。服务端仍会在超时后强制终止子进程。
+
+#### 异步扫描任务（T10-1）
+
+提交后立即返回任务标识，不阻塞等待扫描完成，用轮询查状态：
+
+```bash
+# 提交，返回 202 {"taskId":"...","status":"QUEUED"}
+curl -X POST "http://localhost:8080/api/v1/assets/{assetId}/scan-tasks" \
+  -H "Content-Type: application/json" -d '{}'
+
+# 轮询状态，含各扫描器运行摘要与失败原因
+curl "http://localhost:8080/api/v1/scan-tasks/{taskId}"
+
+# 分页取归一化报警（按指纹去重）
+curl "http://localhost:8080/api/v1/scan-tasks/{taskId}/findings?page=0&size=50"
+```
+
+任务态 `QUEUED → RUNNING → SUCCEEDED / PARTIAL / FAILED`：单个扫描器失败任务进入 `PARTIAL`，
+其余结果仍可查询；任务级异常进入 `FAILED` 并带结构化失败原因。取消、并发配额、重试和 Slither
+接入为 T10 后续切片（见 `docs/generated/t10-scan-orchestration-breakdown.md`），当前 executor 为
+有界固定线程池，尚无配额调度与主动取消。
 
 #### 外部扫描结果查询
 
