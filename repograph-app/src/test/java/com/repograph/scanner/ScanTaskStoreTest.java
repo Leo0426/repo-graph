@@ -151,6 +151,23 @@ class ScanTaskStoreTest {
         assertThat(store.find("t1").orElseThrow().status()).isEqualTo(ScanTaskStatus.CANCELLED);
     }
 
+    @Test
+    void prepareRetryOnlyFromFailedOrPartialAndBumpsAttempt() {
+        store.create(queued("t1", "p1"));
+        // QUEUED：不可重试
+        assertThat(store.prepareRetry("t1", "2026-08-01T00:00:03Z")).isFalse();
+
+        store.markRunning("t1", "2026-08-01T00:00:01Z");
+        store.complete("t1", new ExternalScanBatchResult("b1", "p1", ScanBatchStatus.PARTIAL,
+                List.of(run("s1", "p1", "SEMGREP", ScannerRunStatus.FAILED, List.of()))),
+                ScanTaskStatus.PARTIAL, "2026-08-01T00:00:09Z");
+
+        assertThat(store.prepareRetry("t1", "2026-08-01T00:00:10Z")).isTrue();
+        ScanTask requeued = store.find("t1").orElseThrow();
+        assertThat(requeued.status()).isEqualTo(ScanTaskStatus.QUEUED);
+        assertThat(requeued.attempt()).isEqualTo(2);
+    }
+
     private static ScanTask queued(String id, String projectId) {
         return new ScanTask(id, projectId, "asset-" + projectId,
                 List.of("SEMGREP", "CODEQL"), List.of("java"), 300,

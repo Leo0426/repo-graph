@@ -631,6 +631,9 @@ curl "http://localhost:8080/api/v1/scan-tasks/{taskId}/findings?page=0&size=50"
 
 # 取消任务（QUEUED 永不启动；RUNNING 终止扫描器子进程）
 curl -X POST "http://localhost:8080/api/v1/scan-tasks/{taskId}/cancel"
+
+# 重试 FAILED/PARTIAL 任务（只重跑未成功的扫描器）
+curl -X POST "http://localhost:8080/api/v1/scan-tasks/{taskId}/retry"
 ```
 
 任务态 `QUEUED → RUNNING → SUCCEEDED / PARTIAL / FAILED`：单个扫描器失败任务进入 `PARTIAL`，
@@ -640,7 +643,9 @@ curl -X POST "http://localhost:8080/api/v1/scan-tasks/{taskId}/cancel"
 
 任务提交受**并发配额**约束（`repograph.scanner.quota.global`=4、`project`=2、`scanner`=2）：超额任务留在
 `QUEUED`，配额释放后按入队顺序准入（工作保守，项目/扫描器达上限不饿死其他任务），任务计入其包含的每个
-扫描器。重试和 Slither 接入为 T10 后续切片（见 `docs/generated/t10-scan-orchestration-breakdown.md`）。
+扫描器。`retry` 对 `FAILED/PARTIAL` 任务只重跑未成功的扫描器（已成功的跳过），合并结果重算状态并
+`attempt+1`；靠指纹幂等与去重，报警不会重复。Slither 接入为 T10 后续切片
+（见 `docs/generated/t10-scan-orchestration-breakdown.md`）。
 
 #### 外部扫描结果查询
 

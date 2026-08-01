@@ -82,17 +82,23 @@
 - **落点**：`ScanTaskScheduler`（锁内准入 + 三维在飞计数 + 完成释放重排空）；`DefaultScanTaskService.
   submit` 改走 `scheduler.submit(...,()->runTask(id))`；`ScannerAsyncConfig` executor 池 ≥ 全局配额。
 
-### T10-4　幂等重试
+### T10-4　幂等重试 ✅ 已完成（2026-08-01）
 
 - **类型**：AFK
 - **被阻塞于**：T10-1
 - **覆盖验收**：重试不重复写入 finding
 - **要构建什么**：`POST /api/v1/scan-tasks/{id}/retry` 对 FAILED/PARTIAL 任务只重跑未成功的扫描器，
-  靠现有 `(project_id, fingerprint)` 幂等保证 finding 不重复写；记录 attempt 计数。
+  保留已成功扫描器的运行结果，合并后重算状态并 attempt+1；靠现有 `(project_id, fingerprint)` 幂等 +
+  任务 findings 页按指纹去重保证报警不重复。
 - **验收标准**：
-  - [ ] 让某扫描器失败 → 重试后成功，findings 无重复，attempt +1
-  - [ ] 已 SUCCEEDED 的扫描器重试时跳过，不重复执行
-- **验证方式**：重试前后 findings 计数不变 + attempt 断言
+  - [x] 让某扫描器失败 → 重试后成功，findings 无重复，attempt +1
+  - [x] 已 SUCCEEDED 的扫描器重试时跳过，不重复执行（重跑扫描器集不含已成功者）
+- **验证方式**（已实现）：`ScanTaskStoreTest`（prepareRetry 仅从 FAILED/PARTIAL 生效并 attempt+1）、
+  `DefaultScanTaskServiceTest`（重试只以 {CODEQL} 调 scan、合并去重后 findings 总数不翻倍、attempt=2、
+  非可重试状态与未知任务抛异常）、`ScannerControllerTest`（retry 200/400/404 契约）。
+- **落点**：`ScanTaskStore.prepareRetry`（QUEUED + attempt+1）；`DefaultScanTaskService.retry` +
+  统一 `execute(task, scanners, keptRuns)`（首次 keptRuns 空、重试保留已成功 run）；
+  `ScannerController` 增 `POST /scan-tasks/{id}/retry`。
 
 ### T10-5　Slither 适配器 + 无 Solidity 索引时标记上下文不可定位
 

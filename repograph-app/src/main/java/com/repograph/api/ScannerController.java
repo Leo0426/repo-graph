@@ -192,6 +192,19 @@ public class ScannerController {
     }
 
     /**
+     * 重试一个 {@code FAILED} 或 {@code PARTIAL} 任务，只重跑其中未成功的扫描器；依赖指纹幂等，
+     * 不重复写入报警。
+     *
+     * @param taskId 任务标识
+     * @return 重新入队的任务标识与状态；任务不存在时 404，状态不可重试时 400
+     */
+    @PostMapping("/scan-tasks/{taskId}/retry")
+    public ResponseEntity<SubmitScanTaskResponse> retryScanTask(@PathVariable String taskId) {
+        ScanTask task = scanTaskService.retry(taskId);
+        return ResponseEntity.ok(new SubmitScanTaskResponse(task.id(), task.status().name()));
+    }
+
+    /**
      * 查询一个资产的扫描运行历史。
      *
      * @param assetId 资产标识

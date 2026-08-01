@@ -200,6 +200,29 @@ public class ScanTaskStore {
         return cancelFrom(taskId, "RUNNING", occurredAt);
     }
 
+    /**
+     * 将 {@code FAILED} 或 {@code PARTIAL} 任务重新入队为 {@code QUEUED} 并 {@code attempt + 1}，
+     * 供重试重跑未成功的扫描器。
+     *
+     * @param taskId     任务标识
+     * @param occurredAt 操作时间
+     * @return 是否真正发生迁移
+     */
+    public boolean prepareRetry(String taskId, String occurredAt) {
+        String url = "jdbc:sqlite:" + dbPath;
+        try (Connection conn = DriverManager.getConnection(url);
+             PreparedStatement statement = conn.prepareStatement("""
+                     UPDATE scan_tasks SET status = 'QUEUED', attempt = attempt + 1, updated_at = ?
+                     WHERE id = ? AND status IN ('FAILED', 'PARTIAL')
+                     """)) {
+            statement.setString(1, occurredAt);
+            statement.setString(2, taskId);
+            return statement.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to prepare retry for scan task '" + taskId + "'", e);
+        }
+    }
+
     private boolean cancelFrom(String taskId, String fromStatus, String occurredAt) {
         String url = "jdbc:sqlite:" + dbPath;
         try (Connection conn = DriverManager.getConnection(url);

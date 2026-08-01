@@ -163,6 +163,37 @@ class ScannerControllerTest {
     }
 
     @Test
+    void retryScanTask_returnsRequeuedTask() throws Exception {
+        when(scanTaskService.retry("task-1")).thenReturn(new ScanTask(
+                "task-1", "project-1", "asset-1", List.of("SEMGREP", "CODEQL"),
+                List.of("java"), 300, ScanTaskStatus.QUEUED, 2, "", "",
+                "2026-08-01T00:00:00Z", "2026-08-01T00:00:10Z"));
+
+        mvc.perform(post("/api/v1/scan-tasks/task-1/retry"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.taskId").value("task-1"))
+                .andExpect(jsonPath("$.status").value("QUEUED"));
+    }
+
+    @Test
+    void retryScanTask_returns400ForNonRetryableStatus() throws Exception {
+        when(scanTaskService.retry("task-1"))
+                .thenThrow(new IllegalArgumentException("scan task not retryable in status SUCCEEDED"));
+
+        mvc.perform(post("/api/v1/scan-tasks/task-1/retry"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void retryScanTask_returns404ForUnknownTask() throws Exception {
+        when(scanTaskService.retry("nope"))
+                .thenThrow(new ScanTaskNotFoundException("scan task not found: nope"));
+
+        mvc.perform(post("/api/v1/scan-tasks/nope/retry"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     void scan_usesReadyAssetProfileAndReturnsIndependentRuns() throws Exception {
         ImportedAsset asset = asset();
         when(assetImportService.find("asset-1")).thenReturn(Optional.of(asset));

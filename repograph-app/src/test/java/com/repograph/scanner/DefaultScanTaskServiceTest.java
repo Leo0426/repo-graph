@@ -11,9 +11,14 @@ import com.repograph.core.scanner.ScanBatchStatus;
 import com.repograph.core.scanner.ScanTask;
 import com.repograph.core.scanner.ScanTaskNotFoundException;
 import com.repograph.core.scanner.ScanTaskStatus;
+import com.repograph.core.scanner.ScannerRunResult;
+import com.repograph.core.scanner.ScannerRunStatus;
+import com.repograph.core.finding.ExternalFinding;
+import com.repograph.core.finding.ExternalFindingSeverity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -64,7 +69,9 @@ class DefaultScanTaskServiceTest {
         ImportedAsset asset = asset("asset-1", "p1");
         when(assetImportService.find("asset-1")).thenReturn(Optional.of(asset));
         when(externalScanService.scan(any(), any())).thenReturn(new ExternalScanBatchResult(
-                "batch-1", "p1", ScanBatchStatus.PARTIAL, List.of()));
+                "batch-1", "p1", ScanBatchStatus.PARTIAL,
+                List.of(scannerRun("SEMGREP", ScannerRunStatus.SUCCEEDED, List.of()),
+                        scannerRun("CODEQL", ScannerRunStatus.FAILED, List.of()))));
 
         ScanTask submitted = service.submit(asset, options());
 
@@ -157,6 +164,56 @@ class DefaultScanTaskServiceTest {
     }
 
     @Test
+    void retryRerunsOnlyFailedScannersAndDeduplicatesFindings() {
+        // 造一个 PARTIAL 完成态：SEMGREP 成功（1 报警），CODEQL 失败。
+        store.create(new ScanTask("t1", "p1", "asset-1",
+                List.of("SEMGREP", "CODEQL"), List.of("java"), 300,
+                ScanTaskStatus.QUEUED, 1, "", "", now(), now()));
+        store.markRunning("t1", now());
+        ExternalFinding fa = finding("SEMGREP", "rule-a", "A.java", 10);
+        store.complete("t1", new ExternalScanBatchResult("b1", "p1", ScanBatchStatus.PARTIAL,
+                        List.of(scannerRun("SEMGREP", ScannerRunStatus.SUCCEEDED, List.of(fa)),
+                                scannerRun("CODEQL", ScannerRunStatus.FAILED, List.of()))),
+                ScanTaskStatus.PARTIAL, now());
+
+        when(assetImportService.find("asset-1")).thenReturn(Optional.of(asset("asset-1", "p1")));
+        ExternalFinding fb = finding("CODEQL", "rule-b", "B.java", 20);
+        // 重试时只应重跑 CODEQL；返回含重复报警以验证去重。
+        when(externalScanService.scan(any(), any())).thenReturn(new ExternalScanBatchResult(
+                "b2", "p1", ScanBatchStatus.SUCCEEDED,
+                List.of(scannerRun("CODEQL", ScannerRunStatus.SUCCEEDED, List.of(fb, fb)))));
+
+        ScanTask retried = service.retry("t1");
+        assertThat(retried.attempt()).isEqualTo(2);
+
+        ScanTask done = store.find("t1").orElseThrow();
+        assertThat(done.status()).isEqualTo(ScanTaskStatus.SUCCEEDED);
+        // 合并保留的 SEMGREP + 重跑的 CODEQL，去重后 2 条。
+        assertThat(store.findingsPage("t1", 0, 50).total()).isEqualTo(2);
+
+        // 只重跑未成功的 CODEQL，已成功的 SEMGREP 跳过。
+        ArgumentCaptor<ExternalScanOptions> options = ArgumentCaptor.forClass(ExternalScanOptions.class);
+        verify(externalScanService).scan(any(), options.capture());
+        assertThat(options.getValue().scanners()).containsExactly("CODEQL");
+    }
+
+    @Test
+    void retryRejectsNonRetryableStatus() {
+        store.create(new ScanTask("t1", "p1", "asset-1",
+                List.of("SEMGREP"), List.of("java"), 300,
+                ScanTaskStatus.QUEUED, 1, "", "", now(), now()));
+
+        assertThatThrownBy(() -> service.retry("t1"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void retryThrowsForUnknownTask() {
+        assertThatThrownBy(() -> service.retry("nope"))
+                .isInstanceOf(ScanTaskNotFoundException.class);
+    }
+
+    @Test
     void cancelThrowsForUnknownTask() {
         assertThatThrownBy(() -> service.cancel("nope"))
                 .isInstanceOf(ScanTaskNotFoundException.class);
@@ -175,6 +232,17 @@ class DefaultScanTaskServiceTest {
     private static ImportedAsset asset(String assetId, String projectId) {
         return new ImportedAsset(assetId, projectId, "a.zip", "zip",
                 null, AssetStatus.READY, "", now(), now(), null);
+    }
+
+    private static ScannerRunResult scannerRun(
+            String scanner, ScannerRunStatus status, List<ExternalFinding> findings) {
+        return new ScannerRunResult("scan-" + scanner, "p1", scanner, status, "1.0", 0, 5,
+                now(), now(), findings, status == ScannerRunStatus.FAILED ? "boom" : "");
+    }
+
+    private static ExternalFinding finding(String tool, String ruleId, String file, int line) {
+        return new ExternalFinding(tool, ruleId, "CWE-79", ExternalFindingSeverity.MEDIUM,
+                "msg", file, line, line, "sym", List.of(), "{}");
     }
 
     private static String now() {

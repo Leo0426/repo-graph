@@ -11,14 +11,20 @@ import com.repograph.core.scanner.ScanTaskFindingsPage;
 import com.repograph.core.scanner.ScanTaskService;
 import com.repograph.core.scanner.ScanTaskStatus;
 import com.repograph.core.scanner.ScanTaskNotFoundException;
+import com.repograph.core.scanner.ScannerRunResult;
+import com.repograph.core.scanner.ScannerRunStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -96,7 +102,24 @@ public class DefaultScanTaskService implements ScanTaskService {
             log.warn("Scan task not found, skip run: {}", taskId);
             return;
         }
-        ScanTask task = found.get();
+        execute(found.get(), found.get().scanners(), List.of());
+    }
+
+    private void runRetry(String taskId, List<String> retryScanners, List<ScannerRunResult> keptRuns) {
+        Optional<ScanTask> found = store.find(taskId);
+        if (found.isEmpty()) {
+            log.warn("Scan task not found, skip retry: {}", taskId);
+            return;
+        }
+        execute(found.get(), retryScanners, keptRuns);
+    }
+
+    /**
+     * 执行任务的一次运行：{@code QUEUED -> RUNNING}，扫描给定扫描器，与保留的已成功运行合并后
+     * 落终态。重试时 {@code keptRuns} 为上一轮成功的扫描器结果；首次执行为空。
+     */
+    private void execute(ScanTask task, List<String> scanners, List<ScannerRunResult> keptRuns) {
+        String taskId = task.id();
         if (!store.markRunning(taskId, Instant.now().toString())) {
             // 已被取消、已在运行或已终态：不重复执行。
             return;
@@ -109,10 +132,14 @@ public class DefaultScanTaskService implements ScanTaskService {
                 return;
             }
             ExternalScanOptions options = new ExternalScanOptions(
-                    new LinkedHashSet<>(task.scanners()), task.languages(), task.timeoutSeconds());
+                    new LinkedHashSet<>(scanners), task.languages(), task.timeoutSeconds());
             ExternalScanBatchResult batch = externalScanService.scan(asset.get(), options);
+            List<ScannerRunResult> combined = new ArrayList<>(keptRuns);
+            combined.addAll(batch.runs());
+            ExternalScanBatchResult merged = new ExternalScanBatchResult(
+                    batch.batchId(), task.projectId(), combinedStatus(combined), combined);
             // 若期间被取消（状态已非 RUNNING），complete 为条件 no-op，CANCELLED 得以保留。
-            store.complete(taskId, batch, mapStatus(batch.status()), Instant.now().toString());
+            store.complete(taskId, merged, mapStatus(merged.status()), Instant.now().toString());
         } catch (RuntimeException e) {
             log.warn("Scan task {} failed", taskId, e);
             // 取消导致的中断同样进入此分支，fail 为条件 no-op，不覆盖 CANCELLED。
@@ -122,6 +149,39 @@ public class DefaultScanTaskService implements ScanTaskService {
             // 清除可能因取消/超时残留的中断标志，避免污染线程池中的下一个任务。
             Thread.interrupted();
         }
+    }
+
+    @Override
+    public ScanTask retry(String taskId) {
+        ScanTask task = store.find(taskId)
+                .orElseThrow(() -> new ScanTaskNotFoundException("scan task not found: " + taskId));
+        if (task.status() != ScanTaskStatus.FAILED && task.status() != ScanTaskStatus.PARTIAL) {
+            throw new IllegalArgumentException(
+                    "scan task not retryable in status " + task.status());
+        }
+        List<ScannerRunResult> keptRuns = new ArrayList<>();
+        Set<String> succeeded = new HashSet<>();
+        store.result(taskId).ifPresent(batch -> {
+            for (ScannerRunResult run : batch.runs()) {
+                if (run.status() == ScannerRunStatus.SUCCEEDED) {
+                    keptRuns.add(run);
+                    succeeded.add(run.scanner());
+                }
+            }
+        });
+        List<String> retryScanners = task.scanners().stream()
+                .filter(scanner -> !succeeded.contains(scanner))
+                .toList();
+        if (retryScanners.isEmpty()) {
+            throw new IllegalArgumentException("no failed scanners to retry for task " + taskId);
+        }
+        if (!store.prepareRetry(taskId, Instant.now().toString())) {
+            throw new IllegalArgumentException("scan task not retryable in status " + task.status());
+        }
+        List<ScannerRunResult> kept = List.copyOf(keptRuns);
+        scheduler.submit(taskId, task.projectId(), retryScanners,
+                () -> runRetry(taskId, retryScanners, kept));
+        return store.find(taskId).orElse(task);
     }
 
     @Override
@@ -167,6 +227,21 @@ public class DefaultScanTaskService implements ScanTaskService {
             case PARTIAL -> ScanTaskStatus.PARTIAL;
             case FAILED -> ScanTaskStatus.FAILED;
         };
+    }
+
+    /**
+     * 从合并后的扫描器运行结果重算批次状态：全部成功为 {@code SUCCEEDED}，全部未成功为 {@code FAILED}，
+     * 否则 {@code PARTIAL}。与 {@code DefaultExternalScannerService} 的聚合逻辑一致。
+     */
+    private static ScanBatchStatus combinedStatus(List<ScannerRunResult> runs) {
+        long succeeded = runs.stream()
+                .filter(run -> run.status() == ScannerRunStatus.SUCCEEDED
+                        || run.status() == ScannerRunStatus.PARTIAL)
+                .count();
+        if (succeeded == runs.size()) {
+            return ScanBatchStatus.SUCCEEDED;
+        }
+        return succeeded == 0 ? ScanBatchStatus.FAILED : ScanBatchStatus.PARTIAL;
     }
 
     private static String structuredError(RuntimeException e) {

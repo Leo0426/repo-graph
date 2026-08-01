@@ -32,6 +32,18 @@ public interface ScanTaskService {
     ScanTask cancel(String taskId);
 
     /**
+     * 重试一个 {@code FAILED} 或 {@code PARTIAL} 任务：只重跑其中未成功的扫描器，保留已成功扫描器的
+     * 结果，合并后重算任务状态并 {@code attempt + 1}。依赖 {@code (project_id, fingerprint)} 幂等，
+     * 重复报警不会重复写入。
+     *
+     * @param taskId 任务标识
+     * @return 重新入队的任务
+     * @throws ScanTaskNotFoundException 任务不存在
+     * @throws IllegalArgumentException  任务当前状态不可重试
+     */
+    ScanTask retry(String taskId);
+
+    /**
      * 按标识查询任务。
      *
      * @param taskId 任务标识

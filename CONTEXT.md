@@ -236,8 +236,11 @@ repograph-taint-engine/   WALA-based IFDS 精确污点引擎
   （`repograph.scanner.quota.{global:4,project:2,scanner:2}`）；超额任务留待队列，配额释放后按入队顺序
   工作保守准入（跳过被阻塞项，避免项目/扫描器间饿死），任务计入其包含的每个扫描器。`submit` 只入队，
   准入后才 `markRunning`。executor 池线程数应 ≥ 全局配额。
-- **当前边界**：T3 为同步单批执行；T10-1/T10-2/T10-3 增量叠加异步任务（提交/状态/分页/取消/配额调度），
-  同步端点保留不破坏。幂等重试（T10-4）、Slither 接入（T10-5）待后续切片。
+- **幂等重试（T10-4）**：`POST /api/v1/scan-tasks/{id}/retry` 对 `FAILED/PARTIAL` 任务只重跑未成功的
+  扫描器，保留已成功扫描器的 run，合并后重算状态并 `attempt+1`；靠 `(project_id, fingerprint)` 幂等 +
+  findings 页按指纹去重保证不重复。`runTask` 与重试统一到 `execute(task, scanners, keptRuns)`。
+- **当前边界**：T3 为同步单批执行；T10-1~T10-4 增量叠加异步任务（提交/状态/分页/取消/配额调度/重试），
+  同步端点保留不破坏。Slither 接入（T10-5）待后续切片。
 
 ## 路由鉴权与资源访问证据
 
