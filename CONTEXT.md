@@ -226,12 +226,15 @@ repograph-taint-engine/   WALA-based IFDS 精确污点引擎
   后台 executor 执行现有同步 `ExternalScanService.scan`，任务态 `QUEUED→RUNNING→SUCCEEDED/PARTIAL/
   FAILED`（`ScanBatchStatus` 直接映射；异常 → `FAILED` + 结构化 error）。`GET /api/v1/scan-tasks/{id}`
   返回状态与各扫描器运行摘要；`GET /api/v1/scan-tasks/{id}/findings?page=&size=` 按指纹去重后分页。
-  领域模型 `ScanTask/ScanTaskStatus/ScanTaskService` 在 `com.repograph.core.scanner`，
-  `ScanTaskStore`（SQLite `scan_tasks` + batch_json 快照）、`DefaultScanTaskService`、
+  `POST /api/v1/scan-tasks/{id}/cancel`（T10-2）取消任务：`QUEUED` 永不启动 → `CANCELLED`（后续
+  `markRunning` 失败），`RUNNING` 中断 worker 线程经 `CliProcessRunner` 的中断分支 `destroyForcibly`
+  子进程 → `CANCELLED`，已完成扫描器的 `scanner_runs` 保留；终态取消幂等。领域模型
+  `ScanTask/ScanTaskStatus/ScanTaskService` 在 `com.repograph.core.scanner`，`ScanTaskStore`（SQLite
+  `scan_tasks` + batch_json 快照）、`DefaultScanTaskService`（`running` 注册表支持取消中断）、
   `ScannerAsyncConfig`（executor bean）在 `com.repograph.scanner`。
-- **当前边界**：T3 为同步单批执行；T10-1 增量叠加异步任务（提交/状态/分页），同步端点保留不破坏。
-  主动取消（T10-2）、全局/项目/扫描器级并发配额（T10-3）、幂等重试（T10-4）、Slither 接入（T10-5）
-  待后续切片；当前 executor 为有界固定线程池，尚无配额调度。
+- **当前边界**：T3 为同步单批执行；T10-1/T10-2 增量叠加异步任务（提交/状态/分页/取消），同步端点
+  保留不破坏。全局/项目/扫描器级并发配额（T10-3）、幂等重试（T10-4）、Slither 接入（T10-5）待后续
+  切片；当前 executor 为有界固定线程池，尚无配额调度。
 
 ## 路由鉴权与资源访问证据
 

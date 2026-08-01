@@ -628,12 +628,16 @@ curl "http://localhost:8080/api/v1/scan-tasks/{taskId}"
 
 # 分页取归一化报警（按指纹去重）
 curl "http://localhost:8080/api/v1/scan-tasks/{taskId}/findings?page=0&size=50"
+
+# 取消任务（QUEUED 永不启动；RUNNING 终止扫描器子进程）
+curl -X POST "http://localhost:8080/api/v1/scan-tasks/{taskId}/cancel"
 ```
 
 任务态 `QUEUED → RUNNING → SUCCEEDED / PARTIAL / FAILED`：单个扫描器失败任务进入 `PARTIAL`，
-其余结果仍可查询；任务级异常进入 `FAILED` 并带结构化失败原因。取消、并发配额、重试和 Slither
-接入为 T10 后续切片（见 `docs/generated/t10-scan-orchestration-breakdown.md`），当前 executor 为
-有界固定线程池，尚无配额调度与主动取消。
+其余结果仍可查询；任务级异常进入 `FAILED` 并带结构化失败原因。`cancel` 将 `QUEUED` 任务标记
+`CANCELLED` 使其永不启动，`RUNNING` 任务则中断执行线程并强制终止在跑的扫描器子进程（已完成
+扫描器的结果仍保留），终态任务取消为幂等 no-op。并发配额、重试和 Slither 接入为 T10 后续切片
+（见 `docs/generated/t10-scan-orchestration-breakdown.md`），当前 executor 为有界固定线程池，尚无配额调度。
 
 #### 外部扫描结果查询
 

@@ -177,6 +177,45 @@ public class ScanTaskStore {
     }
 
     /**
+     * 将任务从 {@code QUEUED} 取消为 {@code CANCELLED}。取消 {@code QUEUED} 任务后，
+     * 其 {@link #markRunning} 将失败，任务永不启动，不产生任何扫描器运行。
+     *
+     * @param taskId     任务标识
+     * @param occurredAt 操作时间
+     * @return 是否真正发生迁移
+     */
+    public boolean cancelIfQueued(String taskId, String occurredAt) {
+        return cancelFrom(taskId, "QUEUED", occurredAt);
+    }
+
+    /**
+     * 将任务从 {@code RUNNING} 取消为 {@code CANCELLED}。调用方随后应中断执行线程以终止
+     * 正在运行的扫描器子进程。
+     *
+     * @param taskId     任务标识
+     * @param occurredAt 操作时间
+     * @return 是否真正发生迁移
+     */
+    public boolean cancelIfRunning(String taskId, String occurredAt) {
+        return cancelFrom(taskId, "RUNNING", occurredAt);
+    }
+
+    private boolean cancelFrom(String taskId, String fromStatus, String occurredAt) {
+        String url = "jdbc:sqlite:" + dbPath;
+        try (Connection conn = DriverManager.getConnection(url);
+             PreparedStatement statement = conn.prepareStatement(
+                     "UPDATE scan_tasks SET status = 'CANCELLED', updated_at = ? "
+                             + "WHERE id = ? AND status = ?")) {
+            statement.setString(1, occurredAt);
+            statement.setString(2, taskId);
+            statement.setString(3, fromStatus);
+            return statement.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to cancel scan task '" + taskId + "'", e);
+        }
+    }
+
+    /**
      * 读取任务的批次结果快照。
      *
      * @param taskId 任务标识

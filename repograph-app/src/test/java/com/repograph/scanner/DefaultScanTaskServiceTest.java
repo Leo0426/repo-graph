@@ -19,13 +19,16 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -100,6 +103,61 @@ class DefaultScanTaskServiceTest {
         ScanTask failed = store.find("t1").orElseThrow();
         assertThat(failed.status()).isEqualTo(ScanTaskStatus.FAILED);
         assertThat(failed.error()).contains("engine boom");
+    }
+
+    @Test
+    void cancelQueuedTaskPreventsExecution() {
+        store.create(new ScanTask("t1", "p1", "asset-1",
+                List.of("SEMGREP"), List.of("java"), 300,
+                ScanTaskStatus.QUEUED, 1, "", "", now(), now()));
+
+        ScanTask cancelled = service.cancel("t1");
+        assertThat(cancelled.status()).isEqualTo(ScanTaskStatus.CANCELLED);
+
+        // 取消后再执行：markRunning 失败，扫描器永不被调用。
+        service.runTask("t1");
+        assertThat(store.find("t1").orElseThrow().status()).isEqualTo(ScanTaskStatus.CANCELLED);
+        verifyNoInteractions(externalScanService);
+    }
+
+    @Test
+    void cancelRunningTaskInterruptsWorkerAndStaysCancelled() throws Exception {
+        ImportedAsset asset = asset("asset-1", "p1");
+        when(assetImportService.find("asset-1")).thenReturn(Optional.of(asset));
+        store.create(new ScanTask("t1", "p1", "asset-1",
+                List.of("SEMGREP"), List.of("java"), 300,
+                ScanTaskStatus.QUEUED, 1, "", "", now(), now()));
+
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch interrupted = new CountDownLatch(1);
+        when(externalScanService.scan(any(), any())).thenAnswer(inv -> {
+            started.countDown();
+            try {
+                Thread.sleep(30_000);
+            } catch (InterruptedException e) {
+                interrupted.countDown();
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("scan interrupted");
+            }
+            return new ExternalScanBatchResult("b", "p1", ScanBatchStatus.SUCCEEDED, List.of());
+        });
+
+        Thread worker = new Thread(() -> service.runTask("t1"), "test-scan-worker");
+        worker.start();
+
+        assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+        ScanTask cancelled = service.cancel("t1");
+        assertThat(cancelled.status()).isEqualTo(ScanTaskStatus.CANCELLED);
+        assertThat(interrupted.await(5, TimeUnit.SECONDS)).isTrue();
+
+        worker.join(5_000);
+        assertThat(store.find("t1").orElseThrow().status()).isEqualTo(ScanTaskStatus.CANCELLED);
+    }
+
+    @Test
+    void cancelThrowsForUnknownTask() {
+        assertThatThrownBy(() -> service.cancel("nope"))
+                .isInstanceOf(ScanTaskNotFoundException.class);
     }
 
     @Test

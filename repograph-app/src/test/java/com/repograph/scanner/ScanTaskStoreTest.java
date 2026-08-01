@@ -130,6 +130,27 @@ class ScanTaskStoreTest {
         assertThat(page1.findings()).hasSize(1);
     }
 
+    @Test
+    void cancelIfQueuedOnlyFromQueued() {
+        store.create(queued("t1", "p1"));
+
+        assertThat(store.cancelIfQueued("t1", "2026-08-01T00:00:03Z")).isTrue();
+        assertThat(store.find("t1").orElseThrow().status()).isEqualTo(ScanTaskStatus.CANCELLED);
+        // 已取消，markRunning 不应再生效（任务永不启动）
+        assertThat(store.markRunning("t1", "2026-08-01T00:00:04Z")).isFalse();
+    }
+
+    @Test
+    void cancelIfRunningOnlyFromRunning() {
+        store.create(queued("t1", "p1"));
+        // 仍在 QUEUED：cancelIfRunning 不生效
+        assertThat(store.cancelIfRunning("t1", "2026-08-01T00:00:03Z")).isFalse();
+
+        store.markRunning("t1", "2026-08-01T00:00:01Z");
+        assertThat(store.cancelIfRunning("t1", "2026-08-01T00:00:05Z")).isTrue();
+        assertThat(store.find("t1").orElseThrow().status()).isEqualTo(ScanTaskStatus.CANCELLED);
+    }
+
     private static ScanTask queued(String id, String projectId) {
         return new ScanTask(id, projectId, "asset-" + projectId,
                 List.of("SEMGREP", "CODEQL"), List.of("java"), 300,

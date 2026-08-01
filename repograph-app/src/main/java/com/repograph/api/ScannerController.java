@@ -179,6 +179,19 @@ public class ScannerController {
     }
 
     /**
+     * 取消一个异步扫描任务。{@code QUEUED} 任务永不启动；{@code RUNNING} 任务终止其扫描器子进程；
+     * 终态任务为幂等 no-op。
+     *
+     * @param taskId 任务标识
+     * @return 取消后的任务标识与状态；任务不存在时 404
+     */
+    @PostMapping("/scan-tasks/{taskId}/cancel")
+    public ResponseEntity<SubmitScanTaskResponse> cancelScanTask(@PathVariable String taskId) {
+        ScanTask task = scanTaskService.cancel(taskId);
+        return ResponseEntity.ok(new SubmitScanTaskResponse(task.id(), task.status().name()));
+    }
+
+    /**
      * 查询一个资产的扫描运行历史。
      *
      * @param assetId 资产标识

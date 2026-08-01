@@ -47,18 +47,24 @@
   ScanTaskNotFoundException}`；`com.repograph.scanner.{ScanTaskStore,DefaultScanTaskService,ScannerAsyncConfig}`；
   端点并入 `ScannerController`（复用其 option 解析），`ScanTaskNotFoundException → 404`。
 
-### T10-2　任务取消
+### T10-2　任务取消 ✅ 已完成（2026-08-01）
 
 - **类型**：AFK
 - **被阻塞于**：T10-1
 - **覆盖验收**：CANCELLED 状态、主动取消
 - **要构建什么**：`POST /api/v1/scan-tasks/{id}/cancel`。QUEUED 任务永不启动 → `CANCELLED`；
-  RUNNING 任务协作式取消，复用 T3 的子进程强杀路径终止在跑的扫描器 → `CANCELLED`；
-  终态任务取消是幂等 no-op。
+  RUNNING 任务中断执行线程，经 `CliProcessRunner` 的 `InterruptedException` 分支 `destroyForcibly`
+  在跑的扫描器子进程 → `CANCELLED`；终态任务取消是幂等 no-op。
 - **验收标准**：
-  - [ ] QUEUED 取消 → CANCELLED，不产生 `scanner_runs`
-  - [ ] RUNNING 取消 → 子进程被杀，任务 CANCELLED，已完成扫描器结果保留
-- **验证方式**：提交长任务，RUNNING 时取消；子进程不存活断言 + 状态断言
+  - [x] QUEUED 取消 → CANCELLED，不产生 `scanner_runs`（`markRunning` 随后失败，永不执行）
+  - [x] RUNNING 取消 → 中断 worker 杀子进程，任务 CANCELLED，已完成扫描器结果保留
+    （`DefaultExternalScannerService` 在循环内逐个 `runStore.save`）
+- **验证方式**（已实现）：`ScanTaskStoreTest`（cancelIfQueued/cancelIfRunning 条件迁移）、
+  `DefaultScanTaskServiceTest`（cancelQueued 阻止 scan 调用；cancelRunning 用后台线程 + latch
+  验证 worker 被中断且终态保持 CANCELLED）、`ScannerControllerTest`（cancel 200/404 契约）。
+- **落点**：`ScanTaskStore.cancelIfQueued/cancelIfRunning`；`DefaultScanTaskService` 增 `running`
+  注册表（taskId→Thread）+ `cancel()`，`runTask` finally 清中断标志；`ScanTaskService.cancel`；
+  `ScannerController` 增 `POST /scan-tasks/{id}/cancel`。
 
 ### T10-3　并发配额与调度（全局 / 项目 / 扫描器级）
 

@@ -22,6 +22,16 @@ public interface ScanTaskService {
     ScanTask submit(ImportedAsset asset, ExternalScanOptions options);
 
     /**
+     * 取消一个任务。{@code QUEUED} 任务将永不启动；{@code RUNNING} 任务会中断执行线程以终止
+     * 正在运行的扫描器子进程，已完成扫描器的运行结果仍保留。终态任务为幂等 no-op。
+     *
+     * @param taskId 任务标识
+     * @return 取消后的任务
+     * @throws ScanTaskNotFoundException 任务不存在
+     */
+    ScanTask cancel(String taskId);
+
+    /**
      * 按标识查询任务。
      *
      * @param taskId 任务标识

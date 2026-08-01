@@ -16,6 +16,7 @@ import com.repograph.core.scanner.ExternalScanService;
 import com.repograph.core.scanner.ScanBatchStatus;
 import com.repograph.core.scanner.ScanTask;
 import com.repograph.core.scanner.ScanTaskFindingsPage;
+import com.repograph.core.scanner.ScanTaskNotFoundException;
 import com.repograph.core.scanner.ScanTaskService;
 import com.repograph.core.scanner.ScanTaskStatus;
 import com.repograph.core.scanner.ScannerAvailability;
@@ -137,6 +138,28 @@ class ScannerControllerTest {
                 .andExpect(jsonPath("$.total").value(3))
                 .andExpect(jsonPath("$.findings", org.hamcrest.Matchers.hasSize(1)))
                 .andExpect(jsonPath("$.findings[0].ruleId").value("rule-a"));
+    }
+
+    @Test
+    void cancelScanTask_returnsCancelledStatus() throws Exception {
+        when(scanTaskService.cancel("task-1")).thenReturn(new ScanTask(
+                "task-1", "project-1", "asset-1", List.of("SEMGREP"),
+                List.of("java"), 300, ScanTaskStatus.CANCELLED, 1, "", "",
+                "2026-08-01T00:00:00Z", "2026-08-01T00:00:05Z"));
+
+        mvc.perform(post("/api/v1/scan-tasks/task-1/cancel"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.taskId").value("task-1"))
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+    }
+
+    @Test
+    void cancelScanTask_returns404ForUnknownTask() throws Exception {
+        when(scanTaskService.cancel("nope"))
+                .thenThrow(new ScanTaskNotFoundException("scan task not found: nope"));
+
+        mvc.perform(post("/api/v1/scan-tasks/nope/cancel"))
+                .andExpect(status().isNotFound());
     }
 
     @Test

@@ -18,8 +18,10 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 
 /**
@@ -39,6 +41,9 @@ public class DefaultScanTaskService implements ScanTaskService {
     private final ExternalScanService externalScanService;
     private final AssetImportService assetImportService;
     private final Executor executor;
+
+    /** 正在执行的任务 → 执行线程，供取消 {@code RUNNING} 任务时中断以终止子进程。 */
+    private final Map<String, Thread> running = new ConcurrentHashMap<>();
 
     /**
      * 创建异步扫描任务服务。
@@ -98,20 +103,46 @@ public class DefaultScanTaskService implements ScanTaskService {
             // 已被取消、已在运行或已终态：不重复执行。
             return;
         }
-        Optional<ImportedAsset> asset = assetImportService.find(task.assetId());
-        if (asset.isEmpty()) {
-            store.fail(taskId, "asset not found: " + task.assetId(), Instant.now().toString());
-            return;
-        }
+        running.put(taskId, Thread.currentThread());
         try {
+            Optional<ImportedAsset> asset = assetImportService.find(task.assetId());
+            if (asset.isEmpty()) {
+                store.fail(taskId, "asset not found: " + task.assetId(), Instant.now().toString());
+                return;
+            }
             ExternalScanOptions options = new ExternalScanOptions(
                     new LinkedHashSet<>(task.scanners()), task.languages(), task.timeoutSeconds());
             ExternalScanBatchResult batch = externalScanService.scan(asset.get(), options);
+            // 若期间被取消（状态已非 RUNNING），complete 为条件 no-op，CANCELLED 得以保留。
             store.complete(taskId, batch, mapStatus(batch.status()), Instant.now().toString());
         } catch (RuntimeException e) {
             log.warn("Scan task {} failed", taskId, e);
+            // 取消导致的中断同样进入此分支，fail 为条件 no-op，不覆盖 CANCELLED。
             store.fail(taskId, structuredError(e), Instant.now().toString());
+        } finally {
+            running.remove(taskId);
+            // 清除可能因取消/超时残留的中断标志，避免污染线程池中的下一个任务。
+            Thread.interrupted();
         }
+    }
+
+    @Override
+    public ScanTask cancel(String taskId) {
+        ScanTask task = store.find(taskId)
+                .orElseThrow(() -> new ScanTaskNotFoundException("scan task not found: " + taskId));
+        String now = Instant.now().toString();
+        if (store.cancelIfQueued(taskId, now)) {
+            return store.find(taskId).orElse(task);
+        }
+        if (store.cancelIfRunning(taskId, now)) {
+            Thread worker = running.get(taskId);
+            if (worker != null) {
+                worker.interrupt();
+            }
+            return store.find(taskId).orElse(task);
+        }
+        // 已终态或已取消：幂等 no-op。
+        return task;
     }
 
     @Override
