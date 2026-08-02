@@ -7,6 +7,8 @@ import com.repograph.asset.UnsupportedArchiveException;
 import com.repograph.core.asset.AssetBusyException;
 import com.repograph.core.asset.AssetNotReadyException;
 import com.repograph.core.finding.ReviewQueueEntryNotFoundException;
+import com.repograph.core.finding.RuleNotFoundException;
+import com.repograph.core.finding.RuleTransitionException;
 import com.repograph.core.scanner.ScanTaskNotFoundException;
 import com.repograph.finding.ExternalFindingImportException;
 import com.repograph.finding.github.GitHubCommentException;
@@ -187,6 +189,33 @@ public class GlobalExceptionHandler {
         log.debug("Review queue entry not found: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(Map.of("error", messageOr(ex, "Review queue entry not found")));
+    }
+
+    /**
+     * 处理规则或版本不存在，返回 404 Not Found。
+     *
+     * @param ex 规则不存在异常
+     * @return 结构化 404 响应
+     */
+    @ExceptionHandler(RuleNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleRuleNotFound(RuleNotFoundException ex) {
+        log.debug("Rule not found: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(Map.of("code", "RULE_NOT_FOUND", "error", messageOr(ex, "Rule not found")));
+    }
+
+    /**
+     * 处理非法生命周期迁移或回归闸门拒绝，返回 409 Conflict。
+     *
+     * @param ex 规则迁移冲突
+     * @return 结构化 409 响应
+     */
+    @ExceptionHandler(RuleTransitionException.class)
+    public ResponseEntity<Map<String, String>> handleRuleTransition(RuleTransitionException ex) {
+        log.debug("Rule transition rejected: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(Map.of("code", "RULE_TRANSITION_REJECTED",
+                        "error", messageOr(ex, "Rule transition rejected")));
     }
 
     /**

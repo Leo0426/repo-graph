@@ -201,6 +201,19 @@ repograph-taint-engine/   WALA-based IFDS 精确污点引擎
   结论/状态/规则/更新时间筛选）、`POST /{entryId}/claim|return|confirm|reject`、
   `GET /{entryId}/audit`、`GET /snapshots/{snapshotId}/export?format=markdown|json`。
 
+**规则注册与发布回归闸门**（P1 T11-1，`com.repograph.finding`）：
+- `DetectionRule` 统一保存来源、语言/框架、CWE、严重程度、版本、状态、变更说明、matcher 和正负回归样本；
+  `RuleRegistry` 接口位于 core，SQLite 实现 `RuleRegistryStore` 位于 finding，保持单向依赖。
+- 生命周期为 `CANDIDATE → IN_REVIEW → PUBLISHED / REJECTED`；发布前以纯函数执行全部回归样本：正样本
+  必须命中且负样本必须不命中。失败返回冲突且版本保持 `IN_REVIEW`，不会产生虚假发布状态。
+- 同一 `ruleId` 的版本号单调递增，SQLite 部分唯一索引保证至多一个活动版本；新版本发布后旧版本保留为
+  非活动 `PUBLISHED` 历史，回滚把当前版本标记 `ROLLED_BACK` 并恢复上一已发布版本。
+- 创建、提交评审、发布、驳回、替代、回滚和恢复均写不可变审计事件，记录操作者、时间和理由。
+- REST：`POST /api/v1/rules` 创建候选；`POST /{ruleId}/versions/{version}/review|publish|reject`；
+  `POST /{ruleId}/rollback`；`GET /api/v1/rules`、版本/活动版本查询和 `GET /{ruleId}/audit`。
+- 当前 matcher 仅支持 `REGEX / SUBSTRING` 和内联代码片段回归集；它是 T11 的版本化发布脊柱，尚未替换
+  `CodeVulnScanner` 的内置规则，也不自动接入外部情报。格式化、效果评估和情报评审分别留给 T11-3/2/4。
+
 ## 外部扫描器编排
 
 - **领域边界**：`ScannerAdapter` 声明语言、命令、输出格式和前置条件；`ExternalScanService` 负责按工具
