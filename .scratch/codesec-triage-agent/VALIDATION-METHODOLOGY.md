@@ -30,8 +30,8 @@ roadmap（`docs/generated/roadmap-codesec-triage-agent.md`）P0 阶段的验证�
    REPOGRAPH_QDRANT_VECTOR_SIZE=768 \
    REPOGRAPH_OLLAMA_BASE_URL=http://localhost:11434 \
    REPOGRAPH_OLLAMA_MODEL=nomic-embed-text \
-   java --enable-preview --enable-native-access=ALL-UNNAMED \
-     -jar repograph-app/build/libs/repograph-app-<version>.jar serve
+java --enable-preview --enable-native-access=ALL-UNNAMED \
+     -jar repograph-app/build/libs/repograph-app-<version>.jar
    ```
 
 ## 每轮验证的执行步骤

@@ -86,7 +86,7 @@ public class RepographApiClient {
             throw e;
         } catch (java.net.ConnectException e) {
             throw new RepographApiException(
-                    "Cannot connect to repograph-app at " + baseUrl + ". Is it running? Try: repograph serve", e);
+                    "Cannot connect to repograph-app at " + baseUrl + ". Is the Web service running?", e);
         } catch (Exception e) {
             throw new RepographApiException("HTTP request failed: " + e.getMessage(), e);
         }
@@ -121,7 +121,7 @@ public class RepographApiClient {
             throw e;
         } catch (java.net.ConnectException e) {
             throw new RepographApiException(
-                    "Cannot connect to repograph-app at " + baseUrl + ". Is it running? Try: repograph serve", e);
+                    "Cannot connect to repograph-app at " + baseUrl + ". Is the Web service running?", e);
         } catch (Exception e) {
             throw new RepographApiException("HTTP request failed: " + e.getMessage(), e);
         }
@@ -158,7 +158,7 @@ public class RepographApiClient {
             throw e;
         } catch (java.net.ConnectException e) {
             throw new RepographApiException(
-                    "Cannot connect to repograph-app at " + baseUrl + ". Is it running? Try: repograph serve", e);
+                    "Cannot connect to repograph-app at " + baseUrl + ". Is the Web service running?", e);
         } catch (Exception e) {
             throw new RepographApiException("HTTP request failed: " + e.getMessage(), e);
         }

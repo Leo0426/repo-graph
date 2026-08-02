@@ -6,8 +6,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 /**
  * Spring Boot 应用入口，扫描所有 {@code com.repograph} 包下的组件。
  *
- * <p>CLI 命令通过 Picocli Spring Boot Starter 集成，{@code @Command} bean 由 Spring 管理并支持依赖注入。
- * 运行 {@code repograph serve} 时启动内嵌 Web 服务器；其他子命令执行完毕后退出。
+ * <p>应用对外提供 Web、REST 和 MCP 接口；索引与分析操作统一通过这些接口触发。
  *
  * @author leolu
  * @since 0.1.0
@@ -18,7 +17,7 @@ public class RepographApplication {
     /**
      * 应用启动入口。
      *
-     * @param args 命令行参数，由 Picocli 解析为对应子命令
+     * @param args Spring Boot 启动参数
      */
     public static void main(String[] args) {
         SpringApplication.run(RepographApplication.class, args);

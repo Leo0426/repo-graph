@@ -13,9 +13,6 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-thymeleaf")
 
-    // CLI
-    implementation(libs.picocli.spring)
-
     // Storage
     implementation(libs.sqlite.jdbc)
     implementation(libs.neo4j.driver)
@@ -41,7 +38,6 @@ dependencies {
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation(libs.neo4j.harness)
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 // Forward benchmark.* system properties to the test JVM.

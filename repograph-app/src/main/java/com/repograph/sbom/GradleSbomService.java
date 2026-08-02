@@ -60,7 +60,7 @@ public class GradleSbomService implements SbomService {
         // 版本目录中的依赖库
         for (LibEntry lib : catalogLibs) {
             String version = lib.version.isEmpty() ? versions.getOrDefault(lib.versionRef, "") : lib.version;
-            // 版本目录别名使用短横线；Gradle 访问器使用点号（picocli-spring → picocli.spring）
+            // 版本目录别名使用短横线；Gradle 访问器使用点号（spring-boot → spring.boot）
             String accessor = lib.alias.replace("-", ".");
             String scope = catalogScopeMap.getOrDefault(accessor, "required");
             deps.add(new Dependency(lib.groupId, lib.artifactId, version, scope));
@@ -176,7 +176,7 @@ public class GradleSbomService implements SbomService {
             Matcher m = CATALOG_DEP_PATTERN.matcher(script);
             while (m.find()) {
                 String configuration = m.group(1);
-                String accessor = m.group(2); // e.g. "picocli.spring"
+                String accessor = m.group(2); // e.g. "spring.boot"
                 map.put(accessor, mapConfigToScope(configuration));
             }
         }

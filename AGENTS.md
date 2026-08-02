@@ -51,7 +51,7 @@
 ./gradlew build -x test   # 快速构建
 ./gradlew test            # 跑测试
 java --enable-preview --enable-native-access=ALL-UNNAMED \
-  -jar repograph-app/build/libs/repograph-app-0.1.0-SNAPSHOT.jar serve
+  -jar repograph-app/build/libs/repograph-app-0.5.0.jar
 ```
 
 ## 版本管理

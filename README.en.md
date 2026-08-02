@@ -30,7 +30,7 @@ RepoGraph indexes your source code into a graph + vector database running entire
 
 RepoGraph's end goal is to be a **context provider for LLM agents**: let an agent locate the right context on demand inside a large codebase through tool calls, instead of stuffing the whole repo into a context window. The MCP toolset + GraphRAG retrieval are the core deliverables.
 
-The current phase ships as a **standalone code-audit platform** — every analysis capability is built and validated on the platform first (web console / REST / CLI), then exposed as MCP tools step by step (see [Roadmap](#roadmap)).
+The current phase ships as a **standalone code-audit platform** — every analysis capability is built and validated on the platform first (web console / REST), then exposed as MCP tools step by step (see [Roadmap](#roadmap)).
 
 **Scope boundary**: static heuristic analysis, not full compiler semantics — coarse-to-medium granularity is enough for retrieval and auditing; the WALA IFDS precise taint engine covers the cases that demand maximum precision. Fully local; code never leaves your network.
 
@@ -73,7 +73,7 @@ The current phase ships as a **standalone code-audit platform** — every analys
 | Quality | Code metrics | Cyclomatic complexity, coupling / instability, package cycles (Tarjan SCC), git churn hotspots |
 | Quality | Health report | Six-dimension score aggregating vulnerabilities, cycles, complexity, test gaps, dead code |
 | Visualization | Dependency graph export | Package-level dependency graph → DOT / Mermaid, cycles highlighted |
-| AI integration | MCP server | 18 stdio MCP tools — search / GraphRAG / call graph / taint / vulns / indexing |
+| AI integration | MCP server | 23 stdio MCP tools — search / GraphRAG / call graph / taint / vulns / indexing |
 | UI | Web console | Search, graph, flow analysis, vulnerability panel, stats, indexing, health — at `localhost:8080` |
 
 ---
@@ -103,7 +103,7 @@ The current phase ships as a **standalone code-audit platform** — every analys
 ```
 ┌─────────────────────────────────┐    ┌──────────────────┐
 │        repograph-app            │    │  repograph-mcp   │
-│  Spring Boot REST API + CLI     │◄───│  MCP stdio server│
+│  Spring Boot Web + REST API     │◄───│  MCP stdio server│
 │                                 │    │  (AI tool bridge)│
 │  Parser  ──► Graph ──► Vector   │    └──────────────────┘
 │  (Java/C/Python)  Neo4j  Qdrant │
@@ -157,62 +157,20 @@ Starts Qdrant (`:16333`/`:16334`) and Neo4j (`:7474`/`:7687`). Ollama runs separ
 ./gradlew :repograph-app:bootJar -x test
 ```
 
-**3. Index a project and start the server**
+**3. Start the server and index a project**
 
 ```bash
 # Start the REST server
 java --enable-native-access=ALL-UNNAMED \
-  -jar repograph-app/build/libs/repograph-app-0.5.0.jar serve
+  -jar repograph-app/build/libs/repograph-app-0.5.0.jar
 
-# In another terminal — index your project
-java --enable-native-access=ALL-UNNAMED \
-  -jar repograph-app/build/libs/repograph-app-0.5.0.jar \
-  index /path/to/your/project
+# In another terminal — index your project asynchronously through REST
+curl -X POST "http://localhost:8080/api/v1/index/project" \
+  -H "Content-Type: application/json" \
+  -d '{"projectRoot":"/path/to/your/project"}'
 ```
 
 Open **http://localhost:8080** for the web console.
-
----
-
-## CLI Reference
-
-```
-repograph index <projectRoot>        Scan and build vector index + knowledge graph
-repograph search <query>             Semantic search (natural language)
-repograph symbol <qualifiedName>     Show symbol details
-repograph locate <file> <line>       Resolve line number to symbol
-repograph callers <symbol>           Find callers (with depth)
-repograph callees <symbol>           Find callees (with depth)
-repograph impact <symbol>            Transitive impact analysis
-repograph subtypes <type>            Find subclasses and interface implementations
-repograph entrypoints                List framework entry points
-repograph projects                   List indexed projects
-repograph stats <projectId>          Project statistics
-repograph sbom <projectId>           Generate SBOM (CycloneDX JSON) — auto-detects Maven / Gradle / npm / pip
-repograph delete <projectRoot>       Remove project index
-repograph watch <projectRoot>        Watch for file changes and auto-reindex
-repograph serve                      Start REST server
-repograph complexity <projectId>     Cyclomatic complexity ranking
-repograph coupling <projectId>       Coupling / instability analysis
-repograph cycles <projectId>         Package cycle detection
-repograph hotspots <projectId>       Git churn hotspots
-repograph deadcode <projectId>       Dead code detection
-repograph testgap <projectId>        Test gap detection
-repograph report <projectId>         Code health report (6 dimensions + score)
-repograph export <projectId>         Package dependency graph (DOT / Mermaid)
-repograph vuln scan-code <projectId>             Scan for code vulnerabilities
-repograph vuln scan-deps <projectId> <root>      Scan dependencies against advisory DB
-repograph vuln list <projectId>                  List vulnerability findings
-repograph vuln report <projectId> [--out FILE]   Generate vulnerability report
-```
-
-Common `index` options:
-
-```
---lang java,c,python    Target languages (default: all)
---strategy auto         Parse strategy: auto / precise / heuristic
---no-incremental        Force full reindex
-```
 
 ---
 
@@ -384,7 +342,7 @@ repograph:
 ```
 
 **Build outputs:**
-- `repograph-app/build/libs/repograph-app-0.5.0.jar` — REST server + CLI
+- `repograph-app/build/libs/repograph-app-0.5.0.jar` — Web / REST server
 - `repograph-mcp/build/libs/repograph-mcp-exec.jar` — MCP stdio server
 - `./gradlew :repograph-taint-engine:installDist` — precise taint engine (`build/install/repograph-taint-engine/`, invoked as a subprocess by the precise scan)
 
@@ -411,7 +369,7 @@ Phase 2 (next)      LLM-agent context provider
 
 ### Phase 1 — Audit Platform ✓
 
-Everything in the [Features](#features) table is implemented and available today via the web console, REST API, and CLI.
+Everything in the [Features](#features) table is implemented and available today via the web console, REST API, and MCP.
 
 ### Phase 2 — LLM Agent Integration (in progress)
 

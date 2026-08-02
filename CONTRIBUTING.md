@@ -57,7 +57,7 @@ repograph-app/src/main/java/com/repograph/
   flow/         CFG / PDG / taint analysis (Java)
   framework/    Spring / JAX-RS annotation detection
   vuln/         Vulnerability scanning and advisory store
-  app/          Picocli CLI + index pipeline + Spring Boot entry point
+  app/          Index pipeline + Spring Boot entry point
   api/          Spring MVC REST controllers
 ```
 

@@ -30,23 +30,14 @@ dependencies {
 
     // WALA 传递依赖(flatDir 不带 POM,需手动声明)
     implementation("com.google.guava:guava:32.0.0-jre")
-    implementation("com.google.code.gson:gson:2.10.1")
     implementation("commons-io:commons-io:2.15.1")
 
-    // 引擎自身:source/sink 配置解析、AST 辅助
+    // 引擎自身:source/sink JSON/XML 配置解析
     implementation("com.alibaba.fastjson2:fastjson2:2.0.44")
     implementation("org.dom4j:dom4j:2.1.4")
-    implementation("org.javassist:javassist:3.30.2-GA")
-
-    implementation("com.fasterxml.jackson.core:jackson-databind:2.14.2")
-    implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.14.2")
-    // 规则反射注册
-    implementation("org.reflections:reflections:0.10.2")
 
     implementation("org.slf4j:slf4j-api")
 
-    testImplementation("org.junit.jupiter:junit-jupiter")
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testRuntimeOnly("org.slf4j:slf4j-simple:2.0.9")
 }
 

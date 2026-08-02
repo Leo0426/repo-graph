@@ -34,7 +34,7 @@ AI Native SAST 报警研判与修复 Agent：接入现有 SAST / SCA / CI 工具
 三个 Gradle 子项目，源码均在对应子项目下：
 
 ```
-repograph-app/   Spring Boot 服务 + Picocli CLI
+repograph-app/   Spring Boot Web/REST 服务
   com.repograph.core/        领域模型 + 接口定义
     model/        CodeUnit / CodeUnitKind / RelationEdge / EdgeKind
     parser/       CodeParser / ParseResult / ParseStrategy / ParseOptions
@@ -85,7 +85,7 @@ repograph-app/   Spring Boot 服务 + Picocli CLI
     HealthReportService       聚合六维度生成健康分（100 起扣分制）
   com.repograph.export/      GraphExportService（包级依赖图 → DOT / Mermaid）
   com.repograph.api/         Spring MVC REST 控制器
-  com.repograph.app/         Picocli CLI + 索引管道（DefaultIndexPipeline）+ Spring Boot 入口
+  com.repograph.app/         索引管道（DefaultIndexPipeline）+ Spring Boot 入口
 
 repograph-mcp/   独立 MCP stdio 服务（JSON-RPC，供 AI 工具调用，通过 HTTP 转发至 repograph-app）
 
@@ -98,19 +98,14 @@ repograph-taint-engine/   WALA-based IFDS 精确污点引擎
     domain/       TaintDomain / AccessPath（field-sensitive 域）
     flow/         Call / Return / Normal / CallToReturn 四类 IFDS 流函数
     prelim/       SSA 传递函数、AccessPath 收集与预分析（稀疏化）
-    summary/      StubDroid 风格 XML library summary
-    npdnorm/      空指针解引用 IFDS 分析（复用同一 solver 框架）
-    invoke/       规则注册与分发（RuleFactory / *RuleManager）
-    ── 以下为随引擎迁移的边界层，是接入 repo-graph 的"接缝"，后续替换/映射 ──
     api/          IContext / DefaultContext / rules / TaintResult（配置与输出契约）
     sourcesink/   Source / Sink / Kill 定义 + JSON/XML Provider
-    report/       源码行定位 + 结果 DTO（待映射到 com.repograph.vuln VulnFinding/TaintPath）
     support/framework/spring/   @Controller/@RequestMapping 入口点与 HTTP source 识别
     extutil/      DFAUtils / FileUtils（WALA IR 操作辅助）
   libs/           vendored 补丁 WALA jar（见下方 ADR）
 ```
 
-> **状态**：288 个 repograph-app 源文件，0-error 编译。**引擎端到端已跑通并验证**：
+> **状态**：289 个 repograph-app 主源码文件，0-error 编译。**引擎端到端已跑通并验证**：
 > 32 个 JUnit 全绿，含端到端集成测试
 > （`e2e.TaintAnalysisEndToEndTest` 走 `TaintScanRunner`，即 CLI 内部同一管道）——在编译后的 fixture 上跑
 > 完整 WALA+IFDS 管道，成功检出 `System.getenv → Runtime.exec` 命令注入污点流。
@@ -125,7 +120,7 @@ repograph-taint-engine/   WALA-based IFDS 精确污点引擎
    故 `repograph-taint-engine` 的 Gradle toolchain 固定为 **JDK 21**。**引擎运行时同样需要带 jmods 的 JDK**
    —— 这与 repograph-app 需要 JDK 25（FFM/tree-sitter）冲突，是 app 接入的核心决策点（见 ADR）。
 2. **需要 WALA 排除文件**：不剪 JRE 时，访问路径预分析（AssemblerAP）在全 java.base 超图上会卡死。
-   `src/test/resources/JavaTaintExclusions.txt` 剪掉 GUI/security/concurrent/stream 等昂贵闭包后，
+   `src/main/resources/JavaTaintExclusions.txt` 剪掉 GUI/security/concurrent/stream 等昂贵闭包后，
    调用图收敛，端到端分析 <1s 完成。
 3. **source/sink 为库方法**：`SourceDefinition/SinkDefinition.getMethodReference()` 硬编码 Primordial
    类加载器，故 source/sink 通常是 JRE 库方法（如 System.getenv / Runtime.exec）才能匹配调用点。
@@ -524,13 +519,14 @@ app（JDK 25）以子进程在带 jmods 的 JDK 上运行 `repograph-taint-engin
 | 图存储 | Neo4j 5.x（Bolt）| 原生图遍历（Cypher 变长路径），跨进程共享，免应用层 BFS 与 JSON 快照 |
 | 行号 | 1-based | 与编辑器对齐 |
 | 索引 API | 异步（202）| Embedding 大模型耗时数十分钟，同步会超时 |
+| 应用对外入口 | Web/REST + MCP，不保留内嵌 Picocli | 运行态验证表明传入 `--help` 仍直接启动 Spring 服务，29 个命令类从未接入启动入口；其 23 个测试仅直接实例化孤立命令对象。删除这组失效接口可减少重复编排层；未来若确有脚本化需求，应新增独立的轻量 REST 客户端。 |
 | 函数内流图 | 按需生成，不持久化语句节点 | 避免 Neo4j 图规模膨胀，同时支持局部 CFG/PDG 分析 |
 | Advisory 数据库 | 离线 JSON 打包至 classpath + SQLite 持久化 | 完全离线，无需外部请求；启动时幂等 seed，可追加导入 |
 | 漏洞扫描分层 | CodeVuln（快）+ TaintVuln（精）+ DepsVuln（依赖）| 各层互补，不强制串行 |
 | 质量指标 | 启发式 rawSource 统计 | 无需完整 AST，对大代码库仍有可接受精度 |
 | IFDS 引擎 | 独立子模块 repograph-taint-engine（WALA-based）| 字节码级 field-sensitive 精确污点，作为未来第四条扫描路径（要求目标可编译），与源码级 TaintVuln 各管一档，不替换 |
 | IFDS 依赖的 WALA | vendored 补丁 fork（core/util/shrike 1.6.10-SNAPSHOT，libs/ 内 flatDir）| 引擎覆写 TabulationSolver 的 processNormal/propToReturnSite（官方为 private/final），并访问 supergraph/flowFunctionMap 等（官方为 private）；官方 Maven 版编译不过。补丁来源 WALA checkout 分支 cb205619d |
-| IFDS 边界层 | 语义核心原样复制（sourcesink/DFAUtils/spring-annotations 等），不手写重写 | 真实依赖闭环约 230 文件、重语义（DFAUtils 1186 行 WALA IR 操作等）；手写重写会引入静默行为偏离。report/输出层保留为接缝，待映射到 VulnFinding/TaintPath |
+| IFDS 引擎代码边界 | 只保留从生产入口 `TaintScanCli` 可达的 133 个主源码类 | app 与引擎的唯一契约是 CLI 参数和 JSON 输出；字节码依赖分析确认旧 NPD、RuleFactory、report/summary 实现共 73 类对生产入口不可达，且仅被 7 个无 JUnit `@Test` 的手工 main 壳引用。删除后 clean build、32 个测试和端到端污点流保持通过；未来若需要 NPD 等能力，应作为显式新切片重新引入，不继续携带休眠实现。 |
 | IFDS 引擎运行 JDK | 固定 JDK 21（带 jmods），与 app 的 JDK 25 分离 | WALA 需 jmods 建 JRE 模型，JDK 25 无 jmods |
 | IFDS 引擎接入方式 | **方案 A：独立进程**（installDist + TaintScanCli，app 子进程调用） | 彻底隔离 JDK 冲突（app JDK25 / 引擎 JDK21）；app 无需依赖引擎模块，仅解析其 JSON 输出；契合"精确扫描是要求可编译、按需触发的重路径"定位 |
 | IFDS 引擎共享可变状态 | 每次扫描独立进程（生产）/ 测试 forkEvery=1 + 方法定序 | `DomainElement.ZERO` 被 `TaintDomain.add` 就地合并 Info，同 JVM 连跑多次分析会污染；独立进程天然隔离，测试镜像之 |

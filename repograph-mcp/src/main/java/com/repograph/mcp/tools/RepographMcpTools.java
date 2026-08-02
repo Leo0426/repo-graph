@@ -698,7 +698,7 @@ public class RepographMcpTools {
         Optional<JsonNode> result = client.get("/api/v1/projects");
         if (result.isEmpty() || !result.get().isArray() || result.get().isEmpty()) {
             return "No projects indexed yet.\n\n" +
-                   "Run `repograph index <path>` or `POST /api/v1/index/project` to index a codebase.";
+                   "Run `POST /api/v1/index/project` or use `trigger_index` to index a codebase.";
         }
         JsonNode projects = result.get();
         var sb = new StringBuilder();

@@ -1,6 +1,9 @@
 package com.repograph.benchmark;
 
-import com.repograph.benchmark.BenchmarkCase.Type;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.repograph.core.util.ProjectIdUtil;
 import com.repograph.core.vector.SearchOptions;
 import com.repograph.core.vector.SearchPage;
@@ -17,8 +20,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -33,7 +40,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  *   <li>Ollama 已启动（默认 {@code http://192.168.4.113:11434}），
  *       加载了 {@code manutic/nomic-embed-code} 模型</li>
  *   <li>Qdrant 已启动（默认 {@code localhost:16334}）</li>
- *   <li>repograph-app 目录已被索引（运行 {@code repograph index /path/to/repograph-app}）</li>
+ *   <li>repograph-app 目录已通过 REST API 建立索引</li>
  * </ol>
  * <p>任何条件未满足时所有测试自动跳过，不计为失败。
  *
@@ -196,7 +203,7 @@ class CodeRetrievalBenchmark {
 
         new BenchmarkCase("S23", "locate code by file and line",
                 "locate the smallest code symbol that contains a given file path and line number",
-                Type.SEMANTIC, List.of("locateByPosition", "LocateCommand"))
+                Type.SEMANTIC, List.of("locateByPosition", "SymbolController"))
     );
 
     // ══════════════════════════════════════════════════════════════
@@ -287,7 +294,7 @@ class CodeRetrievalBenchmark {
         }
         assumeTrue(!page.results().isEmpty(),
                 "[benchmark] Project not indexed (projectId=" + projectId + ").\n"
-                + "  Index it first:  repograph index " + projectRoot);
+                + "  Index it first via POST /api/v1/index/project?projectRoot=" + projectRoot);
 
         System.out.println("[benchmark] probe OK — corpus size ≥ 1, starting benchmark…");
     }
@@ -417,5 +424,176 @@ class CodeRetrievalBenchmark {
             dir = dir.getParent();
         }
         return Paths.get("").toAbsolutePath();
+    }
+
+    private enum Type { SEMANTIC, CODE }
+
+    private record BenchmarkCase(
+            String id,
+            String description,
+            String query,
+            Type type,
+            List<String> expectedPatterns
+    ) {
+    }
+
+    private record BenchmarkResult(
+            BenchmarkCase benchCase,
+            int rank,
+            float topScore,
+            float hitScore,
+            List<String> retrieved
+    ) {
+        private boolean hitAt(int k) {
+            return rank >= 1 && rank <= k;
+        }
+
+        private double reciprocalRank() {
+            return rank >= 1 ? 1.0 / rank : 0.0;
+        }
+    }
+
+    private static final class BenchmarkReporter {
+
+        private static final int[] KS = {1, 3, 5, 10};
+        private static final int DESC_WIDTH = 50;
+
+        private BenchmarkReporter() {
+        }
+
+        private static void print(String title, List<BenchmarkResult> results, int k) {
+            System.out.println();
+            System.out.println("── " + title + " (" + results.size() + " queries, K=" + k + ") "
+                    + "─".repeat(40));
+            printHeader();
+            results.forEach(result -> printRow(result, k));
+            System.out.println("  " + "─".repeat(82));
+            printAggregate(results, k);
+            printMisses(results, k);
+        }
+
+        private static void printHeader() {
+            System.out.printf("  %-4s  %-" + DESC_WIDTH + "s  %3s %3s %3s %3s  %4s  %9s%n",
+                    "ID", "Query / Description", "@1", "@3", "@5", "10", "Rank", "HitScore");
+            System.out.println("  " + "─".repeat(82));
+        }
+
+        private static void printRow(BenchmarkResult result, int k) {
+            String description = result.benchCase().description();
+            if (description.length() > DESC_WIDTH) {
+                description = description.substring(0, DESC_WIDTH - 1) + "…";
+            }
+            System.out.printf("  %-4s  %-" + DESC_WIDTH + "s  %3s %3s %3s %3s  %4s  %9.3f%n",
+                    result.benchCase().id(), description,
+                    mark(result, 1), mark(result, 3), mark(result, 5), mark(result, 10),
+                    result.rank() > 0 ? String.valueOf(result.rank()) : "—", result.hitScore());
+        }
+
+        private static String mark(BenchmarkResult result, int k) {
+            return result.hitAt(k) ? "✓" : "✗";
+        }
+
+        private static void printAggregate(List<BenchmarkResult> results, int k) {
+            System.out.print(" ");
+            for (int currentK : KS) {
+                long hits = results.stream().filter(result -> result.hitAt(currentK)).count();
+                System.out.printf("  Hit@%-2d %5.1f%%", currentK, 100.0 * hits / results.size());
+            }
+            System.out.println();
+
+            double mrr = results.stream().mapToDouble(BenchmarkResult::reciprocalRank).average().orElse(0);
+            double avgTop1 = results.stream().mapToDouble(BenchmarkResult::topScore).average().orElse(0);
+            System.out.printf("  MRR@%-2d %.3f    Avg top-1 score %.3f%n%n", k, mrr, avgTop1);
+        }
+
+        private static void printMisses(List<BenchmarkResult> results, int k) {
+            List<BenchmarkResult> misses = results.stream().filter(result -> !result.hitAt(k)).toList();
+            if (misses.isEmpty()) {
+                return;
+            }
+            System.out.println("  Misses (rank > " + k + " or not found):");
+            for (BenchmarkResult miss : misses) {
+                System.out.printf("    %s  \"%s\"%n", miss.benchCase().id(), miss.benchCase().query());
+                System.out.printf("       expected : %s%n", miss.benchCase().expectedPatterns());
+                if (!miss.retrieved().isEmpty()) {
+                    System.out.printf("       top-1    : %s  (score=%.3f)%n",
+                            miss.retrieved().get(0), miss.topScore());
+                } else {
+                    System.out.println("       top-1    : (no results returned)");
+                }
+            }
+            System.out.println();
+        }
+    }
+
+    private static final class BenchmarkJsonWriter {
+
+        private static final ObjectMapper MAPPER = new ObjectMapper()
+                .enable(SerializationFeature.INDENT_OUTPUT);
+        private static final DateTimeFormatter FORMATTER =
+                DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        private static final Path OUTPUT_FILE =
+                Path.of(System.getProperty("user.home"), ".repograph", "benchmark-latest.json");
+
+        private BenchmarkJsonWriter() {
+        }
+
+        private static void write(String projectLabel, int k,
+                                  List<BenchmarkResult> semanticResults, double semanticThreshold,
+                                  List<BenchmarkResult> codeResults, double codeThreshold) {
+            try {
+                Files.createDirectories(OUTPUT_FILE.getParent());
+                ObjectNode root = MAPPER.createObjectNode();
+                root.put("generatedAt", LocalDateTime.now().format(FORMATTER));
+                root.put("projectLabel", projectLabel);
+                root.set("semantic", section("SEMANTIC SEARCH", k, semanticResults, semanticThreshold));
+                root.set("code", section("CODE SEARCH", k, codeResults, codeThreshold));
+                MAPPER.writeValue(OUTPUT_FILE.toFile(), root);
+                System.out.println("[benchmark] results written to " + OUTPUT_FILE);
+            } catch (IOException e) {
+                System.err.println("[benchmark] failed to write results JSON: " + e.getMessage());
+            }
+        }
+
+        private static ObjectNode section(String title, int k,
+                                          List<BenchmarkResult> results, double threshold) {
+            ObjectNode section = MAPPER.createObjectNode();
+            section.put("title", title);
+            section.put("total", results.size());
+            section.put("threshold", threshold);
+            section.put("hit1Rate", hitRate(results, 1));
+            section.put("hit3Rate", hitRate(results, 3));
+            section.put("hit5Rate", hitRate(results, 5));
+            section.put("hit10Rate", hitRate(results, k));
+            section.put("mrr10", mrr(results));
+            section.put("passed", hitRate(results, k) >= threshold);
+
+            ArrayNode cases = section.putArray("cases");
+            for (BenchmarkResult result : results) {
+                ObjectNode benchmarkCase = cases.addObject();
+                benchmarkCase.put("id", result.benchCase().id());
+                benchmarkCase.put("description", result.benchCase().description());
+                benchmarkCase.put("rank", result.rank());
+                benchmarkCase.put("topScore", result.topScore());
+                benchmarkCase.put("hitScore", result.hitScore());
+                benchmarkCase.put("hit1", result.hitAt(1));
+                benchmarkCase.put("hit3", result.hitAt(3));
+                benchmarkCase.put("hit5", result.hitAt(5));
+                benchmarkCase.put("hit10", result.hitAt(k));
+                benchmarkCase.put("topResult", result.retrieved().isEmpty() ? "" : result.retrieved().get(0));
+            }
+            return section;
+        }
+
+        private static double hitRate(List<BenchmarkResult> results, int k) {
+            if (results.isEmpty()) {
+                return 0;
+            }
+            return (double) results.stream().filter(result -> result.hitAt(k)).count() / results.size();
+        }
+
+        private static double mrr(List<BenchmarkResult> results) {
+            return results.stream().mapToDouble(BenchmarkResult::reciprocalRank).average().orElse(0);
+        }
     }
 }

@@ -48,7 +48,7 @@ class McpStdioServerTest {
         assertEquals(1, resp.path("id").asLong());
         assertEquals("2024-11-05", resp.path("result").path("protocolVersion").asText());
         assertEquals("repograph-mcp", resp.path("result").path("serverInfo").path("name").asText());
-        assertEquals("0.1.0",   resp.path("result").path("serverInfo").path("version").asText());
+        assertEquals("0.5.0",   resp.path("result").path("serverInfo").path("version").asText());
         assertFalse(resp.has("error"));
     }
 

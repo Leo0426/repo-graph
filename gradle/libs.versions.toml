@@ -10,7 +10,6 @@ neo4j-driver      = "5.21.0"
 neo4j-harness     = "5.21.0"
 spring-boot       = "3.4.5"
 spring-dep-mgmt   = "1.1.7"
-picocli           = "4.7.6"
 jackson           = "2.17.2"
 protobuf          = "3.24.0"
 commons-compress  = "1.28.0"
@@ -26,8 +25,6 @@ qdrant            = { module = "io.qdrant:client",                              
 neo4j-driver      = { module = "org.neo4j.driver:neo4j-java-driver",                  version.ref = "neo4j-driver" }
 neo4j-harness     = { module = "org.neo4j.test:neo4j-harness",                        version.ref = "neo4j-harness" }
 jackson-databind  = { module = "com.fasterxml.jackson.core:jackson-databind",         version.ref = "jackson" }
-picocli           = { module = "info.picocli:picocli",                                version.ref = "picocli" }
-picocli-spring    = { module = "info.picocli:picocli-spring-boot-starter",            version.ref = "picocli" }
 sqlite-jdbc       = { module = "org.xerial:sqlite-jdbc",                              version.ref = "sqlite-jdbc" }
 protobuf-java     = { module = "com.google.protobuf:protobuf-java",                   version.ref = "protobuf" }
 sootup-core          = { module = "org.soot-oss:sootup.core",          version.ref = "sootup" }

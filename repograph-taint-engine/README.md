@@ -13,10 +13,9 @@ field-sensitive 跨过程污点分析，在**编译后的字节码**上运行，
 
 ## 为什么是"试验性"
 
-- **迁移代码原样复制**：真实依赖闭环约 230 个文件、语义厚重（如 `DFAUtils` 1186 行 WALA IR 操作），
-  手写重写会引入静默行为偏离，故语义核心（`sourcesink/`、`extutil/`、`support/` 等）原样保留。
-- **边界层是接缝**：`api/`、`report/` 等配置与输出层随引擎一起迁入，后续将映射 / 替换为
-  repo-graph 自己的领域模型（`VulnFinding` / `TaintPath`）。
+- **生产闭包最小化**：以唯一生产入口 `TaintScanCli` 做编译后依赖可达性分析，只保留 133 个主源码类。
+  旧 NPD、规则反射注册、report/summary 等 73 个入口不可达类及 7 个未被 JUnit 执行的手工测试壳已移除；
+  语义核心（`sourcesink/`、`extutil/`、`support/` 等）不重写，避免静默行为偏离。
 - **vendored 补丁 WALA**：依赖打过访问修饰符补丁的 WALA fork（`libs/` 内 flatDir，
   core/util/shrike 1.6.10-SNAPSHOT，来源 WALA checkout 分支 cb205619d）。引擎覆写了
   `TabulationSolver` 的 `processNormal` / `propToReturnSite`（官方为 private/final），

@@ -26,7 +26,7 @@ MCP 工具、增量索引管道），区别只是包装和验证对象不同：
 |---|---|---|
 | 受众 | 企业研发安全团队 | 使用编码 Agent 的开发者/团队 |
 | 价值主张 | 减少 SAST 报警人工研判时间 | 减少编码 Agent 探索代码库的成本 |
-| 当前状态 | P0 完成 + 4 轮真实样本验证（见 `.scratch/codesec-triage-agent/VALIDATION-METHODOLOGY.md`） | MCP 工具已存在（21 个），未专门验证"减少探索成本"这个假设 |
+| 当前状态 | P0 完成 + 4 轮真实样本验证（见 `.scratch/codesec-triage-agent/VALIDATION-METHODOLOGY.md`） | MCP 工具已存在（23 个），未专门验证"减少探索成本"这个假设 |
 | 验证方式 | 真实开源项目 + SAST 扫描器结果 | 让编码 Agent（Claude Code/Codex/Junie）接入 MCP，对比"有索引 vs 无索引"完成同一任务的耗时/质量 |
 
 **Why 值得单独列出**：这次真实样本验证过程本身就是证据——四轮验证里挖到的三个 parser/逻辑 bug，

@@ -131,7 +131,7 @@ public class McpStdioServer {
         return Map.of(
                 "protocolVersion", PROTOCOL_VERSION,
                 "capabilities", Map.of("tools", Map.of()),
-                "serverInfo", Map.of("name", "repograph-mcp", "version", "0.1.0")
+                "serverInfo", Map.of("name", "repograph-mcp", "version", "0.5.0")
         );
     }
 

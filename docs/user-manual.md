@@ -1,6 +1,6 @@
 # RepoGraph 使用手册
 
-> 版本：0.1.0 · 最后更新：2026-06
+> 版本：0.5.0 · 最后更新：2026-08
 
 ---
 
@@ -10,13 +10,12 @@
 2. [前置依赖](#2-前置依赖)
 3. [快速开始](#3-快速开始)
 4. [配置参考](#4-配置参考)
-5. [CLI 命令参考](#5-cli-命令参考)
-6. [REST API 参考](#6-rest-api-参考)
-7. [MCP 服务器](#7-mcp-服务器)
-8. [Dashboard 使用指南](#8-dashboard-使用指南)
-9. [核心概念](#9-核心概念)
-10. [已知局限](#10-已知局限)
-11. [故障排查](#11-故障排查)
+5. [REST API 参考](#5-rest-api-参考)
+6. [MCP 服务器](#6-mcp-服务器)
+7. [Dashboard 使用指南](#7-dashboard-使用指南)
+8. [核心概念](#8-核心概念)
+9. [已知局限](#9-已知局限)
+10. [故障排查](#10-故障排查)
 
 ---
 
@@ -122,11 +121,10 @@ repograph:
 ### 3.3 索引项目
 
 ```bash
-# 方式一：CLI 直接索引（阻塞，适合脚本）
-java -jar repograph-app.jar index /path/to/your/project --lang java
+# 启动 Web/REST 服务
+java -jar repograph-app.jar &
 
-# 方式二：启动服务后通过 REST 触发（异步）
-java -jar repograph-app.jar serve &
+# 通过 REST 异步触发索引
 curl -X POST "http://localhost:8080/api/v1/index/project?projectRoot=/path/to/your/project"
 ```
 
@@ -148,10 +146,12 @@ curl "http://localhost:8080/api/v1/assets/{assetId}/profile"
 
 ```bash
 # 语义搜索
-java -jar repograph-app.jar search "HTTP 请求处理入口"
+curl -G "http://localhost:8080/api/v1/search/semantic" \
+  --data-urlencode "query=HTTP 请求处理入口"
 
 # 查调用方
-java -jar repograph-app.jar callers "com.example.UserService#findById"
+curl -G "http://localhost:8080/api/v1/graph/callers" \
+  --data-urlencode "target=com.example.UserService#findById"
 
 # 打开 Dashboard
 open http://localhost:8080
@@ -187,7 +187,7 @@ open http://localhost:8080
 | `repograph.index.db-path` | `~/.repograph/index.db` | 增量缓存 SQLite 数据库 |
 | `repograph.index.batch-size.embed` | `8` | 每批 Embedding 数量 |
 | `repograph.index.batch-size.upsert` | `256` | 每批写入 Qdrant 数量 |
-| `repograph.index.default-strategy` | `AUTO` | 解析策略，见 §9.2 |
+| `repograph.index.default-strategy` | `AUTO` | 解析策略，见 §8.2 |
 
 ### 4.4 Neo4j
 
@@ -197,7 +197,7 @@ open http://localhost:8080
 | `repograph.neo4j.user` | 无 | Neo4j 用户名 |
 | `repograph.neo4j.password` | 无 | Neo4j 密码 |
 
-> 图存储已迁移到 Neo4j 5.x（外部服务）。重启 repograph serve 不会丢图，无需启动加载步骤。
+> 图存储已迁移到 Neo4j 5.x（外部服务）。重启 repograph-app 不会丢图，无需启动加载步骤。
 > 索引时数据直接写入 Neo4j；查询时通过 Cypher 实时遍历。
 
 ### 4.5 归档资产
@@ -253,214 +253,11 @@ open http://localhost:8080
 
 ---
 
-## 5. CLI 命令参考
-
-### 入口
-
-```bash
-java -jar repograph-app.jar [子命令] [选项]
-java -jar repograph-app.jar --help   # 全局帮助
-```
-
----
-
-### 5.1 `serve` — 启动 REST 服务
-
-```bash
-java -jar repograph-app.jar serve [--port PORT]
-```
-
-| 选项 | 说明 |
-|------|------|
-| `--port` | 覆盖监听端口（默认 8080） |
-
-**示例**
-
-```bash
-java -jar repograph-app.jar serve
-# → 访问 http://localhost:8080 打开 Dashboard
-```
-
----
-
-### 5.2 `index` — 建立索引
-
-```bash
-java -jar repograph-app.jar index <projectRoot> [选项]
-```
-
-| 选项 | 说明 |
-|------|------|
-| `<projectRoot>` | **必填**，项目根目录绝对路径 |
-| `--lang` | 目标语言，逗号分隔，如 `java,python`；默认全部 |
-| `--strategy` | 解析策略：`auto`（默认）、`precise`、`heuristic` |
-| `--no-incremental` | 禁用增量，强制全量重新解析 |
-| `--db` | 覆盖缓存数据库路径 |
-
-**示例**
-
-```bash
-# 全量索引 Java 项目
-java -jar repograph-app.jar index /projects/my-service --lang java
-
-# 强制重建，同时索引 Java 和 Python
-java -jar repograph-app.jar index /projects/my-service --lang java,python --no-incremental
-
-# 输出（stderr）
-# Indexed 1284 files (18432 units, 62817 edges) in 187340 ms
-```
-
-> **索引速度**：取决于 Ollama 服务的 Embedding 吞吐量。本地 GPU 约 10 万单元/小时，远程 CPU 服务约 1 万单元/小时。
-
----
-
-### 5.3 `search` — 语义 / 代码检索
-
-```bash
-java -jar repograph-app.jar search <query> [选项]
-```
-
-| 选项 | 默认 | 说明 |
-|------|------|------|
-| `<query>` | — | 查询字符串（自然语言或代码片段） |
-| `--mode` | `semantic` | `semantic`（NL→代码）或 `code`（代码→相似实现） |
-| `--lang` | — | 语言过滤：`java` / `c` / `python` |
-| `--kind` | — | 符号类型过滤：`METHOD`、`CLASS`、`FUNCTION` 等 |
-| `--limit` | `10` | 最大结果数 |
-| `--project` | — | 按项目 ID 过滤 |
-| `--entry-only` | false | 仅返回入口点（HTTP 接口、Controller 方法等） |
-| `--no-test` | false | 排除测试代码 |
-| `--format` | `table` | 输出格式：`table` 或 `json` |
-
-**示例**
-
-```bash
-# 查找所有 HTTP 接口
-java -jar repograph-app.jar search "HTTP REST 接口处理" --entry-only --lang java
-
-# 查找与某段代码相似的实现
-java -jar repograph-app.jar search "public void process(String input)" --mode code
-
-# JSON 格式输出（管道处理）
-java -jar repograph-app.jar search "数据库连接" --format json | jq '.[0].unit.qualifiedName'
-```
-
-**Table 输出格式**
-
-```
-SCORE    KIND         LANG       QUALIFIED_NAME
------------------------------------------------------------------------------------------------
-0.9231   METHOD       java       com.example.api.UserController#getUser(Long)
-0.8914   METHOD       java       com.example.api.OrderController#createOrder(OrderRequest)
-```
-
----
-
-### 5.4 `callers` — 查调用方
-
-```bash
-java -jar repograph-app.jar callers <qualifiedName> [--depth N]
-```
-
-| 参数 | 说明 |
-|------|------|
-| `<qualifiedName>` | 目标符号全限定名 |
-| `--depth` | 遍历深度（默认 3）；`1` = 仅直接调用方 |
-
-**全限定名格式**
-
-| 符号类型 | 格式示例 |
-|---------|---------|
-| 方法（无参） | `com.example.Foo#bar` |
-| 方法（有参） | `com.example.Foo#bar(String,int)` |
-| 类 | `com.example.Foo` |
-| C 函数 | `parse_request` |
-| Python 方法 | `MyService#process` |
-
-**示例**
-
-```bash
-java -jar repograph-app.jar callers "com.example.UserService#findById" --depth 2
-```
-
----
-
-### 5.5 `impact` — 影响面分析
-
-```bash
-java -jar repograph-app.jar impact <qualifiedName>
-```
-
-返回所有直接和间接依赖该符号的代码单元（含调用方、子类、字段类型绑定等）。
-
-**示例**
-
-```bash
-# 重构前评估影响
-java -jar repograph-app.jar impact "com.example.core.Repository#save"
-```
-
----
-
-### 5.6 `symbol` — 精确查找符号
-
-```bash
-java -jar repograph-app.jar symbol <qualifiedName>
-```
-
-按全限定名精确查找，输出完整 JSON（含源码、元数据）。
-
-**示例**
-
-```bash
-java -jar repograph-app.jar symbol "com.example.Foo#bar(String)"
-```
-
----
-
-### 5.7 `locate` — 按文件行号定位
-
-```bash
-java -jar repograph-app.jar locate --file <path> --line <n>
-```
-
-| 选项 | 说明 |
-|------|------|
-| `--file` | 相对于 projectRoot 的文件路径 |
-| `--line` | 1-based 行号 |
-
-**示例**
-
-```bash
-# 从栈帧定位到符号
-java -jar repograph-app.jar locate \
-  --file src/main/java/com/example/UserService.java \
-  --line 42
-```
-
----
-
-### 5.8 `sbom` — 生成软件物料清单
-
-```bash
-java -jar repograph-app.jar sbom <projectRoot> [--format cyclonedx]
-```
-
-解析 `pom.xml`，输出 CycloneDX JSON 格式的依赖清单到 stdout。
-
-**示例**
-
-```bash
-java -jar repograph-app.jar sbom /projects/my-service > sbom.json
-```
-
----
-
-## 6. REST API 参考
+## 5. REST API 参考
 
 启动服务后，所有接口均在 `http://localhost:8080` 可用。
 
-### 6.1 索引
+### 5.1 索引
 
 #### `POST /api/v1/index/project` — 触发项目索引（异步）
 
@@ -750,7 +547,7 @@ GET  /api/v1/review-queue/snapshots/{snapshotId}/export?format=markdown|json|pdf
 
 ---
 
-### 6.2 搜索
+### 5.2 搜索
 
 #### `GET /api/v1/search/semantic` — 语义检索
 
@@ -777,7 +574,7 @@ GET /api/v1/search/code
 
 ---
 
-### 6.3 符号查询
+### 5.3 符号查询
 
 #### `GET /api/v1/symbol/{qualifiedName}` — 精确查找
 
@@ -797,7 +594,7 @@ GET /api/v1/locate?file=src/main/java/Foo.java&line=42
 
 ---
 
-### 6.4 图谱查询
+### 5.4 图谱查询
 
 所有图谱接口都需要先完成索引；图持久化在 Neo4j 中，服务重启后立即可用，无需重新加载。
 
@@ -848,7 +645,7 @@ GET /api/v1/graph/entrypoints?projectId=abc123def456&lang=java
 
 ---
 
-### 6.5 其他
+### 5.5 其他
 
 #### `GET /api/v1/health` — 健康检查
 
@@ -870,7 +667,7 @@ GET /api/v1/sbom/a1b2c3d4e5f6?format=cyclonedx
 
 #### `GET /api/v1/projects` — 已索引项目列表
 
-返回当前 Neo4j 中所有 `:Project` 元节点的概要：`projectId / projectRoot / nodeCount / indexedAt`。供 dashboard 项目选择器和 CLI 自动补全使用。
+返回当前 Neo4j 中所有 `:Project` 元节点的概要：`projectId / projectRoot / nodeCount / indexedAt`，供 dashboard 项目选择器和 API 客户端使用。
 
 #### `GET /api/v1/projects/{projectId}/stats` — 项目聚合统计
 
@@ -882,11 +679,11 @@ GET /api/v1/sbom/a1b2c3d4e5f6?format=cyclonedx
 
 ---
 
-## 7. MCP 服务器
+## 6. MCP 服务器
 
 RepoGraph 内置 MCP（Model Context Protocol）stdio 服务器，让 Cursor 等支持 MCP 协议的 AI 工具直接查询代码知识图谱。
 
-### 7.1 构建与启动
+### 6.1 构建与启动
 
 ```bash
 ./gradlew :repograph-mcp:bootJar
@@ -897,7 +694,7 @@ java -jar repograph-mcp/build/libs/repograph-mcp-*.jar
 
 MCP 服务器通过 stdin/stdout 与 AI 客户端通信，日志写入 `~/.repograph/mcp.log`。
 
-### 7.2 配置
+### 6.2 配置
 
 ```properties
 # repograph-mcp/src/main/resources/application.properties
@@ -911,7 +708,7 @@ repograph.timeout-seconds=30
 REPOGRAPH_BASE_URL=http://192.168.1.100:8080 java -jar repograph-mcp.jar
 ```
 
-### 7.3 MCP 客户端集成
+### 6.3 MCP 客户端集成
 
 在 MCP 客户端配置（`mcpServers` 格式）中添加：
 
@@ -929,20 +726,35 @@ REPOGRAPH_BASE_URL=http://192.168.1.100:8080 java -jar repograph-mcp.jar
 }
 ```
 
-### 7.4 MCP 工具参考
+### 6.4 MCP 工具参考
 
-共 **8 个工具**：
+共 **23 个工具**：
 
 | 工具名 | 用途 | 必填参数 |
 |--------|------|---------|
 | `search_semantic` | 自然语言搜代码 | `query` |
+| `search_keyword` | 按标识符、CWE/CVE、配置键精确检索 | `query` |
 | `search_code` | 代码片段找相似实现 | `snippet` |
+| `search_graphrag` | 向量检索并展开调用图和影响面 | `query` |
+| `build_context_pack` | 生成带引用、受预算约束的上下文包 | `query` |
 | `lookup_symbol` | 精确查找符号（含源码） | `qualified_name` |
 | `locate_at` | file:line → 符号名 | `file`, `line` |
+| `find_entrypoints` | 列出框架入口点 | 无 |
 | `find_callers` | 谁调用了 X | `target` |
 | `find_callees` | X 调用了谁 | `target` |
 | `get_impact` | X 变更后影响哪些代码 | `target` |
 | `find_subtypes` | 谁实现/继承了 X | `target` |
+| `analyze_flow` | 分析单个方法的 CFG、数据流和 PDG | `target` |
+| `trace_taint` | 从方法参数执行跨过程污点追踪 | `source` |
+| `triage_finding` | 导入并研判 Semgrep/SARIF/CodeQL 报警 | `format`, `json` |
+| `record_triage_feedback` | 记录人工研判反馈 | `fingerprint`, `projectId`, `status` |
+| `list_triage_feedback` | 查询项目研判反馈 | `projectId` |
+| `list_vulns` | 查询项目漏洞 | `projectId` |
+| `scan_vuln_code` | 触发内置代码漏洞扫描 | `projectId` |
+| `get_health_report` | 获取项目综合健康报告 | `projectId` |
+| `list_projects` | 列出已索引项目 | 无 |
+| `trigger_index` | 异步触发目录索引 | `projectRoot` |
+| `index_status` | 查询目录索引进度 | `projectRoot` |
 
 #### 工具详情
 
@@ -993,11 +805,11 @@ AI 调用:
 
 ---
 
-## 8. Dashboard 使用指南
+## 7. Dashboard 使用指南
 
 启动服务后访问 `http://localhost:8080`，使用内置单页仪表盘。
 
-### 8.1 界面布局
+### 7.1 界面布局
 
 ```
 ┌─────────────────────────────────────────────┐
@@ -1014,7 +826,7 @@ AI 调用:
 
 左侧竖向导航栏包含 4 个面板：搜索（1）、图谱（2）、索引（3）、健康（4）。
 
-### 8.2 面板切换
+### 7.2 面板切换
 
 | 方式 | 操作 |
 |------|------|
@@ -1022,7 +834,7 @@ AI 调用:
 | 数字键 | `1` 搜索、`2` 图谱、`3` 索引、`4` 健康 |
 | 快捷键 | `⌘K` 或 `/` 直接聚焦搜索框 |
 
-### 8.3 搜索面板
+### 7.3 搜索面板
 
 1. 选择搜索模式（**语义** / **代码**）
 2. 在搜索框输入查询，支持：
@@ -1048,7 +860,7 @@ AI 调用:
 - 点击复制图标 → 复制全限定名（底部 Toast 确认）
 - 搜索历史自动保存到 localStorage（最多 8 条）
 
-### 8.4 图谱面板
+### 7.4 图谱面板
 
 1. 在 **目标符号** 输入框填入全限定名（从搜索面板点击结果可自动填入）
 2. 选择查询类型：
@@ -1073,7 +885,7 @@ AI 调用:
 | 滚轮 / 双指 | 缩放 |
 | `+` / `−` / `⌂` 按钮 | 放大 / 缩小 / 重置视图 |
 
-### 8.5 索引面板
+### 7.5 索引面板
 
 1. 填写**项目根目录**（会保存到 localStorage）
 2. 选择语言和解析策略
@@ -1082,15 +894,15 @@ AI 调用:
 
 右侧状态区显示进度环、统计指标（文件数/单元数/边数/降级数/错误数/耗时）和实时日志。
 
-### 8.6 健康面板
+### 7.6 健康面板
 
 实时显示 Qdrant 和 Ollama 的连接状态（每 5 秒自动刷新，标签页隐藏时暂停轮询）。
 
 ---
 
-## 9. 核心概念
+## 8. 核心概念
 
-### 9.1 全限定名（Qualified Name）格式
+### 8.1 全限定名（Qualified Name）格式
 
 RepoGraph 使用统一的全限定名格式标识所有代码符号：
 
@@ -1107,7 +919,7 @@ RepoGraph 使用统一的全限定名格式标识所有代码符号：
 
 > **注意**：在 URL 中使用时，`#` 需编码为 `%23`。
 
-### 9.2 解析策略
+### 8.2 解析策略
 
 | 策略 | 触发条件 | 精度 |
 |------|---------|------|
@@ -1117,7 +929,7 @@ RepoGraph 使用统一的全限定名格式标识所有代码符号：
 
 降级后的文件会在索引状态的 `degradedFiles` 中记录。
 
-### 9.3 边类型（EdgeKind）
+### 8.3 边类型（EdgeKind）
 
 | 边类型 | 方向 | 含义 |
 |--------|------|------|
@@ -1141,7 +953,7 @@ RepoGraph 使用统一的全限定名格式标识所有代码符号：
 | DEFINES_TYPE | ✓ | — | — |
 | OVERRIDES | ✓ | — | — |
 
-### 9.4 projectId
+### 8.4 projectId
 
 每个项目由其根目录的绝对路径的 SHA-256 前 12 位唯一标识：
 
@@ -1152,9 +964,9 @@ echo -n "/path/to/project" | sha256sum | cut -c1-12
 
 ---
 
-## 10. 已知局限
+## 9. 已知局限
 
-### 10.1 Java 解析
+### 9.1 Java 解析
 
 | 局限 | 说明 |
 |------|------|
@@ -1164,7 +976,7 @@ echo -n "/path/to/project" | sha256sum | cut -c1-12
 | 跨文件链式调用 | `a.getB().doC()` 中若 `getB()` 在其他文件，`doC()` 的目标不可解析 |
 | `super()` 构造器委托 | 父类构造器调用暂不产出 CALLS 边 |
 
-### 10.2 Python 解析
+### 9.2 Python 解析
 
 | 局限 | 说明 |
 |------|------|
@@ -1172,21 +984,21 @@ echo -n "/path/to/project" | sha256sum | cut -c1-12
 | 相对导入 | `from . import foo` 的路径解析依赖 projectRoot 配置 |
 | 元类 | 元类产出的方法不在图中 |
 
-### 10.3 C 解析
+### 9.3 C 解析
 
 | 局限 | 说明 |
 |------|------|
 | 宏展开 | 宏定义的函数调用可能漏检 |
 | 函数指针 | 通过指针的间接调用不追踪 |
 
-### 10.4 图谱
+### 9.4 图谱
 
 | 局限 | 说明 |
 |------|------|
-| 外部服务依赖 | 图存储托管在 Neo4j，repograph serve 无法连接 Neo4j 时图相关接口不可用 |
+| 外部服务依赖 | 图存储托管在 Neo4j，repograph-app 无法连接 Neo4j 时图相关接口不可用 |
 | 无时序语义 | 所有边无时间信息，不区分初始化/销毁顺序 |
 
-### 10.5 审核队列
+### 9.5 审核队列
 
 | 局限 | 说明 |
 |------|------|
@@ -1197,7 +1009,7 @@ echo -n "/path/to/project" | sha256sum | cut -c1-12
 
 ---
 
-## 11. 故障排查
+## 10. 故障排查
 
 ### 图查询返回空
 

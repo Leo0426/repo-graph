@@ -38,7 +38,7 @@
 
 RepoGraph 的终极方向是成为 **LLM Agent 的上下文提供者**：让 Agent 在大型代码库中以工具调用方式按需定位上下文，而不是把整个仓库塞进上下文窗口。MCP 工具集 + GraphRAG 检索是核心交付物。
 
-当前阶段以**独立代码审计平台**形态交付——所有分析能力先在平台上（Web 控制台 / REST / CLI）完成开发与验证，再逐步暴露为 MCP 工具（进度见[开发计划](#开发计划)）。
+当前阶段以**独立代码审计平台**形态交付——所有分析能力先在平台上（Web 控制台 / REST）完成开发与验证，再逐步暴露为 MCP 工具（进度见[开发计划](#开发计划)）。
 
 **能力边界**：面向静态启发式分析，不做完整编译器语义分析——粗中粒度对检索与审计够用；需要最高精度的场景由 WALA IFDS 精确污点引擎补位。完全本地运行，代码不出内网。
 
@@ -48,13 +48,13 @@ RepoGraph 的终极方向是成为 **LLM Agent 的上下文提供者**：让 Age
 
 | 能力域 | 能力 | 说明 | 使用入口 |
 | --- | --- | --- | --- |
-| 代码解析 | Java | AST 解析，提取类型、方法、字段、注解与调用边 | `repograph index` / 索引页面 |
-| 代码解析 | C / Python | Tree-sitter 解析；失败时自动降级 | `repograph index` / 索引页面 |
+| 代码解析 | Java | AST 解析，提取类型、方法、字段、注解与调用边 | 索引页面 / REST |
+| 代码解析 | C / Python | Tree-sitter 解析；失败时自动降级 | 索引页面 / REST |
 | 代码解析 | 字节码 | 可选 `.class` 分析 | 索引时指定 `class` 语言 |
 | 代码解析 | Markdown 文档 | 按 H1-H3 标题切分为 DOCUMENT 单元，参与语义检索 | 索引管道自动识别 `.md` |
-| 索引 | 增量索引 | 文件级缓存，仅处理变更文件 | `repograph index` / `POST /api/v1/index/project` |
-| 索引 | 文件监听 | 监听增删改，自动触发增量更新 | `repograph watch` / 项目概览 |
-| 索引 | 多项目管理 | 稳定 ID、隔离存储与统计管理 | 顶部项目选择器 / `repograph projects` |
+| 索引 | 增量索引 | 文件级缓存，仅处理变更文件 | 索引页面 / `POST /api/v1/index/project` |
+| 索引 | 文件监听 | 监听增删改，自动触发增量更新 | 项目概览 |
+| 索引 | 多项目管理 | 稳定 ID、隔离存储与统计管理 | 顶部项目选择器 / REST |
 | 向量检索 | 语义搜索 | 自然语言 → 代码单元 | 搜索页面 / `search_semantic` |
 | 向量检索 | 代码相似搜索 | 代码片段 → 相似实现 | 搜索页面 / `search_code` |
 | GraphRAG | Hybrid 种子召回 | 向量种子 + 关键词种子（函数名 / CVE / CWE / 规则 ID / 配置 key） | `GET /api/v1/search/graphrag` |
@@ -62,28 +62,28 @@ RepoGraph 的终极方向是成为 **LLM Agent 的上下文提供者**：让 Age
 | GraphRAG | 调用图展开 | 种子 → callers + callees 展开 | `GET /api/v1/search/graphrag` |
 | GraphRAG | 影响面扩展 | 影响面展开，仅补充安全相关节点 | `GET /api/v1/search/graphrag?impactExpansion=true` |
 | GraphRAG | 安全感知重排序 | 静态安全信号评分，无需 LLM | `GET /api/v1/search/graphrag?rerank=true` |
-| 符号查询 | 符号详情与定位 | 按限定名查询，或按文件行号定位 | 符号页面 / CLI / REST |
+| 符号查询 | 符号详情与定位 | 按限定名查询，或按文件行号定位 | 符号页面 / REST |
 | 符号查询 | 符号自动补全 | 部分名称匹配，返回完整符号候选 | 图谱页面目标符号输入框 |
-| 代码图 | 调用链分析 | 基于接收者类型与继承关系的精确调用解析 | 图谱页面 / CLI / MCP |
-| 代码图 | 影响面分析 | 跨调用、继承和覆盖关系的传递影响分析 | 图谱页面 / `repograph impact` |
-| 代码图 | 类型层次 | 子类与接口实现分类查询 | 图谱页面 / `repograph subtypes` |
+| 代码图 | 调用链分析 | 基于接收者类型与继承关系的精确调用解析 | 图谱页面 / REST / MCP |
+| 代码图 | 影响面分析 | 跨调用、继承和覆盖关系的传递影响分析 | 图谱页面 / REST |
+| 代码图 | 类型层次 | 子类与接口实现分类查询 | 图谱页面 / REST |
 | 代码图 | 项目隔离 | 所有图查询支持 `projectId` 过滤 | 顶部项目选择器 / REST |
 | 流分析 | 数据流摘要 | 参数、字段读写与返回值摘要 | 图谱 → 流分析 |
 | 流分析 | CFG | Java 方法与构造器的控制流图 | 图谱 → 流分析 → CFG |
 | 流分析 | PDG | 数据依赖与控制依赖的组合分析 | 图谱 → 流分析 → PDG |
 | 流分析 | 跨过程污点 | 方法内摘要 + BFS 沿调用图传播，内置 SQL/OS/反序列化等 Sink | `GET /api/v1/flow/taint` |
 | 框架分析 | 入口点识别 | Spring MVC、JAX-RS、MyBatis 注解识别与标记 | 图谱入口点 / 项目工具 |
-| 漏洞 | 代码扫描 | 9 条 CWE 标注静态规则 | `repograph vuln scan-code` / 漏洞面板 |
+| 漏洞 | 代码扫描 | 9 条 CWE 标注静态规则 | 漏洞面板 / REST |
 | 漏洞 | 污点扫描 | 跨过程污点追踪（HTTP 入口 → Sink，源码级启发式） | `POST /api/v1/vulns/scan/taint` |
 | 漏洞 | 精确污点扫描 | WALA IFDS 字节码级 field-sensitive（独立进程引擎） | `POST /api/v1/vulns/scan/taint/precise` |
-| 漏洞 | 依赖 CVE | 离线 Advisory 数据库 × SBOM 比对 | `repograph vuln scan-deps` / 漏洞面板 |
-| 质量指标 | 复杂度 / 耦合 / 包循环 / 热点 | 圈复杂度、不稳定度、Tarjan SCC 包循环、Git Churn | `repograph complexity` 等 / `GET /api/v1/metrics/*` |
+| 漏洞 | 依赖 CVE | 离线 Advisory 数据库 × SBOM 比对 | 漏洞面板 / REST |
+| 质量指标 | 复杂度 / 耦合 / 包循环 / 热点 | 圈复杂度、不稳定度、Tarjan SCC 包循环、Git Churn | 指标页面 / `GET /api/v1/metrics/*` |
 | 质量指标 | 健康报告 | 漏洞、循环、复杂度等六维度扣分制健康分 | `GET /api/v1/metrics/report` / `get_health_report` |
-| 可视化 | 依赖图导出 | 包级依赖图 → DOT / Mermaid，循环依赖高亮 | `repograph export` / `GET /api/v1/export/graph` |
-| SBOM | Maven | `pom.xml` → CycloneDX JSON（`pkg:maven`） | `repograph sbom` / 项目工具 |
-| SBOM | Gradle | `build.gradle[.kts]` + `libs.versions.toml` → CycloneDX JSON（`pkg:maven`） | `repograph sbom` / 项目工具 |
-| SBOM | npm | `package.json` → CycloneDX JSON（`pkg:npm`），支持 scoped 包 | `repograph sbom` / 项目工具 |
-| SBOM | pip | `pyproject.toml` + `requirements*.txt` → CycloneDX JSON（`pkg:pypi`） | `repograph sbom` / 项目工具 |
+| 可视化 | 依赖图导出 | 包级依赖图 → DOT / Mermaid，循环依赖高亮 | `GET /api/v1/export/graph` |
+| SBOM | Maven | `pom.xml` → CycloneDX JSON（`pkg:maven`） | 项目工具 / REST |
+| SBOM | Gradle | `build.gradle[.kts]` + `libs.versions.toml` → CycloneDX JSON（`pkg:maven`） | 项目工具 / REST |
+| SBOM | npm | `package.json` → CycloneDX JSON（`pkg:npm`），支持 scoped 包 | 项目工具 / REST |
+| SBOM | pip | `pyproject.toml` + `requirements*.txt` → CycloneDX JSON（`pkg:pypi`） | 项目工具 / REST |
 | 可视化 | Web 控制台 | 搜索、代码图、流分析、统计、索引与健康状态 | `http://localhost:8080` |
 | AI 集成 | MCP stdio 服务 | 23 个 MCP 工具：搜索 / GraphRAG / Context Pack / SAST 研判 / 反馈闭环 / 调用链 / 污点 / 漏洞 / 索引管理 | `repograph-mcp` |
 | 质量评测 | 检索 Benchmark | Hit@1/3/5/10、MRR@10、HitScore 及阈值门禁 | Benchmark 页面 / Gradle 测试 |
@@ -149,7 +149,7 @@ RepoGraph 的终极方向是成为 **LLM Agent 的上下文提供者**：让 Age
 三个 Gradle 子项目：
 
 ```
-repograph-app/   Spring Boot 服务 + Picocli CLI（REST API、索引管道、检索）
+repograph-app/   Spring Boot Web 服务（REST API、索引管道、检索）
   ├─ core/        领域模型 + 接口定义（CodeUnit / VectorStore / GraphQueryService）
   ├─ parser/      JavaParser AST、Tree-sitter FFM（C/Python）、Markdown 文档、启发式状态机
   ├─ graph/       Neo4j Bolt 门面（调用链 / 影响面 / 继承图）
@@ -162,7 +162,7 @@ repograph-app/   Spring Boot 服务 + Picocli CLI（REST API、索引管道、�
   ├─ metrics/     圈复杂度 / 耦合 / 包循环 / Git 热点 / 健康报告
   ├─ export/      包级依赖图导出（DOT / Mermaid）
   ├─ api/         Spring MVC REST 控制器
-  └─ app/         Picocli CLI + 索引管道 + Spring Boot 入口
+  └─ app/         索引管道 + Spring Boot 入口
 
 repograph-mcp/   独立 MCP stdio 服务（供 AI 工具调用，通过 HTTP 转发至 repograph-app）
 
@@ -194,8 +194,7 @@ repograph-taint-engine/   WALA IFDS 精确污点引擎（试验性模块，独�
 **检索效果 Benchmark**（需先建索引，Qdrant + Ollama 在线）：
 
 ```bash
-# 对 repograph-app 自身建索引后运行 benchmark（23 条语义 + 8 条代码相似查询）
-repograph index ./repograph-app
+# 先通过 REST 对 repograph-app 自身建索引，再运行 benchmark（23 条语义 + 8 条代码相似查询）
 ./gradlew :repograph-app:test --tests "*.benchmark.*"
 
 # 对外部项目 benchmark
@@ -207,7 +206,7 @@ repograph index ./repograph-app
 指标：Hit@1/3/5/10、MRR@10、HitScore。Hit@10 低于阈值（语义 65%，代码 75%）测试失败。
 
 产物：
-- `repograph-app/build/libs/repograph-app-0.5.0.jar` — REST 服务 + CLI（命令：`repograph`）
+- `repograph-app/build/libs/repograph-app-0.5.0.jar` — Web / REST 服务
 - `repograph-mcp/build/libs/repograph-mcp-exec.jar` — MCP stdio 服务
 - `./gradlew :repograph-taint-engine:installDist` — 精确污点引擎（`build/install/repograph-taint-engine/`，供精确扫描子进程调用）
 
@@ -253,17 +252,12 @@ repograph:
 
 ```bash
 java --enable-native-access=ALL-UNNAMED \
-  -jar repograph-app/build/libs/repograph-app-0.5.0.jar serve
+  -jar repograph-app/build/libs/repograph-app-0.5.0.jar
 ```
 
 **2. 索引一个项目**
 
 ```bash
-# 通过 CLI（直接调用管道，无需 HTTP）
-java --enable-native-access=ALL-UNNAMED \
-  -jar repograph-app/build/libs/repograph-app-0.5.0.jar \
-  index /path/to/your/project
-
 # 通过 REST API（异步，返回 202）
 curl -X POST "http://localhost:8080/api/v1/index/project" \
   -H "Content-Type: application/json" \
@@ -277,48 +271,6 @@ curl "http://localhost:8080/api/v1/index/project/status?projectRoot=/path/to/you
 
 ```bash
 curl "http://localhost:8080/api/v1/search/semantic?q=HTTP+REST+endpoint+handler&lang=java&limit=10"
-```
-
----
-
-## CLI 命令
-
-```
-repograph index <projectRoot>        扫描并建立向量索引和知识图谱
-repograph search <query>             语义检索（自然语言）
-repograph symbol <qualifiedName>     查看符号详情
-repograph locate <file> <line>       定位行号所在符号
-repograph callers <symbol>           查询调用者
-repograph callees <symbol>           查询被调用者
-repograph impact <symbol>            影响面分析
-repograph subtypes <type>            查找子类与实现
-repograph entrypoints                列出框架入口点
-repograph projects                   列出已索引项目
-repograph stats <projectId>          项目统计信息
-repograph sbom <projectId>           生成 SBOM
-repograph delete <projectRoot>       删除项目索引
-repograph watch <projectRoot>        监听文件变更并增量更新
-repograph serve                      启动 REST 服务
-repograph complexity <projectId>     圈复杂度分析
-repograph coupling <projectId>       耦合（不稳定度）分析
-repograph cycles <projectId>         包循环依赖检测
-repograph hotspots <projectId>       Git 变更热点
-repograph deadcode <projectId>       死代码检测
-repograph testgap <projectId>        测试空白检测
-repograph report <projectId>         代码健康报告（六维度 + 健康分）
-repograph export <projectId>         包级依赖图导出（DOT / Mermaid）
-repograph vuln scan-code <projectId>              代码漏洞扫描
-repograph vuln scan-deps <projectId> <root>       依赖漏洞扫描
-repograph vuln list <projectId>                   列出发现记录
-repograph vuln report <projectId> [--out FILE]    生成漏洞报告
-```
-
-常用选项（`index` 命令）：
-
-```
---lang java,c,python    指定解析语言（默认全部）
---strategy auto         解析策略：auto / precise / heuristic
---no-incremental        强制全量重新索引
 ```
 
 ---
@@ -530,7 +482,7 @@ RepoGraph 提供 MCP stdio 服务，可接入 Cursor 等任何支持 MCP 协议�
 |--------|------|
 | **漏洞影响面分析** | 图遍历找出发现点的所有可达调用链 |
 | **发现状态管理** | 状态机 `SUSPECTED → CONFIRMED → FIXED / DISMISSED`，确认后计入报告 |
-| **漏洞报告** | JSON（REST）与 Markdown（CLI）双格式报告 |
+| **漏洞报告** | REST JSON 报告 |
 
 ### REST 接口
 
@@ -551,20 +503,11 @@ GET  /api/v1/vulns/report/{projectId}            生成漏洞报告（JSON）
 `enabled: true`。引擎以独立子进程运行，与 app 的 JDK 25 互不干扰；扫描结果以
 `ruleId=PRECISE_<rule>` 写入发现记录。
 
-### CLI 命令
-
-```
-repograph vuln scan-code  <projectId>
-repograph vuln scan-deps  <projectId> <projectRoot>
-repograph vuln list       <projectId> [--severity HIGH] [--status SUSPECTED]
-repograph vuln report     <projectId> [--out report.md] [--all]
-```
-
 ### 设计约束
 
 - **完全离线**：Advisory 数据打包至 classpath，扫描不发出外部请求
 - **无误报放大**：代码扫描结果标记为 `SUSPECTED`，需人工 `CONFIRMED` 后才计入报告
-- **与 SBOM 联动**：依赖漏洞扫描以 `repograph sbom` 产出的 CycloneDX JSON 为输入
+- **与 SBOM 联动**：依赖漏洞扫描复用 SBOM 服务产出的 CycloneDX JSON
 
 ---
 
@@ -594,7 +537,7 @@ RepoGraph 的后续产品主线收敛为：**面向企业研发安全团队的 A
 
 ### 第一阶段 — 审计平台 ✓
 
-[项目能力](#项目能力) 表格中的所有功能均已实现，可通过 Web 控制台、REST API 和 CLI 使用。
+[项目能力](#项目能力) 表格中的所有功能均已实现，可通过 Web 控制台、REST API 和 MCP 使用。
 
 ### 第二阶段 — LLM Agent 集成（进行中）
 
