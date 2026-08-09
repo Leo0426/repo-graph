@@ -5,7 +5,6 @@ import com.repograph.core.retrieval.KeywordSearchOptions;
 import com.repograph.core.retrieval.KeywordSearchResult;
 import com.repograph.core.retrieval.KeywordSearchService;
 import com.repograph.core.vector.SearchOptions;
-import com.repograph.core.vector.SearchResult;
 import com.repograph.core.vector.VectorStore;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;

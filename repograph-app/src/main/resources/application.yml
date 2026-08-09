@@ -44,13 +44,6 @@ repograph:
     timeout-millis: 15000
     max-retries: 1
     redact: true
-  taint:
-    precise:                 # 方案 A:WALA IFDS 引擎独立进程(需带 jmods 的 JDK)
-      enabled: false         # 配好 java-home 与 engine-lib-dir 后置 true
-      java-home: ""          # 带 jmods 的 JDK 主目录,如 ~/.sdkman/candidates/java/21.0.9-tem
-      engine-lib-dir: ""     # 引擎 installDist 产物 lib 目录
-      exclusions: ""         # 可选 WALA 排除文件;空则用引擎打包默认
-      timeout-seconds: 600
   github:
     token: ""                    # Personal Access Token 或 GitHub App token；留空则发评论时报错
     api-base-url: https://api.github.com

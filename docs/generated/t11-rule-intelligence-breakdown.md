@@ -4,7 +4,7 @@
 > 拆分方式：垂直切片（tracer bullet），每片端到端可验证。
 > 基线：规则目前在 `CodeVulnScanner` 中硬编码为 `List<Rule>`（ruleId/cwe/severity/title/pattern），
 > 无元数据、版本或生命周期。已有可复用件：`RuleSuppressionStore`（生命周期 + 审计表模式）、
-> `LlmAdvisoryEvaluator`（标注样本算准确率）、taint-engine 的 source/sink JSON/XML provider。
+> `LlmAdvisoryEvaluator`（标注样本算准确率）。
 
 ## 领域新词
 

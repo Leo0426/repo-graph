@@ -20,14 +20,5 @@ public enum ScanTaskStatus {
     /** 没有扫描器成功，或任务级执行失败。 */
     FAILED,
     /** 任务被主动取消。 */
-    CANCELLED;
-
-    /**
-     * 是否为终态。
-     *
-     * @return 终态返回 {@code true}
-     */
-    public boolean isTerminal() {
-        return this == SUCCEEDED || this == PARTIAL || this == FAILED || this == CANCELLED;
-    }
+    CANCELLED
 }

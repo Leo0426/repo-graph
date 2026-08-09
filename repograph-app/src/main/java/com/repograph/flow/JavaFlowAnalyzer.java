@@ -1,5 +1,6 @@
 package com.repograph.flow;
 
+import com.github.javaparser.ast.nodeTypes.NodeWithSimpleName;
 import com.repograph.core.flow.ControlFlowGraph;
 import com.repograph.core.flow.DataFlowSummary;
 import com.repograph.core.flow.FlowAnalysisResult;
@@ -71,7 +72,7 @@ final class JavaFlowAnalyzer {
     FlowAnalysisResult analyze() {
         FlowNode entry = addNode(FlowNodeKind.ENTRY, "ENTRY", unit.startLine());
         List<String> parameters = callable.getParameters().stream()
-                .map(parameter -> parameter.getNameAsString())
+                .map(NodeWithSimpleName::getNameAsString)
                 .toList();
         parameters.forEach(parameter -> lastDefinitions.put(parameter, entry.id()));
 

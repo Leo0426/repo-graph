@@ -5,7 +5,6 @@ import com.repograph.core.finding.FindingContext;
 import com.repograph.core.finding.RuleSuppression;
 import com.repograph.core.finding.TriageDecisionEvidence;
 import com.repograph.core.finding.TriageFeedback;
-import com.repograph.core.finding.TriageFeedbackStatus;
 import com.repograph.core.finding.TriageReport;
 import com.repograph.core.finding.TriageReviewContext;
 import com.repograph.core.finding.TriageVerdict;

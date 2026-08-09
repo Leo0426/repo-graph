@@ -99,11 +99,6 @@ async function loadProjectStats() {
   }
 }
 
-function readStatsHash() {
-  const m = /^#stats=([^&]+)$/.exec(location.hash || '');
-  return m ? decodeURIComponent(m[1]) : '';
-}
-
 /* ── Health score badge ── */
 async function loadHealthBadge(projectId) {
   const section = document.getElementById('health-badge-section');

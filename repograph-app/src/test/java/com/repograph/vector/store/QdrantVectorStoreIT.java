@@ -6,7 +6,6 @@ import com.repograph.core.util.CodeUnitIdUtil;
 import com.repograph.core.vector.EmbeddedUnit;
 import com.repograph.core.vector.SearchOptions;
 import com.repograph.core.vector.SearchPage;
-import com.repograph.core.vector.SearchResult;
 import com.repograph.vector.config.QdrantProperties;
 import io.qdrant.client.QdrantClient;
 import io.qdrant.client.QdrantGrpcClient;

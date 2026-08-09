@@ -22,7 +22,6 @@ import java.util.concurrent.Executors;
 @Configuration
 @EnableConfigurationProperties({
         IndexProperties.class,
-        com.repograph.vuln.PreciseTaintProperties.class,
         com.repograph.asset.ArchiveProperties.class,
         com.repograph.scanner.ScannerProperties.class,
         com.repograph.advisory.LlmAdvisoryProperties.class

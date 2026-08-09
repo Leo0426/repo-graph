@@ -93,16 +93,6 @@ header {
   text-transform: uppercase;
 }
 
-.logo-icon {
-  padding: 4px 7px;
-  border: 1px solid rgba(0,255,179,0.55);
-  border-radius: var(--r);
-  font-size: 15px;
-  letter-spacing: 0.06em;
-  box-shadow: 0 0 10px rgba(0,255,179,0.2), inset 0 0 8px rgba(0,255,179,0.04);
-  background: rgba(0,255,179,0.05);
-}
-
 .logo-img {
   height: 28px;
   width: auto;
@@ -1561,7 +1551,6 @@ kbd {
 .sbom-meta .sbom-name    { font-size: 15px; font-weight: 700; color: var(--text); font-family: var(--ff); letter-spacing: 0.05em; }
 .sbom-meta .sbom-version { color: var(--mint); font-weight: 600; }
 .sbom-meta .sbom-dot     { color: var(--text-3); }
-.sbom-filter-row { display: flex; gap: 6px; align-items: center; margin-bottom: 0; flex-wrap: wrap; }
 .sbom-scope-btn {
   padding: 3px 9px; border-radius: var(--r); border: 1px solid var(--border);
   background: var(--glass); cursor: pointer; font-family: var(--fm);
@@ -1578,20 +1567,6 @@ kbd {
 .sbom-scope-btn.excluded.active {
   background: rgba(239,68,68,0.07); border-color: rgba(239,68,68,0.28); color: var(--red);
 }
-.sbom-table { width: 100%; border-collapse: collapse; font-family: var(--fm); font-size: 15px; }
-.sbom-table th {
-  color: var(--text-3); font-size: 15px; letter-spacing: 0.14em; text-transform: uppercase;
-  padding: 5px 9px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap;
-}
-.sbom-table td {
-  padding: 6px 9px; border-bottom: 1px solid rgba(0,212,255,0.025);
-  color: var(--text-2); vertical-align: middle;
-}
-.sbom-table tr:hover td { background: var(--glass); }
-.sbom-col-name  { color: var(--text); font-weight: 600; }
-.sbom-col-group { color: var(--text-3); font-size: 15px; }
-.sbom-col-ver   { color: var(--purple); }
-.sbom-col-purl  { font-size: 15px; color: var(--text-3); word-break: break-all; max-width: 260px; }
 .sbom-scope-badge {
   display: inline-block; padding: 1px 6px; border-radius: var(--r);
   font-size: 15px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
@@ -1646,7 +1621,6 @@ kbd {
 
 /* ── Font size overrides ── */
 .logo             { font-size: 13px; }
-.logo-icon        { font-size: 12px; }
 .badge            { font-size: 11px; }
 .nav-label        { font-size: 11px; }
 .project-context select { font-size: 12px; }
@@ -1676,9 +1650,6 @@ kbd {
 .stats-watch-bar  { font-size: 11px; }
 .sbom-meta        { font-size: 11px; }
 .sbom-scope-btn   { font-size: 10px; }
-.sbom-table       { font-size: 12px; }
-.sbom-col-group   { font-size: 10px; }
-.sbom-col-purl    { font-size: 10px; }
 .sbom-scope-badge { font-size: 10px; }
 .sbom-count-bar   { font-size: 11px; }
 .statusbar        { font-size: 10px; }

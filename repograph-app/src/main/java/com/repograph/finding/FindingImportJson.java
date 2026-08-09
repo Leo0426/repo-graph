@@ -2,9 +2,7 @@ package com.repograph.finding;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import java.util.ArrayList;
 import java.util.Iterator;
-import java.util.List;
 
 /**
  * 外部报警 JSON 解析辅助方法。
@@ -45,16 +43,6 @@ final class FindingImportJson {
             if (!normalized.isBlank()) return normalized;
         }
         return "";
-    }
-
-    static List<String> textArray(JsonNode node) {
-        List<String> values = new ArrayList<>();
-        if (node == null || !node.isArray()) return values;
-        node.forEach(item -> {
-            String value = item.asText("");
-            if (!value.isBlank()) values.add(value);
-        });
-        return values;
     }
 
     static String normalizeCwe(String value) {

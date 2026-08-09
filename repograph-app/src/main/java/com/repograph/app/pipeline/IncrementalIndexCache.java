@@ -167,35 +167,6 @@ public class IncrementalIndexCache {
     }
 
     /**
-     * 更新指定文件的 MD5 缓存记录（索引成功后调用）。
-     *
-     * @param file       已索引的文件路径，不为 {@code null}
-     * @param projectId  项目唯一标识符，不为 {@code null}
-     * @param projectRoot 项目根目录，不为 {@code null}
-     */
-    public void updateEntry(Path file, String projectId, Path projectRoot) {
-        String relPath = toRelPath(file, projectRoot);
-        String md5 = computeMd5(file);
-        if (md5 == null) return;
-
-        String url = "jdbc:sqlite:" + dbPath;
-        try (Connection conn = DriverManager.getConnection(url)) {
-            conn.setAutoCommit(false);
-            try (PreparedStatement ps = conn.prepareStatement(
-                    "INSERT INTO file_cache(project_id, file_path, md5) VALUES(?,?,?) " +
-                    "ON CONFLICT(project_id, file_path) DO UPDATE SET md5=excluded.md5")) {
-                ps.setString(1, projectId);
-                ps.setString(2, relPath);
-                ps.setString(3, md5);
-                ps.executeUpdate();
-            }
-            conn.commit();
-        } catch (SQLException e) {
-            log.warn("Failed to update cache entry for '{}': {}", relPath, e.getMessage());
-        }
-    }
-
-    /**
      * 批量更新文件 MD5 缓存，在一个事务内完成，提升写入性能。
      *
      * @param files       已成功索引的文件列表，不为 {@code null}

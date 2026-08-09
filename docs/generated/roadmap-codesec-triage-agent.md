@@ -74,7 +74,7 @@ MCP 工具、增量索引管道），区别只是包装和验证对象不同：
 | 图谱 | Neo4j CodeUnit 图、CALLS、EXTENDS、IMPLEMENTS | 调用链、影响面、路径解释 |
 | 检索 | 向量 + 轻量关键词 Hybrid GraphRAG | 按规则 ID、CWE/CVE、API 名称和自然语言找上下文 |
 | Context Pack | 已有 citation-ready 上下文包 | 给 Agent 提供可溯源证据 |
-| 漏洞管理 | CodeVuln / TaintVuln / DepsVuln / PreciseTaint | 作为研判和复核工具 |
+| 漏洞管理 | CodeVuln / TaintVuln / DepsVuln | 作为研判和复核工具 |
 | MCP | 23 个工具 | 作为 AI Agent 工具层 |
 
 ## 分阶段路线
