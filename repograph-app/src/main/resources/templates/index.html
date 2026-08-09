@@ -17,6 +17,7 @@
 <div class="layout">
   <nav th:replace="~{fragments/nav :: nav}"></nav>
   <main>
+    <th:block th:replace="~{panels/agent    :: panel}"></th:block>
     <th:block th:replace="~{panels/search   :: panel}"></th:block>
     <th:block th:replace="~{panels/graph    :: panel}"></th:block>
     <th:block th:replace="~{panels/symbol   :: panel}"></th:block>
@@ -76,6 +77,7 @@
 
 <!-- App scripts (defer — run after DOM + Alpine) -->
 <script defer th:src="@{/js/repograph-app.js}"></script>
+<script defer th:src="@{/js/repograph-agent.js}"></script>
 <script defer th:src="@{/js/repograph-search.js}"></script>
 <script defer th:src="@{/js/repograph-graph.js}"></script>
 <script defer th:src="@{/js/repograph-stats.js}"></script>

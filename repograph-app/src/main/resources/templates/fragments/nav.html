@@ -1,6 +1,15 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
 <nav th:fragment="nav">
+  <div class="nav-group-label" data-i18n="nav.group.agent">Agent Ops</div>
+  <button class="nav-btn nav-btn-agent" data-panel="agent"
+          :class="{ active: $store.repograph.panel === 'agent' }"
+          @click="$store.repograph.showPanel('agent')" title="Agent Workbench">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2v4M4.93 4.93l2.83 2.83M2 12h4M18 12h4M6 18h12a3 3 0 0 0 3-3V9a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v6a3 3 0 0 0 3 3Z"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><path d="M9 22h6"/></svg>
+    <span class="nav-label" data-i18n="nav.agent">Agent 作战台</span>
+    <span class="nav-live-dot" title="SAST_TRIAGE available"></span>
+  </button>
+
   <div class="nav-group-label" data-i18n="nav.group.explore">Explore</div>
   <button class="nav-btn" data-panel="search"
           :class="{ active: $store.repograph.panel === 'search' }"

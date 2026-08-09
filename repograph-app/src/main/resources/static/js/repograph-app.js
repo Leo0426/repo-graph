@@ -168,7 +168,34 @@ const api = {
   },
   exportGraphUrl: (projectId, format) =>
     `/api/v1/export/graph?projectId=${encodeURIComponent(projectId)}&format=${encodeURIComponent(format)}`,
+  agentStartSastTriage: async (projectId, format, json, codeVersion, ruleVersion) => {
+    const p = new URLSearchParams({ projectId, format });
+    if (codeVersion) p.set('codeVersion', codeVersion);
+    if (ruleVersion) p.set('ruleVersion', ruleVersion);
+    const response = await fetch(`/api/v1/agent-runs/sast-triage?${p}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: json,
+    });
+    if (!response.ok) throw new Error(await apiError(response));
+    return response.json();
+  },
+  agentRuns: async (projectId, limit = 20) => {
+    const p = new URLSearchParams({ projectId, limit });
+    const response = await fetch(`/api/v1/agent-runs?${p}`);
+    if (!response.ok) throw new Error(await apiError(response));
+    return response.json();
+  },
+  agentRun: async (runId) => {
+    const response = await fetch(`/api/v1/agent-runs/${encodeURIComponent(runId)}`);
+    if (!response.ok) throw new Error(await apiError(response));
+    return response.json();
+  },
 };
+
+async function apiError(response) {
+  const text = await response.text();
+  try { return JSON.parse(text).error || `HTTP ${response.status}`; }
+  catch (_) { return text || `HTTP ${response.status}`; }
+}
 
 /* ── Navigation ── */
 function switchPanel(id) {
@@ -176,6 +203,7 @@ function switchPanel(id) {
 }
 
 function handlePanelSwitch(id) {
+  if (id === 'agent') { refreshProjectsList().then(populateAgentProjectSelect).then(loadAgentRuns); return; }
   if (id === 'graph') setTimeout(initGraphCanvas, 50);
   if (id === 'tools') renderProjectsManage();
   if (id === 'benchmark') { loadBenchmark(); return; }
@@ -233,6 +261,8 @@ function setGlobalProject(projectId) {
     const input = document.getElementById(id);
     if (input) input.value = value;
   });
+  const agentProject = document.getElementById('agent-project-select');
+  if (agentProject) agentProject.value = state.activeProjectId;
   const active = document.querySelector('.panel.active');
   if (active?.id === 'panel-stats' && value) loadProjectStats();
 }

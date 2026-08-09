@@ -7,6 +7,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.util.unit.DataSize;
 
+import java.time.Clock;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -69,6 +70,30 @@ public class AppConfiguration {
             thread.setDaemon(true);
             return thread;
         });
+    }
+
+    /**
+     * Agent Playbook 后台执行专用单线程执行器，保证单实例内运行顺序可审计。
+     *
+     * @return Agent 运行执行器
+     */
+    @Bean(name = "agentRunExecutor", destroyMethod = "shutdown")
+    public ExecutorService agentRunExecutor() {
+        return Executors.newSingleThreadExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "repograph-agent-run");
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
+    /**
+     * Agent 运行时间戳使用的 UTC 时钟。
+     *
+     * @return UTC 系统时钟
+     */
+    @Bean(name = "agentClock")
+    public Clock agentClock() {
+        return Clock.systemUTC();
     }
 
     private static final class ArchiveRequestOverhead {

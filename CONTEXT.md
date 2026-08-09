@@ -138,6 +138,25 @@ repograph-mcp/   独立 MCP stdio 服务（JSON-RPC，供 AI 工具调用，通�
 - `LlmAdvisoryEvaluator` 在人工标注固定样本上分别计算启发式与模型建议准确率，以及平均延迟和总成本。
 - REST：`POST /api/v1/triage/advisory` 接收已有 `TriageReport`，返回独立辅助意见。
 
+**平台 Agent 工作台（v1 已实现，`com.repograph.agent` / `com.repograph.core.agent`）**：
+- **定位**：平台 Agent 是围绕明确安全目标，自主编排现有分析能力、记录执行状态与证据、
+  并在关键节点等待人工确认的可观察工作流；不等同于通用聊天机器人。
+- `AgentPlaybook`：可版本化的目标工作流，定义步骤顺序、可用能力、降级语义和人工检查点；
+  首个 Playbook 为 `SAST_TRIAGE`（报警归一化 → 代码定位 → Context Pack → 证据增强 → 研判 → 人工审核）。
+- `AgentRun`：一次 Playbook 执行，关联项目、输入事实和输出报告；状态为
+  `QUEUED → RUNNING → WAITING_FOR_REVIEW → COMPLETED`，异常终态为 `PARTIAL / FAILED / CANCELLED`。
+- `AgentStep`：`AgentRun` 中可观察的执行步骤，只记录能力名、状态、输入/输出引用、摘要、citation、
+  缺失信息和结构化错误；不记录或伪造模型内部思维过程。
+- **事实边界**：`AgentRun` 只负责编排和可观测性，不复制 `ScanTask / TriageReport / ContextPack /
+  ReviewQueueEntry` 中的领域事实；步骤通过稳定 ID 引用原始结果。
+- **界面边界**：Web 增加一级“Agent”工作台，展示能力目录、Run 列表、步骤时间线、证据结果和
+  人工操作；通用聊天与 MCP 外部 Agent 集成是次级入口。
+- **降级语义**：LLM 未安装或未启用时，启发式研判照常完成，对应步骤显式标记“LLM 辅助未启用”；
+  部分能力失败时保留已产生证据并进入 `PARTIAL`，不将降级包装为完整 Agent 结论。
+- **REST 与界面**：`POST /api/v1/agent-runs/sast-triage` 异步接受运行；`GET /api/v1/agent-runs`
+  和 `GET /api/v1/agent-runs/{id}` 暴露项目运行台账与步骤时间线。Web 一级 Agent 作战台展示当前可用
+  Playbook、报警输入、运行状态、证据引用、缺失信息、结构化错误及报告快照人工审核出口。
+
 **审核队列与报告快照**（P1 T9 第一片，`com.repograph.finding`）：
 - `ReportSnapshot`：生成后即冻结的批量研判结果，携带 `schemaVersion/toolVersion/codeVersion/
   ruleVersion/generatedAt`，Markdown、JSON 和 PDF 导出均由同一份快照派生，天然保证报警数、结论和
@@ -481,6 +500,7 @@ Neo4j Docker 启动示例：`-p 7474:7474 -p 7687:7687`（7474 浏览器 UI，76
 | 质量指标 | 启发式 rawSource 统计 | 无需完整 AST，对大代码库仍有可接受精度 |
 | 字节码精确污点 | 从主仓库移除 WALA IFDS 引擎，归档于 tag `archive/taint-engine-20260809` | 引擎需补丁 WALA、独立 JDK 21/jmods 和子进程协议，但尚无真实基准证明其研判收益超过维护成本。主线保留源码级污点；更高精度交给 CodeQL 等外部扫描器，未来只在基准证明增量价值后重新接入。 |
 | AI Agent 缺陷发现接口 | `repograph-mcp` 结构化查询工具（调用图/污点/向量），不依赖 Agent 默认 grep/Read | grep 是字符串匹配，无法表达跨函数/跨文件数据流（如参数从入口方法传到 sink 的调用链）；`find_callers`/`find_callees`/`trace_taint`/`scan_vuln_code`/`search_graphrag` 让 Agent 对预建的 CodeUnit 图和污点摘要做结构化查询，代价是需要维护 Neo4j+Qdrant+MCP 进程，换取 grep 结构上做不到的跨过程追踪精度 |
+| 平台 Agent 产品形态 | 可观察、可审核的 Agent 工作台为一级入口；聊天和 MCP 集成居次 | 安全研判需要显示任务状态、步骤、citation、降级原因和人工检查点；通用聊天会把可审计事实淹没在对话中，而只展示 MCP 工具不能让 Web 用户感知平台自身的 Agent 能力。 |
 | 不可信源码归档接入 | 独立资产接入层 + 受控持久目录 + 异步复用 IndexPipeline | 不把归档逻辑混入领域索引管道；ZIP 中链接属性从中央目录读取，TAR.GZ 流式解压；主服务只递归删除 SQLite 注册的受控资产目录 |
 | 资产画像生成 | 按需聚合托管源码、图谱、SBOM、漏洞和 Git 热点 | 保持画像为可重算快照，避免复制事实源；可选来源失败写入 omittedReasons；扫描器人工排除优先于包含 |
 | 外部扫描器执行 | 小 ScannerAdapter + 受控 CLI 进程 + SQLite 事实存储 | 工具专属参数不渗透领域模型；失败按扫描器隔离；CodeQL 仅使用 build-mode none，禁止主服务隐式执行项目构建；主动取消和任务队列留给 T10 的统一状态机 |

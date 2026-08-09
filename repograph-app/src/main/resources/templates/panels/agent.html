@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="panel" id="panel-agent" class="panel agent-panel"
+     :class="{ active: $store.repograph.panel === 'agent' }">
+  <div class="panel-header agent-panel-header">
+    <div class="agent-title-row">
+      <div>
+        <div class="panel-title" data-i18n="agent.title">Agent 作战台</div>
+        <div class="panel-subtitle" data-i18n="agent.subtitle">可追踪的安全工作流 · 证据链 · 人工检查点</div>
+      </div>
+      <div class="agent-system-state"><span></span><b>1</b> PLAYBOOK ONLINE</div>
+    </div>
+  </div>
+
+  <div class="panel-body agent-body">
+    <section class="agent-capability-strip" aria-label="Agent capabilities">
+      <article class="agent-capability active">
+        <div class="agent-cap-index">A/01</div>
+        <div><strong>SAST TRIAGE</strong><small data-i18n="agent.cap.sast">报警定位 → 证据组装 → 研判 → 审核</small></div>
+        <span>LIVE</span>
+      </article>
+      <article class="agent-capability planned">
+        <div class="agent-cap-index">A/02</div>
+        <div><strong>ARCH REVIEW</strong><small data-i18n="agent.cap.arch">架构漂移与变更风险评估</small></div>
+        <span>ROADMAP</span>
+      </article>
+      <article class="agent-capability planned">
+        <div class="agent-cap-index">A/03</div>
+        <div><strong>REMEDIATION</strong><small data-i18n="agent.cap.fix">修复方案生成与验证闭环</small></div>
+        <span>ROADMAP</span>
+      </article>
+    </section>
+
+    <section class="agent-command-deck">
+      <div class="agent-section-label"><span>01</span><b data-i18n="agent.launch">发起任务</b><em>PLAYBOOK / SAST_TRIAGE@1</em></div>
+      <div class="agent-command-grid">
+        <label><span data-i18n="agent.project">目标项目</span>
+          <select id="agent-project-select" onchange="loadAgentRuns()">
+            <option value="" data-i18n="ph.selectProject">— 选择项目 —</option>
+          </select>
+        </label>
+        <label><span data-i18n="agent.format">报警格式</span>
+          <select id="agent-format"><option value="semgrep">SEMGREP JSON</option><option value="sarif">SARIF 2.1</option></select>
+        </label>
+        <label><span>CODE VERSION</span><input id="agent-code-version" placeholder="commit SHA (optional)"></label>
+        <label><span>RULE VERSION</span><input id="agent-rule-version" placeholder="ruleset (optional)"></label>
+      </div>
+      <div class="agent-payload-row">
+        <div class="agent-payload-wrap">
+          <textarea id="agent-findings-json" spellcheck="false" data-i18n-ph="agent.payload"
+                    placeholder="粘贴 Semgrep / SARIF JSON，或选择文件…"></textarea>
+          <div class="agent-payload-tools">
+            <input id="agent-file-input" type="file" accept=".json,.sarif" hidden onchange="readAgentFile(this)">
+            <button class="btn btn-ghost" onclick="document.getElementById('agent-file-input').click()" data-i18n="agent.chooseFile">选择文件</button>
+            <span id="agent-file-name">INPUT / NOT LOADED</span>
+          </div>
+        </div>
+        <button id="agent-run-btn" class="agent-execute-btn" onclick="startSastTriageAgent()">
+          <span class="agent-execute-icon">▶</span>
+          <span><b data-i18n="agent.execute">执行研判</b><small>START AGENT RUN</small></span>
+        </button>
+      </div>
+      <div id="agent-command-error" class="agent-command-error"></div>
+    </section>
+
+    <section class="agent-operations">
+      <aside class="agent-run-rail">
+        <div class="agent-section-label"><span>02</span><b data-i18n="agent.runs">运行记录</b><button onclick="loadAgentRuns()">↻</button></div>
+        <div id="agent-run-list" class="agent-run-list">
+          <div class="agent-empty" data-i18n="agent.selectProject">选择项目以查看 Agent 运行</div>
+        </div>
+      </aside>
+      <div class="agent-run-detail">
+        <div class="agent-section-label"><span>03</span><b data-i18n="agent.timeline">执行时间线</b><em id="agent-run-id">NO RUN SELECTED</em></div>
+        <div id="agent-run-detail" class="agent-detail-empty">
+          <div class="agent-radar"><i></i><i></i><i></i></div>
+          <strong data-i18n="agent.noRun">尚未选择运行</strong>
+          <span data-i18n="agent.noRunHint">运行 Agent 后，这里会展示步骤、证据引用、缺失信息与人工审核节点。</span>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+</body>
+</html>
