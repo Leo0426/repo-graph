@@ -3,7 +3,120 @@ const agentUi = {
   runs: [],
   selectedId: '',
   polling: null,
+  llmSettings: null,
+  llmConnection: null,
 };
+
+async function loadLlmSettings() {
+  const stateElement = document.getElementById('agent-llm-state');
+  if (!stateElement) return;
+  setLlmState('loading', 'LOADING', '—');
+  try {
+    const settings = await api.llmSettings();
+    agentUi.llmSettings = settings;
+    document.getElementById('agent-llm-enabled').checked = settings.enabled;
+    document.getElementById('agent-llm-base-url').value = settings.baseUrl;
+    document.getElementById('agent-llm-model').value = settings.model;
+    renderSavedLlmState();
+  } catch (error) {
+    setLlmState('error', 'CONFIG ERROR', error.message);
+  }
+}
+
+function toggleLlmSettings() {
+  const module = document.getElementById('agent-llm-module');
+  const open = module.classList.toggle('open');
+  document.getElementById('agent-llm-chevron').textContent = open ? '−' : '＋';
+}
+
+function llmDraft() {
+  return {
+    enabled: document.getElementById('agent-llm-enabled').checked,
+    baseUrl: document.getElementById('agent-llm-base-url').value.trim(),
+    model: document.getElementById('agent-llm-model').value.trim(),
+  };
+}
+
+function renderLlmDraftState() {
+  const draft = llmDraft();
+  if (!draft.enabled) setLlmState('disabled', 'DISABLED', t('agent.llm.heuristicOnly'));
+  else setLlmState('unverified', 'ENABLED', t('agent.llm.unsaved'));
+}
+
+function renderSavedLlmState() {
+  const settings = agentUi.llmSettings;
+  if (!settings?.enabled) {
+    setLlmState('disabled', 'DISABLED', t('agent.llm.heuristicOnly'));
+    return;
+  }
+  if (agentUi.llmConnection?.reachable && agentUi.llmConnection?.modelAvailable) {
+    setLlmState('ready', 'READY', `${settings.provider} / ${settings.model}`);
+  } else {
+    setLlmState('unverified', 'ENABLED', `${settings.provider} / ${settings.model}`);
+  }
+}
+
+async function testLlmConnection() {
+  const draft = llmDraft();
+  if (!draft.baseUrl || !draft.model) return showLlmMessage(t('agent.llm.required'), 'error');
+  const button = document.getElementById('agent-llm-test-btn');
+  button.disabled = true;
+  showLlmMessage(t('agent.llm.testing'), 'working');
+  setLlmState('loading', 'PROBING', draft.baseUrl);
+  try {
+    const status = await api.testLlmSettings(draft);
+    agentUi.llmConnection = status;
+    document.getElementById('agent-llm-models').innerHTML = (status.models || [])
+      .map(model => `<option value="${esc(model)}"></option>`).join('');
+    if (!status.reachable) {
+      setLlmState('error', 'UNREACHABLE', draft.baseUrl);
+      showLlmMessage(t('agent.llm.unreachable'), 'error');
+    } else if (!status.modelAvailable) {
+      setLlmState('warning', 'MODEL MISSING', draft.model);
+      showLlmMessage(t('agent.llm.modelMissing', draft.model), 'warning');
+    } else {
+      setLlmState('ready', 'READY', `OLLAMA / ${draft.model}`);
+      showLlmMessage(t('agent.llm.connected', draft.model), 'success');
+    }
+  } catch (error) {
+    setLlmState('error', 'TEST FAILED', draft.baseUrl);
+    showLlmMessage(error.message, 'error');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function saveLlmSettings() {
+  const draft = llmDraft();
+  if (!draft.baseUrl || !draft.model) return showLlmMessage(t('agent.llm.required'), 'error');
+  const button = document.getElementById('agent-llm-save-btn');
+  button.disabled = true;
+  showLlmMessage(t('agent.llm.saving'), 'working');
+  try {
+    agentUi.llmSettings = await api.updateLlmSettings(draft);
+    renderSavedLlmState();
+    showLlmMessage(t('agent.llm.saved'), 'success');
+    showToast(t('agent.llm.saved'));
+  } catch (error) {
+    showLlmMessage(error.message, 'error');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function setLlmState(tone, title, detail) {
+  const element = document.getElementById('agent-llm-state');
+  if (!element) return;
+  element.className = `agent-llm-state ${tone}`;
+  element.innerHTML = `<i></i><b>${esc(title)}</b><small>${esc(detail)}</small>`;
+}
+
+function showLlmMessage(message, tone) {
+  const element = document.getElementById('agent-llm-message');
+  if (!element) return;
+  element.className = `agent-llm-message ${tone || ''}`;
+  element.textContent = message || '';
+}
 
 function populateAgentProjectSelect(projects = state.projects) {
   const select = document.getElementById('agent-project-select');

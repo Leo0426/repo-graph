@@ -7,6 +7,8 @@ import com.repograph.core.advisory.LlmAdvisoryModel;
 import com.repograph.core.advisory.LlmAdvisoryRequest;
 import com.repograph.core.advisory.LlmAdvisoryResult;
 import com.repograph.core.advisory.LlmAdvisoryService;
+import com.repograph.core.advisory.LlmAdvisorySettings;
+import com.repograph.core.advisory.LlmAdvisorySettingsService;
 import com.repograph.core.advisory.LlmAdvisoryStatus;
 import com.repograph.core.advisory.LlmModelException;
 import com.repograph.core.advisory.LlmModelResponse;
@@ -51,6 +53,7 @@ public class DefaultLlmAdvisoryService implements LlmAdvisoryService {
 
     private final LlmAdvisoryModel model;
     private final LlmAdvisoryProperties properties;
+    private final LlmAdvisorySettingsService settingsService;
     private final ExecutorService executor;
     private final LlmAdvisoryAuditSink auditSink;
     private final Clock clock;
@@ -60,20 +63,47 @@ public class DefaultLlmAdvisoryService implements LlmAdvisoryService {
      *
      * @param model      提供方中立模型适配器
      * @param properties 安全与资源边界
-     * @param executor   专用有界执行器
-     * @param auditSink  无源码审计出口
+     * @param settingsService 页面运行时设置
+     * @param executor        专用有界执行器
+     * @param auditSink       无源码审计出口
      */
     @Autowired
     public DefaultLlmAdvisoryService(
             LlmAdvisoryModel model,
             LlmAdvisoryProperties properties,
+            LlmAdvisorySettingsService settingsService,
             @Qualifier("llmAdvisoryExecutor") ExecutorService executor,
             LlmAdvisoryAuditSink auditSink) {
-        this(model, properties, executor, auditSink, Clock.systemUTC());
+        this(model, properties, settingsService, executor, auditSink, Clock.systemUTC());
     }
 
     /**
      * 创建可注入时钟的辅助复核服务。
+     *
+     * @param model      模型适配器
+     * @param properties 安全与资源边界
+     * @param settingsService 页面运行时设置
+     * @param executor   专用执行器
+     * @param auditSink  审计出口
+     * @param clock      审计时钟
+     */
+    public DefaultLlmAdvisoryService(
+            LlmAdvisoryModel model,
+            LlmAdvisoryProperties properties,
+            LlmAdvisorySettingsService settingsService,
+            ExecutorService executor,
+            LlmAdvisoryAuditSink auditSink,
+            Clock clock) {
+        this.model = Objects.requireNonNull(model, "model");
+        this.properties = Objects.requireNonNull(properties, "properties");
+        this.settingsService = Objects.requireNonNull(settingsService, "settingsService");
+        this.executor = Objects.requireNonNull(executor, "executor");
+        this.auditSink = Objects.requireNonNull(auditSink, "auditSink");
+        this.clock = Objects.requireNonNull(clock, "clock");
+    }
+
+    /**
+     * 创建使用启动配置开关的兼容实例，主要供独立测试和非 Spring 调用使用。
      *
      * @param model      模型适配器
      * @param properties 安全与资源边界
@@ -87,11 +117,7 @@ public class DefaultLlmAdvisoryService implements LlmAdvisoryService {
             ExecutorService executor,
             LlmAdvisoryAuditSink auditSink,
             Clock clock) {
-        this.model = Objects.requireNonNull(model, "model");
-        this.properties = Objects.requireNonNull(properties, "properties");
-        this.executor = Objects.requireNonNull(executor, "executor");
-        this.auditSink = Objects.requireNonNull(auditSink, "auditSink");
-        this.clock = Objects.requireNonNull(clock, "clock");
+        this(model, properties, new StartupSettingsService(properties), executor, auditSink, clock);
     }
 
     /**
@@ -114,7 +140,7 @@ public class DefaultLlmAdvisoryService implements LlmAdvisoryService {
     @Override
     public LlmAdvisoryResult review(TriageReport heuristicReport) {
         TriageReport report = Objects.requireNonNull(heuristicReport, "heuristicReport");
-        if (!properties.enabled() || !model.available()) {
+        if (!settingsService.current().enabled() || !model.available()) {
             return LlmAdvisoryResult.disabled(report);
         }
 
@@ -380,4 +406,25 @@ public class DefaultLlmAdvisoryService implements LlmAdvisoryService {
     private record Replacement(String value, int count) {}
 
     private record PreparedRequest(LlmAdvisoryRequest request, int inputChars, int redactionCount) {}
+
+    private static final class StartupSettingsService implements LlmAdvisorySettingsService {
+
+        private final LlmAdvisorySettings settings;
+
+        private StartupSettingsService(LlmAdvisoryProperties properties) {
+            this.settings = new LlmAdvisorySettings(
+                    properties.enabled(), "STATIC", "", "", Instant.EPOCH.toString());
+        }
+
+        @Override
+        public LlmAdvisorySettings current() {
+            return settings;
+        }
+
+        @Override
+        public LlmAdvisorySettings update(
+                boolean enabled, String baseUrl, String model, String updatedAt) {
+            throw new UnsupportedOperationException("startup settings are immutable");
+        }
+    }
 }

@@ -32,6 +32,34 @@
       </article>
     </section>
 
+    <section id="agent-llm-module" class="agent-llm-module">
+      <button class="agent-llm-header" onclick="toggleLlmSettings()" aria-controls="agent-llm-settings-body">
+        <span class="agent-llm-mark">AI</span>
+        <span class="agent-llm-name"><b>LLM REVIEW MODULE</b><small data-i18n="agent.llm.desc">本地 Ollama · 仅辅助建议 · 不自动修改漏洞状态</small></span>
+        <span id="agent-llm-state" class="agent-llm-state loading"><i></i><b>LOADING</b><small>—</small></span>
+        <span id="agent-llm-chevron" class="agent-llm-chevron">＋</span>
+      </button>
+      <div id="agent-llm-settings-body" class="agent-llm-settings-body">
+        <div class="agent-llm-policy">
+          <span>POLICY / ADVISORY ONLY</span>
+          <p data-i18n="agent.llm.policy">证据发送前执行字符预算和秘密脱敏；模型 citation 会经过白名单校验。</p>
+        </div>
+        <label class="agent-llm-toggle">
+          <input id="agent-llm-enabled" type="checkbox" onchange="renderLlmDraftState()">
+          <span></span>
+          <b data-i18n="agent.llm.enable">启用 LLM 辅助复核</b>
+        </label>
+        <label><span>PROVIDER</span><input value="OLLAMA" disabled></label>
+        <label class="agent-llm-url"><span>BASE URL</span><input id="agent-llm-base-url" placeholder="http://localhost:11434"></label>
+        <label><span>MODEL</span><input id="agent-llm-model" list="agent-llm-models" placeholder="qwen3:8b"><datalist id="agent-llm-models"></datalist></label>
+        <div class="agent-llm-actions">
+          <button id="agent-llm-test-btn" class="btn btn-ghost" onclick="testLlmConnection()" data-i18n="agent.llm.test">测试连接</button>
+          <button id="agent-llm-save-btn" class="btn btn-primary" onclick="saveLlmSettings()" data-i18n="agent.llm.save">保存设置</button>
+        </div>
+        <div id="agent-llm-message" class="agent-llm-message"></div>
+      </div>
+    </section>
+
     <section class="agent-command-deck">
       <div class="agent-section-label"><span>01</span><b data-i18n="agent.launch">发起任务</b><em>PLAYBOOK / SAST_TRIAGE@1</em></div>
       <div class="agent-command-grid">

@@ -127,8 +127,11 @@ repograph-mcp/   独立 MCP stdio 服务（JSON-RPC，供 AI 工具调用，通�
 **受约束 LLM 辅助复核**（P1 HITL，`com.repograph.advisory`）：
 - `LlmAdvisoryService` 接收不可变 `TriageReport`，结果固定 `advisoryOnly=true` 并原样携带启发式报告；
   模型建议不写入 `VulnStore`，不能把发现自动改为 `CONFIRMED`。
-- 默认 `repograph.advisory.enabled=false`，没有真实模型适配器时使用关闭模型，完整退化到启发式结论。
-  当前只固化提供方中立契约，不替部署方决定允许的模型提供方或源码出域策略。
+- `LlmAdvisorySettingsStore` 以 YAML 的 `repograph.advisory.enabled/ollama.*` 为首次启动默认值，页面保存后
+  以 SQLite 运行时设置为准；Agent 作战台可启停辅助复核、配置 Ollama Base URL/生成模型并检测模型是否安装，
+  无需重启。Base URL 只接受无凭据、query、fragment 的 HTTP(S) 地址。
+- `OllamaLlmAdvisoryModel` 调用 `/api/chat` 并要求 JSON-only 结构化结果；本地模型成本固定为 0，服务不可达、
+  模型未安装、超时或响应无效时保留启发式结论。模型提供方适配仍位于实现包，不渗入 core 契约。
 - 调用前剔除外部报警 raw，按字符预算裁剪，并脱敏 password/token/secret/API key/Bearer 等常见秘密；
   证据显式标记为 untrusted，供模型适配器隔离提示指令与数据。
 - 调用后只保留输入 `ContextPack` 中存在的 citation；不存在的引用进入 `missingInfo`，不能成为新证据。
@@ -137,6 +140,7 @@ repograph-mcp/   独立 MCP stdio 服务（JSON-RPC，供 AI 工具调用，通�
   安全错误码，不记录提示词、源码或异常原文。
 - `LlmAdvisoryEvaluator` 在人工标注固定样本上分别计算启发式与模型建议准确率，以及平均延迟和总成本。
 - REST：`POST /api/v1/triage/advisory` 接收已有 `TriageReport`，返回独立辅助意见。
+  `GET/PUT /api/v1/agent-settings/llm` 管理运行时设置，`POST /api/v1/agent-settings/llm/test` 检测页面草稿连接。
 
 **平台 Agent 工作台（v1 已实现，`com.repograph.agent` / `com.repograph.core.agent`）**：
 - **定位**：平台 Agent 是围绕明确安全目标，自主编排现有分析能力、记录执行状态与证据、

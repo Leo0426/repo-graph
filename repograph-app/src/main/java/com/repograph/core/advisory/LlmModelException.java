@@ -23,6 +23,18 @@ public class LlmModelException extends RuntimeException {
     }
 
     /**
+     * 创建带底层原因的模型异常。
+     *
+     * @param message   安全错误摘要，不得包含提示词或源码
+     * @param retryable 是否允许重试
+     * @param cause     底层异常
+     */
+    public LlmModelException(String message, boolean retryable, Throwable cause) {
+        super(message, cause);
+        this.retryable = retryable;
+    }
+
+    /**
      * 返回是否允许重试。
      *
      * @return 可重试时为 {@code true}

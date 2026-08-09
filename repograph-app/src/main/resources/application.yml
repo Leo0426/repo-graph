@@ -37,7 +37,10 @@ repograph:
     codeql-query-suite: security-extended
     slither-command: slither
   advisory:
-    enabled: false             # 默认关闭；明确提供方和源码出域策略后再启用
+    enabled: false             # 首次启动默认值；页面保存后以 SQLite 运行时设置为准
+    ollama:
+      base-url: http://localhost:11434
+      model: qwen3:8b
     max-input-chars: 12000
     max-output-chars: 4000
     max-estimated-cost-usd: 0.05

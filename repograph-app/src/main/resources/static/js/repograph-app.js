@@ -189,6 +189,25 @@ const api = {
     if (!response.ok) throw new Error(await apiError(response));
     return response.json();
   },
+  llmSettings: async () => {
+    const response = await fetch('/api/v1/agent-settings/llm');
+    if (!response.ok) throw new Error(await apiError(response));
+    return response.json();
+  },
+  updateLlmSettings: async (settings) => {
+    const response = await fetch('/api/v1/agent-settings/llm', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings),
+    });
+    if (!response.ok) throw new Error(await apiError(response));
+    return response.json();
+  },
+  testLlmSettings: async (settings) => {
+    const response = await fetch('/api/v1/agent-settings/llm/test', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings),
+    });
+    if (!response.ok) throw new Error(await apiError(response));
+    return response.json();
+  },
 };
 
 async function apiError(response) {
@@ -203,7 +222,11 @@ function switchPanel(id) {
 }
 
 function handlePanelSwitch(id) {
-  if (id === 'agent') { refreshProjectsList().then(populateAgentProjectSelect).then(loadAgentRuns); return; }
+  if (id === 'agent') {
+    refreshProjectsList().then(populateAgentProjectSelect).then(loadAgentRuns);
+    loadLlmSettings();
+    return;
+  }
   if (id === 'graph') setTimeout(initGraphCanvas, 50);
   if (id === 'tools') renderProjectsManage();
   if (id === 'benchmark') { loadBenchmark(); return; }

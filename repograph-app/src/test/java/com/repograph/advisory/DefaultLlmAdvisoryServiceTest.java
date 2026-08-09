@@ -17,7 +17,9 @@ import com.repograph.core.retrieval.ContextEvidence;
 import com.repograph.core.retrieval.ContextPack;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Path;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
@@ -33,6 +35,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * @author leolu
  */
 class DefaultLlmAdvisoryServiceTest {
+
+    @TempDir
+    Path tempDir;
 
     private final List<ExecutorService> executors = new ArrayList<>();
 
@@ -55,6 +60,26 @@ class DefaultLlmAdvisoryServiceTest {
         assertThat(result.suggestedVerdict()).isNull();
         assertThat(result.citations()).isEmpty();
         assertThat(result.missingInfo()).anyMatch(value -> value.contains("未启用"));
+    }
+
+    @Test
+    void reviewUsesRuntimePageToggleInsteadOfStartupEnabledFlag() {
+        LlmAdvisorySettingsStore settings = new LlmAdvisorySettingsStore(
+                tempDir.resolve("runtime-settings.db").toString(),
+                false, "http://localhost:11434", "qwen3:8b");
+        settings.update(true, "http://localhost:11434", "qwen3:8b", "2026-08-09T09:00:00Z");
+        CapturingModel model = new CapturingModel(new LlmModelResponse(
+                TriageVerdict.NEEDS_REVIEW, 0.4f, List.of(), List.of(), LlmUsage.NONE));
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        executors.add(executor);
+        DefaultLlmAdvisoryService service = new DefaultLlmAdvisoryService(
+                model, properties(false, 5000, 1000, 0.1d, 1000, 0),
+                settings, executor, new RecordingAuditSink(), Clock.systemUTC());
+
+        LlmAdvisoryResult result = service.review(heuristicReport());
+
+        assertThat(result.status()).isEqualTo(LlmAdvisoryStatus.COMPLETED);
+        assertThat(model.request).isNotNull();
     }
 
     @Test
