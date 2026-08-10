@@ -105,14 +105,39 @@ class VulnStoreTest {
     }
 
     @Test
+    void replaceTaintEvidence_persistsOrderedSourceCodeSteps() {
+        VulnStore s = store();
+        s.upsertAll(List.of(finding("id-1", "COMMAND_INJECTION_TAINT", "HIGH", VulnFinding.SUSPECTED)));
+        List<TaintEvidenceStep> steps = List.of(
+                new TaintEvidenceStep(2, "SINK", "com.example.Service#exec(String)",
+                        "param[0]", "SINK:exec.arg[0]", "Service.java", 20, 24,
+                        "Runtime.getRuntime().exec(command);"),
+                new TaintEvidenceStep(1, "SOURCE", "com.example.Controller#run(String)",
+                        "param[0]", "process.arg[0]", "Controller.java", 10, 14,
+                        "void run(String command) { service.process(command); }"));
+
+        s.replaceTaintEvidence("id-1", steps);
+
+        assertThat(s.findTaintEvidence("id-1"))
+                .extracting(TaintEvidenceStep::role)
+                .containsExactly("SOURCE", "SINK");
+        assertThat(s.findTaintEvidence("id-1").get(1).sourceExcerpt())
+                .contains("Runtime.getRuntime().exec");
+    }
+
+    @Test
     void removeProject_clears_findings() {
         VulnStore s = store();
         s.upsertAll(List.of(
                 finding("id-1", "SQL_INJECTION", "HIGH", VulnFinding.SUSPECTED),
                 finding("id-2", "WEAK_CRYPTO",   "HIGH", VulnFinding.SUSPECTED)));
+        s.replaceTaintEvidence("id-1", List.of(new TaintEvidenceStep(
+                1, "SOURCE", "com.example.Foo#bar()", "param[0]", "return",
+                "Foo.java", 10, 12, "return input;")));
 
         s.removeProject("proj-1");
 
         assertThat(s.list("proj-1", null, null)).isEmpty();
+        assertThat(s.findTaintEvidence("id-1")).isEmpty();
     }
 }

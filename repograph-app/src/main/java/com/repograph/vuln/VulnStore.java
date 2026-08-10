@@ -152,14 +152,93 @@ public class VulnStore {
         }
     }
 
+    /**
+     * 原子替换指定漏洞的污染链源码证据。
+     *
+     * @param findingId 漏洞 ID
+     * @param steps     有序污染链步骤
+     */
+    public void replaceTaintEvidence(String findingId, List<TaintEvidenceStep> steps) {
+        String url = "jdbc:sqlite:" + dbPath;
+        try (Connection conn = DriverManager.getConnection(url)) {
+            conn.setAutoCommit(false);
+            try (PreparedStatement delete = conn.prepareStatement(
+                    "DELETE FROM vuln_taint_evidence WHERE finding_id = ?");
+                 PreparedStatement insert = conn.prepareStatement("""
+                         INSERT INTO vuln_taint_evidence
+                             (finding_id, sequence_no, role, method_qn, from_slot, to_slot,
+                              file_path, start_line, end_line, source_excerpt)
+                         VALUES (?,?,?,?,?,?,?,?,?,?)
+                         """)) {
+                delete.setString(1, findingId);
+                delete.executeUpdate();
+                for (TaintEvidenceStep step : steps) {
+                    insert.setString(1, findingId);
+                    insert.setInt(2, step.sequence());
+                    insert.setString(3, step.role());
+                    insert.setString(4, step.methodQn());
+                    insert.setString(5, step.fromSlot());
+                    insert.setString(6, step.toSlot());
+                    insert.setString(7, step.filePath());
+                    insert.setInt(8, step.startLine());
+                    insert.setInt(9, step.endLine());
+                    insert.setString(10, step.sourceExcerpt());
+                    insert.addBatch();
+                }
+                insert.executeBatch();
+            }
+            conn.commit();
+        } catch (SQLException e) {
+            log.warn("Failed to replace taint evidence for '{}': {}", findingId, e.getMessage());
+        }
+    }
+
+    /**
+     * 查询指定漏洞的污染链源码证据。
+     *
+     * @param findingId 漏洞 ID
+     * @return 按 sequence 排序的证据步骤
+     */
+    public List<TaintEvidenceStep> findTaintEvidence(String findingId) {
+        List<TaintEvidenceStep> result = new ArrayList<>();
+        String url = "jdbc:sqlite:" + dbPath;
+        try (Connection conn = DriverManager.getConnection(url);
+             PreparedStatement ps = conn.prepareStatement("""
+                     SELECT * FROM vuln_taint_evidence
+                     WHERE finding_id = ? ORDER BY sequence_no
+                     """)) {
+            ps.setString(1, findingId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result.add(new TaintEvidenceStep(
+                            rs.getInt("sequence_no"), rs.getString("role"), rs.getString("method_qn"),
+                            rs.getString("from_slot"), rs.getString("to_slot"), rs.getString("file_path"),
+                            rs.getInt("start_line"), rs.getInt("end_line"), rs.getString("source_excerpt")));
+                }
+            }
+        } catch (SQLException e) {
+            log.warn("Failed to load taint evidence for '{}': {}", findingId, e.getMessage());
+        }
+        return List.copyOf(result);
+    }
+
     /** 删除指定项目的所有漏洞记录，配合项目删除使用。 */
     public void removeProject(String projectId) {
         String url = "jdbc:sqlite:" + dbPath;
-        try (Connection conn = DriverManager.getConnection(url);
-             PreparedStatement ps = conn.prepareStatement(
-                     "DELETE FROM vuln_findings WHERE project_id = ?")) {
-            ps.setString(1, projectId);
-            ps.executeUpdate();
+        try (Connection conn = DriverManager.getConnection(url)) {
+            conn.setAutoCommit(false);
+            try (PreparedStatement evidence = conn.prepareStatement("""
+                         DELETE FROM vuln_taint_evidence
+                         WHERE finding_id IN (SELECT id FROM vuln_findings WHERE project_id = ?)
+                         """);
+                 PreparedStatement findings = conn.prepareStatement(
+                         "DELETE FROM vuln_findings WHERE project_id = ?")) {
+                evidence.setString(1, projectId);
+                evidence.executeUpdate();
+                findings.setString(1, projectId);
+                findings.executeUpdate();
+            }
+            conn.commit();
         } catch (SQLException e) {
             log.warn("Failed to remove vuln findings for '{}': {}", projectId, e.getMessage());
         }
@@ -190,6 +269,21 @@ public class VulnStore {
                     """);
             stmt.execute(
                     "CREATE INDEX IF NOT EXISTS idx_vuln_project ON vuln_findings(project_id)");
+            stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS vuln_taint_evidence (
+                        finding_id     TEXT NOT NULL,
+                        sequence_no    INTEGER NOT NULL,
+                        role           TEXT NOT NULL,
+                        method_qn      TEXT NOT NULL,
+                        from_slot      TEXT NOT NULL,
+                        to_slot        TEXT NOT NULL,
+                        file_path      TEXT NOT NULL,
+                        start_line     INTEGER NOT NULL,
+                        end_line       INTEGER NOT NULL,
+                        source_excerpt TEXT NOT NULL,
+                        PRIMARY KEY (finding_id, sequence_no)
+                    )
+                    """);
         } catch (SQLException e) {
             log.warn("Failed to init vuln_findings table: {}", e.getMessage());
         }

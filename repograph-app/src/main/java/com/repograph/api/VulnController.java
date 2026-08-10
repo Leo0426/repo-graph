@@ -5,6 +5,7 @@ import com.repograph.core.model.CodeUnit;
 import com.repograph.vuln.CodeVulnScanner;
 import com.repograph.vuln.DepsVulnScanner;
 import com.repograph.vuln.TaintVulnScanner;
+import com.repograph.vuln.TaintEvidenceStep;
 import com.repograph.vuln.VulnFinding;
 import com.repograph.vuln.VulnReport;
 import com.repograph.vuln.VulnStore;
@@ -32,6 +33,7 @@ import java.util.stream.Collectors;
  *   <li>{@code POST /api/v1/vulns/scan/deps?projectId=&projectRoot=} — 触发依赖漏洞扫描</li>
  *   <li>{@code GET  /api/v1/vulns?projectId=&severity=&status=} — 列出发现记录</li>
  *   <li>{@code PUT  /api/v1/vulns/{id}/status?status=} — 更新发现状态</li>
+ *   <li>{@code GET  /api/v1/vulns/{id}/taint-evidence} — 查询污染链源码证据</li>
  *   <li>{@code GET  /api/v1/vulns/{id}/impact} — 查询单条漏洞的代码影响面（调用链）</li>
  *   <li>{@code GET  /api/v1/vulns/report/{projectId}} — 生成项目漏洞报告</li>
  * </ul>
@@ -145,6 +147,20 @@ public class VulnController {
         }
         if (!vulnStore.updateStatus(id, upper)) return ResponseEntity.notFound().build();
         return ResponseEntity.ok(Map.of("id", id, "status", upper));
+    }
+
+    /**
+     * 查询单条漏洞的污染链源码证据。
+     *
+     * @param id 漏洞发现记录 ID
+     * @return 按路径顺序排列的 SOURCE / PROPAGATION / SINK 证据；404 若漏洞不存在
+     */
+    @GetMapping("/{id}/taint-evidence")
+    public ResponseEntity<List<TaintEvidenceStep>> taintEvidence(@PathVariable String id) {
+        if (vulnStore.findById(id).isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(vulnStore.findTaintEvidence(id));
     }
 
     /**

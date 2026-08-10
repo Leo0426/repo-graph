@@ -20,6 +20,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -52,6 +53,9 @@ public class TaintVulnScanner {
 
     /** 单次扫描最多处理的入口点数量，防止超大项目超时。 */
     private static final int MAX_ENTRY_POINTS = 80;
+
+    /** 单条污染链步骤最多保留的源码字符数。 */
+    private static final int MAX_SOURCE_EXCERPT_CHARS = 4_000;
 
     // ── 入口点 / 参数标识 ──────────────────────────────────────────────────────
 
@@ -140,6 +144,10 @@ public class TaintVulnScanner {
                 entryPoints.size(), MAX_ENTRY_POINTS, projectId);
 
         List<VulnFinding> findings = new ArrayList<>();
+        Map<String, CodeUnit> unitsByQualifiedName = allUnits.stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        CodeUnit::qualifiedName, unit -> unit, (left, right) -> left));
+        Map<String, List<TaintEvidenceStep>> evidenceByFinding = new LinkedHashMap<>();
         String now = Instant.now().toString();
         int pathsAnalyzed = 0;
 
@@ -174,11 +182,14 @@ public class TaintVulnScanner {
                             VulnFinding.SUSPECTED,
                             entry.id(), entry.qualifiedName(), entry.filePath(), entry.startLine(),
                             rule.title(), detail, now));
+                    evidenceByFinding.put(findingId,
+                            buildEvidence(entry, paramIdx, path, unitsByQualifiedName));
                 }
             }
         }
 
         vulnStore.upsertAll(findings);
+        evidenceByFinding.forEach(vulnStore::replaceTaintEvidence);
         log.info("TaintVulnScanner: {} paths analyzed → {} findings written", pathsAnalyzed, findings.size());
         return new ScanSummary(entryPoints.size(), pathsAnalyzed, findings.size());
     }
@@ -292,6 +303,38 @@ public class TaintVulnScanner {
             sb.append("  ⚠ ").append(path.sinkDescription());
         }
         return sb.toString();
+    }
+
+    private static List<TaintEvidenceStep> buildEvidence(
+            CodeUnit entry, int paramIdx, TaintPath path, Map<String, CodeUnit> unitsByQualifiedName) {
+        List<TaintEvidenceStep> steps = new ArrayList<>();
+        String sourceTarget = path.hops().isEmpty() ? "" : path.hops().get(0).to().toString();
+        steps.add(evidenceStep(
+                1, "SOURCE", entry.qualifiedName(), "param[" + paramIdx + "]", sourceTarget, entry));
+        int sequence = 2;
+        for (TaintHop hop : path.hops()) {
+            String role = hop.to().kind() == com.repograph.core.flow.TaintSlot.SlotKind.SINK
+                    ? "SINK" : "PROPAGATION";
+            steps.add(evidenceStep(
+                    sequence++, role, hop.methodQn(), hop.from().toString(), hop.to().toString(),
+                    unitsByQualifiedName.get(hop.methodQn())));
+        }
+        return List.copyOf(steps);
+    }
+
+    private static TaintEvidenceStep evidenceStep(
+            int sequence, String role, String methodQn, String fromSlot, String toSlot, CodeUnit unit) {
+        if (unit == null) {
+            return new TaintEvidenceStep(
+                    sequence, role, methodQn, fromSlot, toSlot, "", 0, 0, "");
+        }
+        String source = unit.rawSource() == null ? "" : unit.rawSource().strip();
+        if (source.length() > MAX_SOURCE_EXCERPT_CHARS) {
+            source = source.substring(0, MAX_SOURCE_EXCERPT_CHARS).stripTrailing();
+        }
+        return new TaintEvidenceStep(
+                sequence, role, methodQn, fromSlot, toSlot,
+                unit.filePath(), unit.startLine(), unit.endLine(), source);
     }
 
     private static String simpleName(String qn) {

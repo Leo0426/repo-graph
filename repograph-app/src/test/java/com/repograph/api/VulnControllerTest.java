@@ -6,6 +6,7 @@ import com.repograph.core.model.CodeUnitKind;
 import com.repograph.vuln.CodeVulnScanner;
 import com.repograph.vuln.DepsVulnScanner;
 import com.repograph.vuln.TaintVulnScanner;
+import com.repograph.vuln.TaintEvidenceStep;
 import com.repograph.vuln.VulnFinding;
 import com.repograph.vuln.VulnStore;
 import org.junit.jupiter.api.Test;
@@ -173,6 +174,24 @@ class VulnControllerTest {
         mvc.perform(get("/api/v1/vulns/id1/impact"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(0));
+    }
+
+    @Test
+    void taintEvidence_returnsOrderedSourceCodeChain() throws Exception {
+        when(vulnStore.findById("id1")).thenReturn(Optional.of(finding("id1")));
+        when(vulnStore.findTaintEvidence("id1")).thenReturn(List.of(
+                new TaintEvidenceStep(1, "SOURCE", "com.Foo#bar()", "param[0]", "exec.arg[0]",
+                        "Foo.java", 10, 12, "void bar(String input) { exec(input); }"),
+                new TaintEvidenceStep(2, "SINK", "com.Foo#bar()", "param[0]", "SINK:exec.arg[0]",
+                        "Foo.java", 10, 12, "void bar(String input) { exec(input); }")));
+
+        mvc.perform(get("/api/v1/vulns/id1/taint-evidence"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].role").value("SOURCE"))
+                .andExpect(jsonPath("$[1].role").value("SINK"))
+                .andExpect(jsonPath("$[1].filePath").value("Foo.java"))
+                .andExpect(jsonPath("$[1].sourceExcerpt").value(
+                        "void bar(String input) { exec(input); }"));
     }
 
     // ── report ────────────────────────────────────────────────────────────────
