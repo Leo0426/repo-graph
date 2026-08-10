@@ -9,27 +9,40 @@
         <div class="panel-title" data-i18n="agent.title">Agent 作战台</div>
         <div class="panel-subtitle" data-i18n="agent.subtitle">可追踪的安全工作流 · 证据链 · 人工检查点</div>
       </div>
-      <div class="agent-system-state"><span></span><b>1</b> PLAYBOOK ONLINE</div>
+      <div class="agent-header-controls">
+        <div class="agent-text-size" role="group" data-i18n-aria-label="agent.textSize"
+             aria-label="显示字号">
+          <span data-i18n="agent.textSize">显示字号</span>
+          <button id="agent-text-standard" type="button" onclick="setAgentTextSize('standard')"
+                  data-i18n-title="agent.textStandard" title="标准字号">A</button>
+          <button id="agent-text-large" type="button" onclick="setAgentTextSize('large')"
+                  data-i18n-title="agent.textLarge" title="大字号">A+</button>
+        </div>
+        <div class="agent-system-state"><span></span><b>1</b> PLAYBOOK ONLINE</div>
+      </div>
     </div>
   </div>
 
   <div class="panel-body agent-body">
     <section class="agent-capability-strip" aria-label="Agent capabilities">
-      <article class="agent-capability active">
+      <button class="agent-capability active" type="button" onclick="openAgentCapability('triage')"
+              data-i18n-title="agent.openTriage" title="进入报警研判">
         <div class="agent-cap-index">A/01</div>
         <div><strong>SAST TRIAGE</strong><small data-i18n="agent.cap.sast">报警定位 → 证据组装 → 研判 → 审核</small></div>
         <span>LIVE</span>
-      </article>
-      <article class="agent-capability planned">
+      </button>
+      <button class="agent-capability available" type="button" onclick="openAgentCapability('architecture')"
+              data-i18n-title="agent.openArchReview" title="进入架构风险评估">
         <div class="agent-cap-index">A/02</div>
         <div><strong>ARCH REVIEW</strong><small data-i18n="agent.cap.arch">架构漂移与变更风险评估</small></div>
-        <span>ROADMAP</span>
-      </article>
-      <article class="agent-capability planned">
+        <span>OPEN ↗</span>
+      </button>
+      <button class="agent-capability available" type="button" onclick="openAgentCapability('remediation')"
+              data-i18n-title="agent.openRemediation" title="进入漏洞修复工作区">
         <div class="agent-cap-index">A/03</div>
         <div><strong>REMEDIATION</strong><small data-i18n="agent.cap.fix">修复方案生成与验证闭环</small></div>
-        <span>ROADMAP</span>
-      </article>
+        <span>OPEN ↗</span>
+      </button>
     </section>
 
     <section id="agent-llm-module" class="agent-llm-module">
@@ -61,40 +74,101 @@
     </section>
 
     <section class="agent-command-deck">
-      <div class="agent-section-label"><span>01</span><b data-i18n="agent.launch">发起任务</b><em>PLAYBOOK / SAST_TRIAGE@1</em></div>
-      <div class="agent-command-grid">
-        <label><span data-i18n="agent.project">目标项目</span>
-          <select id="agent-project-select" onchange="loadAgentRuns()">
+      <div class="agent-section-label">
+        <span>01</span><b data-i18n="agent.launch">准备研判</b>
+        <em data-i18n="agent.requiredHint">标记 * 的项目为必填项</em>
+      </div>
+      <div class="agent-command-grid agent-command-primary">
+        <label class="agent-required-field"><span><b data-i18n="agent.project">目标项目</b><i>*</i></span>
+          <select id="agent-project-select" onchange="handleAgentProjectChange()">
             <option value="" data-i18n="ph.selectProject">— 选择项目 —</option>
           </select>
+          <small id="agent-project-hint" data-i18n="agent.projectHint">选择已完成索引的代码仓库</small>
         </label>
-        <label><span data-i18n="agent.format">报警格式</span>
-          <select id="agent-format"><option value="semgrep">SEMGREP JSON</option><option value="sarif">SARIF 2.1</option></select>
+        <label><span><b data-i18n="agent.vulnerabilityScope">漏洞范围</b></span>
+          <select id="agent-vulnerability-filter" onchange="renderAgentVulnerabilities()">
+            <option value="active" data-i18n="agent.scopeActive">待处理（疑似 / 已确认）</option>
+            <option value="all" data-i18n="agent.scopeAll">全部漏洞</option>
+            <option value="SUSPECTED" data-i18n="agent.scopeSuspected">仅疑似</option>
+            <option value="CONFIRMED" data-i18n="agent.scopeConfirmed">仅已确认</option>
+          </select>
+          <small data-i18n="agent.scopeHint">默认隐藏已修复和已忽略记录</small>
         </label>
-        <label><span>CODE VERSION</span><input id="agent-code-version" placeholder="commit SHA (optional)"></label>
-        <label><span>RULE VERSION</span><input id="agent-rule-version" placeholder="ruleset (optional)"></label>
       </div>
+
+      <details class="agent-advanced-options">
+        <summary>
+          <span data-i18n="agent.advanced">高级选项</span>
+          <small data-i18n="agent.advancedHint">版本标识与上下文预算</small>
+        </summary>
+        <div class="agent-command-grid">
+          <label><span>CODE VERSION</span><input id="agent-code-version" placeholder="commit SHA (optional)"></label>
+          <label><span>RULE VERSION</span><input id="agent-rule-version" placeholder="ruleset (optional)"></label>
+          <label><span data-i18n="agent.contextBudget">单条上下文预算</span>
+            <select id="agent-budget-chars">
+              <option value="12000">12K CHARS</option>
+              <option value="24000">24K CHARS</option>
+              <option value="60000">60K CHARS</option>
+            </select>
+          </label>
+        </div>
+      </details>
+
       <div class="agent-payload-row">
-        <div class="agent-payload-wrap">
-          <textarea id="agent-findings-json" spellcheck="false" data-i18n-ph="agent.payload"
-                    placeholder="粘贴 Semgrep / SARIF JSON，或选择文件…"></textarea>
-          <div class="agent-payload-tools">
-            <input id="agent-file-input" type="file" accept=".json,.sarif" hidden onchange="readAgentFile(this)">
-            <button class="btn btn-ghost" onclick="document.getElementById('agent-file-input').click()" data-i18n="agent.chooseFile">选择文件</button>
-            <span id="agent-file-name">INPUT / NOT LOADED</span>
+        <div class="agent-vulnerability-picker">
+          <div class="agent-vulnerability-head">
+            <div><b data-i18n="agent.vulnerabilityInput">选择待研判漏洞</b>
+              <small data-i18n="agent.vulnerabilityHint">读取漏洞中心记录，选择一条直接研判</small></div>
+            <div><span id="agent-vulnerability-count">—</span>
+              <button class="btn btn-ghost" onclick="loadAgentVulnerabilities()"
+                      data-i18n="agent.refreshVulnerabilities">刷新漏洞</button></div>
+          </div>
+          <div class="agent-vulnerability-toolbar">
+            <input id="agent-vulnerability-search" type="search" oninput="renderAgentVulnerabilities()"
+                   data-i18n-ph="agent.searchVulnerability" placeholder="搜索标题、规则、CWE 或文件…">
+          </div>
+          <div class="agent-vulnerability-content">
+            <div id="agent-vulnerability-list" class="agent-vulnerability-list" role="listbox"
+                 data-i18n-aria-label="agent.vulnerabilityInput" aria-label="选择待研判漏洞">
+              <div class="agent-empty" data-i18n="agent.selectProjectForVulnerabilities">选择项目以读取漏洞</div>
+            </div>
+            <div id="agent-vulnerability-detail" class="agent-vulnerability-detail">
+              <div class="agent-empty" data-i18n="agent.noVulnerabilitySelected">尚未选择漏洞</div>
+            </div>
           </div>
         </div>
-        <button id="agent-run-btn" class="agent-execute-btn" onclick="startSastTriageAgent()">
-          <span class="agent-execute-icon">▶</span>
-          <span><b data-i18n="agent.execute">执行研判</b><small>START AGENT RUN</small></span>
-        </button>
+        <aside class="agent-launch-panel">
+          <div class="agent-readiness-title"><span></span><b data-i18n="agent.readiness">任务准备状态</b></div>
+          <ul class="agent-readiness-list">
+            <li id="agent-ready-project">
+              <i>1</i><span data-i18n="agent.readyProject">选择目标项目</span><b>WAITING</b>
+            </li>
+            <li id="agent-ready-vulnerability">
+              <i>2</i><span data-i18n="agent.readyVulnerability">选择一条漏洞</span><b>WAITING</b>
+            </li>
+            <li id="agent-ready-review">
+              <i>3</i><span data-i18n="agent.readyReview">人工审核结论</span><b>CHECKPOINT</b>
+            </li>
+          </ul>
+          <button id="agent-run-btn" class="agent-execute-btn" onclick="startSastTriageAgent()" disabled>
+            <span class="agent-execute-icon">▶</span>
+            <span>
+              <b data-i18n="agent.execute">执行研判</b>
+              <small id="agent-run-hint" data-i18n="agent.completeRequired">完成必填项后启动</small>
+            </span>
+          </button>
+          <small class="agent-shortcut" data-i18n="agent.shortcut">快捷键 Ctrl / ⌘ + Enter</small>
+        </aside>
       </div>
-      <div id="agent-command-error" class="agent-command-error"></div>
+      <div id="agent-command-error" class="agent-command-error" role="alert" aria-live="assertive"></div>
     </section>
 
     <section class="agent-operations">
       <aside class="agent-run-rail">
-        <div class="agent-section-label"><span>02</span><b data-i18n="agent.runs">运行记录</b><button onclick="loadAgentRuns()">↻</button></div>
+        <div class="agent-section-label"><span>02</span><b data-i18n="agent.runs">运行记录</b>
+          <em id="agent-run-count">—</em>
+          <button onclick="loadAgentRuns()" data-i18n-title="agent.refresh" title="刷新">↻</button>
+        </div>
         <div id="agent-run-list" class="agent-run-list">
           <div class="agent-empty" data-i18n="agent.selectProject">选择项目以查看 Agent 运行</div>
         </div>

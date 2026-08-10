@@ -104,7 +104,8 @@ repograph-mcp/   独立 MCP stdio 服务（JSON-RPC，供 AI 工具调用，通�
   通过 HTTP 请求流和 Jackson token 流式解析，单请求最多保留控制器允许的报警数，避免大文件构造完整 JSON 树。
 
 **报警研判管道**（P0 报警解释器，`com.repograph.finding`）：
-- `FindingContextService`：filePath+line 定位 CodeUnit（source=FINDING）→ callers/callees/impact 扩展 →
+- `FindingContextService`：优先按 filePath+line 从向量索引定位 CodeUnit，缺失时按 symbol+projectId 从代码图
+  精确回退（source=FINDING）→ callers/callees/impact 扩展 →
   ruleId/cwe/message 关键词补充（source=KEYWORD），复用 `ContextPackService.assemble` 的预算与 citation 规则；
   定位失败写入 `omittedReasons` 不抛异常。
 - `TriageReportService`：启发式基线（定位 + 安全信号 + 调用方可达性 → TRUE_RISK / LIKELY_FALSE_POSITIVE /
@@ -135,7 +136,8 @@ repograph-mcp/   独立 MCP stdio 服务（JSON-RPC，供 AI 工具调用，通�
 - 调用前剔除外部报警 raw，按字符预算裁剪，并脱敏 password/token/secret/API key/Bearer 等常见秘密；
   证据显式标记为 untrusted，供模型适配器隔离提示指令与数据。
 - 调用后只保留输入 `ContextPack` 中存在的 citation；不存在的引用进入 `missingInfo`，不能成为新证据。
-  调用受单次成本预检、超时和有限重试约束。
+  调用受单次成本预检和超时约束；本地 Ollama 默认单次超时 3 分钟且超时不立即重试，避免前一次生成仍在
+  后台运行时重复提交造成排队。
 - SLF4J 审计只记录请求 ID、报警指纹、提供方/模型、状态、尝试次数、延迟、脱敏次数、token/成本和
   安全错误码，不记录提示词、源码或异常原文。
 - `LlmAdvisoryEvaluator` 在人工标注固定样本上分别计算启发式与模型建议准确率，以及平均延迟和总成本。
@@ -150,7 +152,8 @@ repograph-mcp/   独立 MCP stdio 服务（JSON-RPC，供 AI 工具调用，通�
 - `AgentRun`：一次 Playbook 执行，关联项目、输入事实和输出报告；状态为
   `QUEUED → RUNNING → WAITING_FOR_REVIEW → COMPLETED`，异常终态为 `PARTIAL / FAILED / CANCELLED`。
 - `AgentStep`：`AgentRun` 中可观察的执行步骤，只记录能力名、状态、输入/输出引用、摘要、citation、
-  缺失信息和结构化错误；不记录或伪造模型内部思维过程。
+  缺失信息和结构化错误；步骤开始时先持久化 `RUNNING`，结束后以同一 step ID 原位更新终态，形成可实时
+  观察且序号稳定的审计记录。不记录或伪造模型内部思维过程。
 - **事实边界**：`AgentRun` 只负责编排和可观测性，不复制 `ScanTask / TriageReport / ContextPack /
   ReviewQueueEntry` 中的领域事实；步骤通过稳定 ID 引用原始结果。
 - **界面边界**：Web 增加一级“Agent”工作台，展示能力目录、Run 列表、步骤时间线、证据结果和
@@ -160,9 +163,29 @@ repograph-mcp/   独立 MCP stdio 服务（JSON-RPC，供 AI 工具调用，通�
 - **辅助结果可见性**：`LLM_ADVISORY` 步骤把逐报警的启发式基线、模型建议、不确定度和
   `advisoryOnly` 标记保存为 `AgentStepResult`；时间线可直接展示，但审核快照仍只保存原启发式报告，
   模型建议不能覆盖报告结论或改变漏洞状态。运行记录不保存提示词、源码或模型思维链。
-- **REST 与界面**：`POST /api/v1/agent-runs/sast-triage` 异步接受运行；`GET /api/v1/agent-runs`
-  和 `GET /api/v1/agent-runs/{id}` 暴露项目运行台账与步骤时间线。Web 一级 Agent 作战台展示当前可用
-  Playbook、报警输入、运行状态、证据引用、缺失信息、结构化错误及报告快照人工审核出口。
+- **REST 与界面**：`POST /api/v1/agent-runs/vulnerability-triage` 从已有 `VulnFinding` 启动单条研判，
+  运行以 `vulnerability:<id>` 引用输入事实；`POST /api/v1/agent-runs/sast-triage` 继续作为 Semgrep / SARIF
+  外部 JSON 兼容入口。`GET /api/v1/agent-runs` 和 `GET /api/v1/agent-runs/{id}` 暴露项目运行台账与步骤
+  时间线。Web 一级 Agent 作战台按项目读取漏洞，可筛选、搜索并查看漏洞详情后直接研判，同时展示
+  运行状态、证据引用、缺失信息、结构化错误及报告快照人工审核出口。运行期间采用静默轮询和步骤级
+  差异更新，保留滚动/展开状态；运行来源、事件时间、步骤耗时可查看，并可导出完整 Run JSON 审计记录。
+
+**A/02 架构评审（轻量版）**：
+- `ArchitectureReviewService` 与模型输入/输出契约位于 `com.repograph.core.architecture`，默认实现从
+  `HealthReportService` 和 `GitChurnAnalyzer` 组装复杂度、耦合度、包循环及变更热点事实；不复制指标事实源。
+- `OllamaArchitectureReviewModel` 复用 Agent 页面保存的 Ollama 开关、Base URL、模型和 3 分钟 HTTP 超时，
+  将 ForgeFlow Architecture 的 U1–U8（降低认知成本、Deep Module、最小接口、隐藏变化、依赖抽象、组合、
+  抽象层级一致、模式服务简化）固化为结构化提示模板。输出为 3–5 个架构深化候选，包含位置、问题、建议、
+  收益、代价、风险、方法论映射和 citation；服务端仅保留输入事实中存在的 citation。可读字段要求中文，
+  模型偶发返回的非中文字段按字段替换为中文说明并记录 `missingInfo`，不能导致整份评审失败。
+- 状态为 `COMPLETED / DISABLED / FAILED`。模型关闭或失败时仍返回静态指标证据和明确降级原因，不生成伪建议；
+  当前结果按需生成、不持久化，不做跨版本自动漂移对比。REST 为
+  `POST /api/v1/architecture/reviews?projectId=...`；流式入口
+  `GET /api/v1/architecture/reviews/stream?projectId=...` 通过 SSE 发送 `phase / delta / result / complete`，
+  流式任务使用独立 `architectureReviewExecutor`，不得占用 A/01 的 `llmAdvisoryExecutor`；`stream-error`
+  是终止事件，前端必须保留服务端错误详情，不能再被 EventSource 通用错误覆盖。
+  其中 delta 仅为模型公开的结构化 JSON 输出，不包含思维链。Web A/02 默认只显示可展开的 `Think…` 状态，
+  用户点击后才查看实时增量；token 更新只修改输出节点并保留展开状态，完成后局部替换为建议卡片。
 
 **审核队列与报告快照**（P1 T9 第一片，`com.repograph.finding`）：
 - `ReportSnapshot`：生成后即冻结的批量研判结果，携带 `schemaVersion/toolVersion/codeVersion/
@@ -342,11 +365,13 @@ Java 方法调用优先使用接收者类型、方法名和可静态推断的实
    semantic_vec = embed(signature + annotations)
    code_vec     = embed(rawSource)
    DOCUMENT CodeUnit：semantic_vec = embed(章节文本)，code_vec = embed(章节文本)（同源）
+   单次 Embedding 瞬时失败最多重试 3 次并短退避；耗尽后记录批次错误，整体索引标记为 partial
 7. 批量写入 Qdrant（批大小 256）
 8. 更新 SQLite MD5 缓存
 ```
 
-> 索引为**异步**：`POST /api/v1/index/project` 返回 202，用 `GET /api/v1/index/project/status` 轮询。
+> 索引为**异步**：`POST /api/v1/index/project` 返回 202，用 `GET /api/v1/index/project/status` 轮询；
+> 无错误为 `done`，存在解析、Embedding 或写入错误但仍产出部分索引时为 `partial`，异常终止为 `error`。
 
 ## 当前服务配置（实际运行值）
 
@@ -426,6 +451,9 @@ Neo4j Docker 启动示例：`-p 7474:7474 -p 7687:7687`（7474 浏览器 UI，76
 - **精度**：Flow-insensitive 保守近似（宁多报不漏报）；Callee 按简单名匹配，多重载时全部展开。
 - **查询入口**：`GET /api/v1/flow/taint?source=<qualifiedName>&paramIndex=0&projectId=<id>&maxDepth=6`。
 - **输出**：`TaintResult` 包含 `TaintPath` 列表，每条路径记录跳链（`TaintHop`）和是否命中 Sink。
+- **源码证据**：`TaintVulnScanner` 将命中路径固化为独立 `vuln_taint_evidence` 审计步骤，按 SOURCE /
+  PROPAGATION / SINK 保存方法全限定名、槽位流转、文件行号及最多 4000 字符源码；不修改 `VulnFinding`
+  兼容字段。`GET /api/v1/vulns/{id}/taint-evidence` 按路径顺序读取，Agent 漏洞详情局部加载并展示。
 
 ## GraphRAG 检索
 
@@ -445,8 +473,8 @@ Neo4j Docker 启动示例：`-p 7474:7474 -p 7687:7687`（7474 浏览器 UI，76
 - **目标**：将 GraphRAG 排序结果转换为 LLM Agent 可直接消费的证据包，而不是只返回匹配列表。
 - **组装内容**：citationId、qualifiedName、kind、language、filePath、startLine/endLine、source/relation、
   finalScore、excerpt、truncated、securitySignals。
-- **预算控制**：当前使用 `budgetChars` 做近似字符预算，按 GraphRAG 排序顺序截断和记录 omittedReasons；
-  后续可替换为模型 tokenizer。
+- **预算控制**：当前使用 `budgetChars` 做近似字符预算，保持 GraphRAG 排序，并将初始预算公平分配给最多
+  4 条候选，避免单个大类独占全部上下文；截断和未纳入原因写入 omittedReasons，后续可替换为模型 tokenizer。
 - **查询入口**：`GET /api/v1/context/pack?q=...&taskType=security&budgetChars=12000`。
 - **MCP 工具**：`build_context_pack`，用于 Agent 在回答、审查、研判前获取可溯源上下文。
 - **边界**：Context Pack 不生成答案，不做事实判断；它只负责上下文选择、裁剪和引用编号。

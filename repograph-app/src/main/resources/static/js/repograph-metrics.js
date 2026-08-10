@@ -2,6 +2,9 @@
 
 let _metricsPid = '';
 let _metricsTab = 'complexity';
+let _architectureReviewStream = null;
+let _architectureReviewRaw = '';
+let _architectureReviewFrame = 0;
 
 function populateMetricsProjectSelect() {
   const sel = document.getElementById('metrics-project-select');
@@ -15,10 +18,164 @@ function populateMetricsProjectSelect() {
 }
 
 function onMetricsProjectChange() {
+  stopArchitectureReviewStream();
   const sel = document.getElementById('metrics-project-select');
   _metricsPid = sel ? sel.value : '';
+  const reviewButton = document.getElementById('architecture-review-btn');
+  if (reviewButton) reviewButton.disabled = !_metricsPid;
+  resetArchitectureReview();
   if (_metricsPid) loadMetrics();
   else clearMetricsPanel();
+}
+
+function resetArchitectureReview() {
+  const result = document.getElementById('architecture-review-result');
+  if (result) result.innerHTML = `<div class="architecture-review-empty">${esc(t('arch.empty'))}</div>`;
+}
+
+async function generateArchitectureReview() {
+  if (!_metricsPid) return;
+  const button = document.getElementById('architecture-review-btn');
+  const result = document.getElementById('architecture-review-result');
+  stopArchitectureReviewStream();
+  button.disabled = true;
+  button.textContent = t('arch.generating');
+  result.innerHTML = `<div class="architecture-review-loading"><div class="spinner"></div><span>${esc(t('arch.generatingHint'))}</span></div>`;
+  if (!window.EventSource) {
+    await generateArchitectureReviewFallback(button, result);
+    return;
+  }
+  _architectureReviewRaw = '';
+  let receivedResult = false;
+  let terminalErrorReceived = false;
+  const params = new URLSearchParams({ projectId: _metricsPid });
+  const stream = new EventSource(`/api/v1/architecture/reviews/stream?${params}`);
+  _architectureReviewStream = stream;
+  stream.addEventListener('phase', () => renderArchitectureStream());
+  stream.addEventListener('delta', event => {
+    _architectureReviewRaw += event.data;
+    scheduleArchitectureStreamRender();
+  });
+  stream.addEventListener('result', event => {
+    receivedResult = true;
+    renderArchitectureReview(JSON.parse(event.data));
+  });
+  stream.addEventListener('stream-error', event => {
+    terminalErrorReceived = true;
+    const error = JSON.parse(event.data);
+    result.innerHTML = `<div class="architecture-review-error">${esc(error.message)}</div>`;
+    stopArchitectureReviewStream();
+    button.disabled = false;
+    button.textContent = t('arch.generate');
+  });
+  stream.addEventListener('complete', () => {
+    stopArchitectureReviewStream();
+    button.disabled = false;
+    button.textContent = t('arch.generate');
+  });
+  stream.onerror = () => {
+    stopArchitectureReviewStream();
+    button.disabled = false;
+    button.textContent = t('arch.generate');
+    if (!receivedResult && !terminalErrorReceived) {
+      result.innerHTML = `<div class="architecture-review-error">${esc(t('arch.streamFailed'))}</div>`;
+    }
+  };
+}
+
+async function generateArchitectureReviewFallback(button, result) {
+  try {
+    renderArchitectureReview(await api.architectureReview(_metricsPid));
+  } catch (error) {
+    result.innerHTML = `<div class="architecture-review-error">${esc(error.message)}</div>`;
+  } finally {
+    button.disabled = false;
+    button.textContent = t('arch.generate');
+  }
+}
+
+function scheduleArchitectureStreamRender() {
+  if (_architectureReviewFrame) return;
+  _architectureReviewFrame = requestAnimationFrame(() => {
+    _architectureReviewFrame = 0;
+    renderArchitectureStream();
+  });
+}
+
+function renderArchitectureStream() {
+  const result = document.getElementById('architecture-review-result');
+  if (!result) return;
+  const chars = _architectureReviewRaw.length;
+  let console = result.querySelector('.architecture-stream-console');
+  if (!console) {
+    result.innerHTML = `<div class="architecture-stream-console">
+      <details>
+        <summary>
+          <span class="architecture-thinking-state"><i></i><b>${esc(t('arch.thinking'))}</b><small>${esc(t('arch.thinkingHint'))}</small></span>
+          <code class="architecture-stream-count">0 CHARS</code><em>⌄</em>
+        </summary>
+        <div class="architecture-stream-body">
+          <header><span>${esc(t('arch.liveOutput'))}</span><small>${esc(t('arch.publicOutput'))}</small></header>
+          <pre class="streaming"></pre>
+        </div>
+      </details>
+    </div>`;
+    console = result.querySelector('.architecture-stream-console');
+  }
+  const count = console.querySelector('.architecture-stream-count');
+  const output = console.querySelector('pre');
+  if (count) count.textContent = `${chars} CHARS`;
+  if (output) {
+    output.textContent = _architectureReviewRaw || t('arch.awaitingTokens');
+    if (console.querySelector('details')?.open) output.scrollTop = output.scrollHeight;
+  }
+}
+
+function stopArchitectureReviewStream() {
+  if (_architectureReviewStream) {
+    _architectureReviewStream.close();
+    _architectureReviewStream = null;
+  }
+  if (_architectureReviewFrame) {
+    cancelAnimationFrame(_architectureReviewFrame);
+    _architectureReviewFrame = 0;
+  }
+}
+
+function renderArchitectureReview(review) {
+  const result = document.getElementById('architecture-review-result');
+  const evidence = new Map((review.evidence || []).map(item => [item.citationId, item]));
+  const statusClass = String(review.status || '').toLowerCase();
+  const observations = (review.observations || [])
+    .map(item => `<li>${esc(item)}</li>`).join('');
+  const candidates = (review.candidates || []).map(candidate => {
+    const citations = (candidate.citations || []).map(id => {
+      const fact = evidence.get(id);
+      const title = fact ? `${fact.location} · ${fact.summary}` : id;
+      return `<span class="architecture-citation" title="${esc(title)}">${esc(id)}</span>`;
+    }).join('');
+    return `<article class="architecture-candidate">
+      <div class="architecture-candidate-rank">P${esc(candidate.priority)}</div>
+      <div class="architecture-candidate-body">
+        <header><strong>${esc(candidate.title)}</strong><code>${esc(candidate.location)}</code></header>
+        <dl>
+          <div><dt>${esc(t('arch.problem'))}</dt><dd>${esc(candidate.problem)}</dd></div>
+          <div><dt>${esc(t('arch.suggestion'))}</dt><dd>${esc(candidate.suggestion)}</dd></div>
+          <div><dt>${esc(t('arch.benefit'))}</dt><dd>${esc(candidate.benefit)}</dd></div>
+          <div><dt>${esc(t('arch.costRisk'))}</dt><dd>${esc(candidate.cost)} · ${esc(candidate.risk)}</dd></div>
+        </dl>
+        <footer><span>${esc(candidate.methodology)}</span><div>${citations}</div></footer>
+      </div>
+    </article>`;
+  }).join('');
+  const missing = (review.missingInfo || []).map(item => `<li>${esc(item)}</li>`).join('');
+  result.innerHTML = `<div class="architecture-review-meta">
+      <span class="${statusClass}">${esc(review.status)}</span>
+      <code>${esc(review.methodology)}</code><small>${esc(review.model || '—')}</small>
+    </div>
+    ${observations ? `<ul class="architecture-observations">${observations}</ul>` : ''}
+    <div class="architecture-candidates">${candidates || `<div class="architecture-review-empty">${esc(t('arch.noCandidates'))}</div>`}</div>
+    ${missing ? `<details class="architecture-missing"><summary>${esc(t('arch.missing'))}</summary><ul>${missing}</ul></details>` : ''}`;
 }
 
 function clearMetricsPanel() {

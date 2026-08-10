@@ -144,6 +144,11 @@ const api = {
   vulnUpdateStatus: (id, status) =>
     fetch(`/api/v1/vulns/${encodeURIComponent(id)}/status?status=${encodeURIComponent(status)}`,
           { method: 'PUT' }).then(r => r.json()),
+  vulnTaintEvidence: (id) =>
+    fetch(`/api/v1/vulns/${encodeURIComponent(id)}/taint-evidence`).then(async response => {
+      if (!response.ok) throw new Error(`Taint evidence request failed: HTTP ${response.status}`);
+      return response.json();
+    }),
   vulnReport: (projectId) =>
     fetch(`/api/v1/vulns/report/${encodeURIComponent(projectId)}`).then(r => r.json()),
   complexity: (projectId, limit = 20) => {
@@ -162,19 +167,37 @@ const api = {
     const p = new URLSearchParams({ projectId, limit });
     return fetch(`/api/v1/metrics/hotspots?${p}`).then(r => r.json());
   },
+  architectureReview: async (projectId) => {
+    const p = new URLSearchParams({ projectId });
+    const response = await fetch(`/api/v1/architecture/reviews?${p}`, { method: 'POST' });
+    if (!response.ok) throw new Error(await apiError(response));
+    return response.json();
+  },
   exportGraph: (projectId, format = 'mermaid') => {
     const p = new URLSearchParams({ projectId, format });
     return fetch(`/api/v1/export/graph?${p}`).then(r => r.text());
   },
   exportGraphUrl: (projectId, format) =>
     `/api/v1/export/graph?projectId=${encodeURIComponent(projectId)}&format=${encodeURIComponent(format)}`,
-  agentStartSastTriage: async (projectId, format, json, codeVersion, ruleVersion) => {
+  agentStartSastTriage: async (
+      projectId, format, json, codeVersion, ruleVersion, budgetChars = 12000, maxFindings = 10) => {
     const p = new URLSearchParams({ projectId, format });
     if (codeVersion) p.set('codeVersion', codeVersion);
     if (ruleVersion) p.set('ruleVersion', ruleVersion);
+    p.set('budgetChars', budgetChars);
+    p.set('maxFindings', maxFindings);
     const response = await fetch(`/api/v1/agent-runs/sast-triage?${p}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: json,
     });
+    if (!response.ok) throw new Error(await apiError(response));
+    return response.json();
+  },
+  agentStartVulnerabilityTriage: async (
+      vulnerabilityId, codeVersion, ruleVersion, budgetChars = 12000) => {
+    const p = new URLSearchParams({ vulnerabilityId, budgetChars });
+    if (codeVersion) p.set('codeVersion', codeVersion);
+    if (ruleVersion) p.set('ruleVersion', ruleVersion);
+    const response = await fetch(`/api/v1/agent-runs/vulnerability-triage?${p}`, { method: 'POST' });
     if (!response.ok) throw new Error(await apiError(response));
     return response.json();
   },
@@ -223,7 +246,9 @@ function switchPanel(id) {
 
 function handlePanelSwitch(id) {
   if (id === 'agent') {
-    refreshProjectsList().then(populateAgentProjectSelect).then(loadAgentRuns);
+    initAgentWorkbench();
+    refreshProjectsList().then(populateAgentProjectSelect)
+      .then(() => Promise.all([loadAgentVulnerabilities(), loadAgentRuns()]));
     loadLlmSettings();
     return;
   }
@@ -325,6 +350,14 @@ function applyLang() {
     const val = t(el.dataset.i18nPh);
     if (val) el.placeholder = val;
   });
+  document.querySelectorAll('[data-i18n-title]').forEach(el => {
+    const val = t(el.dataset.i18nTitle);
+    if (val) el.title = val;
+  });
+  document.querySelectorAll('[data-i18n-aria-label]').forEach(el => {
+    const val = t(el.dataset.i18nAriaLabel);
+    if (val) el.setAttribute('aria-label', val);
+  });
   document.querySelectorAll('select option[data-i18n]').forEach(el => {
     const val = t(el.dataset.i18n);
     if (val) el.textContent = val;
@@ -333,6 +366,10 @@ function applyLang() {
   if (hint && hint.dataset.i18n) hint.textContent = t(hint.dataset.i18n);
   const modeHint = document.getElementById('search-mode-hint');
   if (modeHint) modeHint.textContent = t(state.searchMode === 'semantic' ? 'hint.semantic' : 'hint.code');
+  if (typeof renderAgentProjectHint === 'function') renderAgentProjectHint();
+  if (typeof renderAgentVulnerabilities === 'function') renderAgentVulnerabilities();
+  if (typeof renderAgentRunList === 'function') renderAgentRunList();
+  if (typeof rerenderAgentCurrentRun === 'function') rerenderAgentCurrentRun();
 }
 
 function onLangChange(lang) {

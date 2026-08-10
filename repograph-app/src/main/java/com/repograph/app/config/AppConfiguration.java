@@ -73,6 +73,20 @@ public class AppConfiguration {
     }
 
     /**
+     * 架构评审流式任务专用单线程执行器，避免长连接占用辅助复核的超时隔离线程。
+     *
+     * @return 架构评审执行器
+     */
+    @Bean(name = "architectureReviewExecutor", destroyMethod = "shutdown")
+    public ExecutorService architectureReviewExecutor() {
+        return Executors.newSingleThreadExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "repograph-architecture-review");
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
+    /**
      * Agent Playbook 后台执行专用单线程执行器，保证单实例内运行顺序可审计。
      *
      * @return Agent 运行执行器

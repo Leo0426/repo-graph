@@ -16,6 +16,22 @@
       </select>
     </div>
 
+    <section class="architecture-review-module">
+      <div class="architecture-review-head">
+        <div class="architecture-review-mark">A/02</div>
+        <div>
+          <strong data-i18n="arch.title">架构漂移与变更风险评估</strong>
+          <small data-i18n="arch.subtitle">ForgeFlow U1–U8 · 静态指标事实 · Ollama 模型建议</small>
+        </div>
+        <span>FORGEFLOW / ARCHITECTURE</span>
+        <button id="architecture-review-btn" class="btn btn-primary" type="button"
+                onclick="generateArchitectureReview()" disabled data-i18n="arch.generate">生成模型建议</button>
+      </div>
+      <div id="architecture-review-result" class="architecture-review-result">
+        <div class="architecture-review-empty" data-i18n="arch.empty">选择项目后生成 3–5 个可追溯的架构深化候选</div>
+      </div>
+    </section>
+
     <!-- Health dashboard -->
     <div id="metrics-health" style="margin-top:12px">
       <div class="empty-state" data-i18n="metrics.empty">选择项目以查看指标</div>
