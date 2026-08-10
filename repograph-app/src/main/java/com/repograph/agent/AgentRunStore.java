@@ -71,7 +71,10 @@ public class AgentRunStore implements AgentRunRepository {
     }
 
     @Override
-    public void appendStep(AgentStep step) {
+    public void saveStep(AgentStep step) {
+        String eventAt = step.finishedAt() == null || step.finishedAt().isBlank()
+                ? step.startedAt() : step.finishedAt();
+        Instant.parse(eventAt);
         try (Connection connection = connection()) {
             connection.setAutoCommit(false);
             try (PreparedStatement statement = connection.prepareStatement("""
@@ -79,6 +82,12 @@ public class AgentRunStore implements AgentRunRepository {
                         (id, run_id, sequence_no, capability, status, summary, error,
                          started_at, finished_at)
                     VALUES (?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        status = excluded.status,
+                        summary = excluded.summary,
+                        error = excluded.error,
+                        started_at = excluded.started_at,
+                        finished_at = excluded.finished_at
                     """)) {
                 statement.setString(1, step.id());
                 statement.setString(2, step.runId());
@@ -91,12 +100,38 @@ public class AgentRunStore implements AgentRunRepository {
                 statement.setString(9, safe(step.finishedAt()));
                 statement.executeUpdate();
             }
+            deleteStepDetails(connection, step.id());
             insertReferences(connection, step.id(), "EVIDENCE", step.evidenceReferences());
             insertReferences(connection, step.id(), "MISSING", step.missingInfo());
             insertResults(connection, step.id(), step.results());
+            updateRunTimestamp(connection, step.runId(), eventAt);
             connection.commit();
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to append agent step '" + step.id() + "'", e);
+        }
+    }
+
+    private static void updateRunTimestamp(
+            Connection connection, String runId, String eventAt) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE agent_runs SET updated_at = ? WHERE id = ?")) {
+            statement.setString(1, eventAt);
+            statement.setString(2, runId);
+            if (statement.executeUpdate() != 1) {
+                throw new SQLException("Agent run not found: " + runId);
+            }
+        }
+    }
+
+    private static void deleteStepDetails(Connection connection, String stepId) throws SQLException {
+        try (PreparedStatement references = connection.prepareStatement(
+                "DELETE FROM agent_step_references WHERE step_id = ?");
+             PreparedStatement results = connection.prepareStatement(
+                     "DELETE FROM agent_step_results WHERE step_id = ?")) {
+            references.setString(1, stepId);
+            references.executeUpdate();
+            results.setString(1, stepId);
+            results.executeUpdate();
         }
     }
 

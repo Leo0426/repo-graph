@@ -3,6 +3,8 @@ package com.repograph.api;
 import com.repograph.agent.AgentRunStore;
 import com.repograph.agent.SastTriageAgentCommand;
 import com.repograph.agent.SastTriageAgentService;
+import com.repograph.agent.VulnerabilityNotFoundException;
+import com.repograph.agent.VulnerabilityTriageAgentCommand;
 import com.repograph.core.agent.AgentPlaybook;
 import com.repograph.core.agent.AgentRun;
 import com.repograph.core.agent.AgentRunStatus;
@@ -57,6 +59,27 @@ class AgentRunControllerTest {
                 .andExpect(jsonPath("$.id").value("run-1"))
                 .andExpect(jsonPath("$.playbook").value("SAST_TRIAGE"))
                 .andExpect(jsonPath("$.status").value("QUEUED"));
+    }
+
+    @Test
+    void startSelectedVulnerabilityReturnsAcceptedRun() throws Exception {
+        when(agentService.start(any(VulnerabilityTriageAgentCommand.class))).thenReturn(run("run-2"));
+
+        mvc.perform(post("/api/v1/agent-runs/vulnerability-triage")
+                        .param("vulnerabilityId", "vuln-1")
+                        .param("codeVersion", "abc123"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.id").value("run-2"));
+    }
+
+    @Test
+    void startSelectedVulnerabilityReturnsNotFoundForStaleSelection() throws Exception {
+        when(agentService.start(any(VulnerabilityTriageAgentCommand.class)))
+                .thenThrow(new VulnerabilityNotFoundException("vuln-1"));
+
+        mvc.perform(post("/api/v1/agent-runs/vulnerability-triage")
+                        .param("vulnerabilityId", "vuln-1"))
+                .andExpect(status().isNotFound());
     }
 
     @Test

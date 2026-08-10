@@ -69,6 +69,40 @@ class AgentRunStoreTest {
         });
     }
 
+    @Test
+    void runningStepCanBeCompletedInPlaceAsOneAuditRecord() {
+        store.create(run("run-1", "2026-08-09T01:00:00Z"));
+        AgentStep running = new AgentStep(
+                "step-1", "run-1", 1, "BUILD_CONTEXT", AgentStepStatus.RUNNING,
+                "正在构建上下文", List.of(), List.of(), List.of(), "",
+                "2026-08-09T01:00:01Z", "");
+
+        store.saveStep(running);
+
+        assertThat(store.get("run-1")).hasValueSatisfying(loaded ->
+                assertThat(loaded.steps()).singleElement().satisfies(step -> {
+                    assertThat(step.status()).isEqualTo(AgentStepStatus.RUNNING);
+                    assertThat(step.finishedAt()).isEmpty();
+                }));
+
+        AgentStep completed = new AgentStep(
+                "step-1", "run-1", 1, "BUILD_CONTEXT", AgentStepStatus.COMPLETED,
+                "上下文构建完成", List.of("finding:fp-1#source"), List.of(), List.of(), "",
+                "2026-08-09T01:00:01Z", "2026-08-09T01:00:04Z");
+        store.saveStep(completed);
+
+        assertThat(store.get("run-1")).hasValueSatisfying(loaded -> {
+            assertThat(loaded.updatedAt()).isEqualTo("2026-08-09T01:00:04Z");
+            assertThat(loaded.steps()).singleElement().satisfies(step -> {
+                assertThat(step.status()).isEqualTo(AgentStepStatus.COMPLETED);
+                assertThat(step.summary()).isEqualTo("上下文构建完成");
+                assertThat(step.evidenceReferences()).containsExactly("finding:fp-1#source");
+                assertThat(step.startedAt()).isEqualTo("2026-08-09T01:00:01Z");
+                assertThat(step.finishedAt()).isEqualTo("2026-08-09T01:00:04Z");
+            });
+        });
+    }
+
     private static AgentRun run(String id, String createdAt) {
         return new AgentRun(id, "project-1", AgentPlaybook.SAST_TRIAGE, "1",
                 AgentRunStatus.QUEUED, "upload:semgrep", "", "",

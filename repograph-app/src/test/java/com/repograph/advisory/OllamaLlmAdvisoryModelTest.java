@@ -19,6 +19,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.client.ExpectedCount.once;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
@@ -66,6 +67,8 @@ class OllamaLlmAdvisoryModelTest {
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("C1")))
+                .andExpect(jsonPath("$.format.type").value("object"))
+                .andExpect(jsonPath("$.format.properties.missingInfo.type").value("array"))
                 .andRespond(withSuccess(ollamaResponse, MediaType.APPLICATION_JSON));
 
         var response = model.review(new LlmAdvisoryRequest(
@@ -79,6 +82,33 @@ class OllamaLlmAdvisoryModelTest {
         assertThat(response.citations()).containsExactly("C1");
         assertThat(response.usage().inputTokens()).isEqualTo(100);
         assertThat(response.usage().outputTokens()).isEqualTo(20);
+        server.verify();
+    }
+
+    @Test
+    void reviewNormalizesScalarListFieldsReturnedByLocalModel() throws Exception {
+        String advisoryJson = objectMapper.writeValueAsString(Map.of(
+                "suggestedVerdict", "LIKELY_FALSE_POSITIVE",
+                "uncertainty", 0.9,
+                "citations", "C1",
+                "missingInfo", "confirm runtime input origin"));
+        String ollamaResponse = objectMapper.writeValueAsString(Map.of(
+                "message", Map.of("role", "assistant", "content", advisoryJson),
+                "prompt_eval_count", 100,
+                "eval_count", 20));
+        server.expect(once(), requestTo("http://localhost:11434/api/chat"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess(ollamaResponse, MediaType.APPLICATION_JSON));
+
+        var response = model.review(new LlmAdvisoryRequest(
+                "req-1", "fp-1", TriageVerdict.TRUE_RISK,
+                "CWE-78 command injection", List.of(new LlmAdvisoryEvidence(
+                "C1", "src/App.java:10-12", "new ProcessBuilder(command)", true)),
+                List.of("input origin unknown"), 2000));
+
+        assertThat(response.suggestedVerdict()).isEqualTo(TriageVerdict.LIKELY_FALSE_POSITIVE);
+        assertThat(response.citations()).containsExactly("C1");
+        assertThat(response.missingInfo()).containsExactly("confirm runtime input origin");
         server.verify();
     }
 

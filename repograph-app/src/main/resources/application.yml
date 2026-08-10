@@ -44,8 +44,8 @@ repograph:
     max-input-chars: 12000
     max-output-chars: 4000
     max-estimated-cost-usd: 0.05
-    timeout-millis: 15000
-    max-retries: 1
+    timeout-millis: 180000
+    max-retries: 0
     redact: true
   github:
     token: ""                    # Personal Access Token 或 GitHub App token；留空则发评论时报错

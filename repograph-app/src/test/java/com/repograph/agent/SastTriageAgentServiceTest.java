@@ -20,6 +20,8 @@ import com.repograph.finding.ReviewQueueStore;
 import com.repograph.finding.RuleSuppressionStore;
 import com.repograph.finding.TriageFeedbackStore;
 import com.repograph.finding.TriageReportService;
+import com.repograph.vuln.VulnFinding;
+import com.repograph.vuln.VulnStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -50,6 +52,7 @@ class SastTriageAgentServiceTest {
 
     private AgentRunStore runStore;
     private ReviewQueueStore reviewQueueStore;
+    private VulnStore vulnStore;
     private ExternalFindingImporter importer;
     private FindingContextService contextService;
     private TriageReportService reportService;
@@ -61,6 +64,7 @@ class SastTriageAgentServiceTest {
         String dbPath = tempDir.resolve("agent.db").toString();
         runStore = new AgentRunStore(dbPath);
         reviewQueueStore = new ReviewQueueStore(dbPath, new ObjectMapper());
+        vulnStore = new VulnStore(dbPath);
         importer = mock(ExternalFindingImporter.class);
         contextService = mock(FindingContextService.class);
         reportService = mock(TriageReportService.class);
@@ -74,8 +78,53 @@ class SastTriageAgentServiceTest {
                 List.of(importer), contextService, reportService,
                 mock(TriageFeedbackStore.class), mock(RuleSuppressionStore.class),
                 advisoryService, reviewQueueStore, runStore, buildProperties,
+                vulnStore,
                 Runnable::run,
                 Clock.fixed(Instant.parse("2026-08-09T03:00:00Z"), ZoneOffset.UTC));
+    }
+
+    @Test
+    void selectedVulnerabilityBecomesAuditableSingleFindingRun() {
+        VulnFinding vulnerability = new VulnFinding(
+                "vuln-1", "project-1", "SQL_INJECTION", "CWE-89", "HIGH", "SUSPECTED",
+                "unit-1", "com.example.Repository.find", "src/Repository.java", 42,
+                "SQL 注入", "用户输入进入 SQL 查询", "2026-08-09T02:00:00Z");
+        vulnStore.upsertAll(List.of(vulnerability));
+        ContextPack pack = new ContextPack("query", "security", List.of(), List.of(), 12000, 0, 0, 0, 0, 0);
+        when(contextService.build(any(), any())).thenAnswer(invocation -> {
+            AgentRun liveRun = runStore.list("project-1", 1).get(0);
+            assertThat(liveRun.steps()).last().satisfies(step -> {
+                assertThat(step.capability()).isEqualTo("BUILD_CONTEXT");
+                assertThat(step.status()).isEqualTo(AgentStepStatus.RUNNING);
+                assertThat(step.finishedAt()).isEmpty();
+            });
+            ExternalFinding finding = invocation.getArgument(0);
+            assertThat(finding.tool()).isEqualTo("repograph");
+            assertThat(finding.ruleId()).isEqualTo("SQL_INJECTION");
+            assertThat(finding.severity()).isEqualTo(ExternalFindingSeverity.HIGH);
+            assertThat(finding.filePath()).isEqualTo("src/Repository.java");
+            assertThat(finding.startLine()).isEqualTo(42);
+            assertThat(finding.message()).contains("SQL 注入").contains("用户输入进入 SQL 查询");
+            return new FindingContext(finding, true, "unit-1", pack);
+        });
+        when(reportService.build(any(), any())).thenAnswer(invocation -> {
+            FindingContext context = invocation.getArgument(0);
+            return new TriageReport(context.finding(), true, "unit-1", TriageVerdict.NEEDS_REVIEW,
+                    0.4f, List.of(), List.of(), "人工确认", "待复核", pack);
+        });
+        when(advisoryService.review(any())).thenAnswer(invocation ->
+                LlmAdvisoryResult.disabled(invocation.getArgument(0)));
+
+        AgentRun accepted = service.start(new VulnerabilityTriageAgentCommand(
+                "vuln-1", "abc123", "rules-v1", 12000));
+
+        AgentRun completed = runStore.get(accepted.id()).orElseThrow();
+        assertThat(completed.projectId()).isEqualTo("project-1");
+        assertThat(completed.inputReference()).isEqualTo("vulnerability:vuln-1");
+        assertThat(completed.status()).isEqualTo(AgentRunStatus.WAITING_FOR_REVIEW);
+        assertThat(completed.steps()).extracting(step -> step.capability())
+                .containsExactly("LOAD_VULNERABILITY", "BUILD_CONTEXT", "TRIAGE_FINDINGS",
+                        "LLM_ADVISORY", "SUBMIT_REVIEW");
     }
 
     @Test

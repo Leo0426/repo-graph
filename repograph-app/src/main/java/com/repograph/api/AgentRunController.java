@@ -3,9 +3,12 @@ package com.repograph.api;
 import com.repograph.agent.AgentRunStore;
 import com.repograph.agent.SastTriageAgentCommand;
 import com.repograph.agent.SastTriageAgentService;
+import com.repograph.agent.VulnerabilityNotFoundException;
+import com.repograph.agent.VulnerabilityTriageAgentCommand;
 import com.repograph.core.agent.AgentRun;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -62,6 +65,36 @@ public class AgentRunController {
         AgentRun run = agentService.start(new SastTriageAgentCommand(
                 projectId, format, findingsJson, codeVersion, ruleVersion, budgetChars, maxFindings));
         return ResponseEntity.accepted().body(run);
+    }
+
+    /**
+     * 从平台已有漏洞记录启动单条研判。
+     *
+     * @param vulnerabilityId 漏洞记录标识
+     * @param codeVersion      当前代码版本
+     * @param ruleVersion      当前规则版本
+     * @param budgetChars      上下文字符预算
+     * @return 已接受的 Agent 运行
+     */
+    @PostMapping("/vulnerability-triage")
+    public ResponseEntity<AgentRun> startVulnerabilityTriage(
+            @RequestParam String vulnerabilityId,
+            @RequestParam(required = false) String codeVersion,
+            @RequestParam(required = false) String ruleVersion,
+            @RequestParam(defaultValue = "12000") int budgetChars) {
+        AgentRun run = agentService.start(new VulnerabilityTriageAgentCommand(
+                vulnerabilityId, codeVersion, ruleVersion, budgetChars));
+        return ResponseEntity.accepted().body(run);
+    }
+
+    /**
+     * 将已失效的漏洞选择转换为 HTTP 404。
+     *
+     * @return 空的 404 响应
+     */
+    @ExceptionHandler(VulnerabilityNotFoundException.class)
+    public ResponseEntity<Void> handleVulnerabilityNotFound() {
+        return ResponseEntity.notFound().build();
     }
 
     /**

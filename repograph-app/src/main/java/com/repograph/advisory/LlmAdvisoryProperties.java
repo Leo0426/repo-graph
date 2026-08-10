@@ -42,6 +42,6 @@ public record LlmAdvisoryProperties(
      * @return 默认关闭的配置
      */
     public static LlmAdvisoryProperties defaults() {
-        return new LlmAdvisoryProperties(false, 12_000, 4_000, 0.05d, 15_000L, 1, true);
+        return new LlmAdvisoryProperties(false, 12_000, 4_000, 0.05d, 180_000L, 0, true);
     }
 }

@@ -10,6 +10,7 @@ import com.repograph.core.agent.AgentStep;
 import com.repograph.core.agent.AgentStepResult;
 import com.repograph.core.agent.AgentStepStatus;
 import com.repograph.core.finding.ExternalFinding;
+import com.repograph.core.finding.ExternalFindingSeverity;
 import com.repograph.core.finding.FindingContext;
 import com.repograph.core.finding.ReportSnapshot;
 import com.repograph.core.finding.RuleSuppression;
@@ -24,6 +25,8 @@ import com.repograph.finding.ReviewQueueStore;
 import com.repograph.finding.RuleSuppressionStore;
 import com.repograph.finding.TriageFeedbackStore;
 import com.repograph.finding.TriageReportService;
+import com.repograph.vuln.VulnFinding;
+import com.repograph.vuln.VulnStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -62,6 +65,7 @@ public class SastTriageAgentService {
     private final ReviewQueueStore reviewQueueStore;
     private final AgentRunStore runStore;
     private final BuildProperties buildProperties;
+    private final VulnStore vulnStore;
     private final Executor executor;
     private final Clock clock;
 
@@ -77,6 +81,7 @@ public class SastTriageAgentService {
      * @param reviewQueueStore      审核快照存储
      * @param runStore              Agent 运行存储
      * @param buildProperties       构建版本信息
+     * @param vulnStore             平台漏洞记录存储
      * @param executor              Agent 后台执行器
      * @param clock                 运行时钟
      */
@@ -90,6 +95,7 @@ public class SastTriageAgentService {
             ReviewQueueStore reviewQueueStore,
             AgentRunStore runStore,
             BuildProperties buildProperties,
+            VulnStore vulnStore,
             @Qualifier("agentRunExecutor") Executor executor,
             @Qualifier("agentClock") Clock clock) {
         this.importers = importers;
@@ -101,6 +107,7 @@ public class SastTriageAgentService {
         this.reviewQueueStore = reviewQueueStore;
         this.runStore = runStore;
         this.buildProperties = buildProperties;
+        this.vulnStore = vulnStore;
         this.executor = executor;
         this.clock = clock;
     }
@@ -113,23 +120,38 @@ public class SastTriageAgentService {
      */
     public AgentRun start(SastTriageAgentCommand command) {
         validate(command);
-        String now = now();
-        AgentRun run = new AgentRun(
-                UUID.randomUUID().toString(),
-                command.projectId().trim(),
-                AgentPlaybook.SAST_TRIAGE,
-                PLAYBOOK_VERSION,
-                AgentRunStatus.QUEUED,
-                "upload:" + command.format().trim().toLowerCase(),
-                "",
-                "",
-                now,
-                now,
-                "",
-                List.of());
-        runStore.create(run);
+        AgentRun run = createRun(command.projectId(), "upload:" + command.format().trim().toLowerCase());
         executor.execute(() -> execute(run.id(), command));
         return runStore.get(run.id()).orElse(run);
+    }
+
+    /**
+     * 从平台已有漏洞记录启动单条 SAST 研判。
+     *
+     * @param command 运行输入
+     * @return 已持久化的运行
+     * @throws IllegalArgumentException       漏洞标识为空
+     * @throws VulnerabilityNotFoundException 漏洞记录不存在
+     */
+    public AgentRun start(VulnerabilityTriageAgentCommand command) {
+        if (command == null || command.vulnerabilityId() == null || command.vulnerabilityId().isBlank()) {
+            throw new IllegalArgumentException("vulnerabilityId is required");
+        }
+        String vulnerabilityId = command.vulnerabilityId().trim();
+        VulnFinding vulnerability = vulnStore.findById(vulnerabilityId)
+                .orElseThrow(() -> new VulnerabilityNotFoundException(vulnerabilityId));
+        AgentRun run = createRun(vulnerability.projectId(), "vulnerability:" + vulnerability.id());
+        executor.execute(() -> execute(run.id(), command, vulnerability));
+        return runStore.get(run.id()).orElse(run);
+    }
+
+    private AgentRun createRun(String projectId, String inputReference) {
+        String now = now();
+        AgentRun run = new AgentRun(
+                UUID.randomUUID().toString(), projectId.trim(), AgentPlaybook.SAST_TRIAGE, PLAYBOOK_VERSION,
+                AgentRunStatus.QUEUED, inputReference, "", "", now, now, "", List.of());
+        runStore.create(run);
+        return run;
     }
 
     private void execute(String runId, SastTriageAgentCommand command) {
@@ -138,6 +160,7 @@ public class SastTriageAgentService {
         String stepStartedAt = now();
         try {
             runStore.transition(runId, AgentRunStatus.RUNNING, "", "", stepStartedAt);
+            beginStep(runId, sequence, capability, stepStartedAt);
             ExternalFindingImporter importer = importerFor(command.format());
             int cap = Math.max(1, Math.min(command.maxFindings(), MAX_FINDINGS_PER_RUN));
             List<ExternalFinding> findings = importer.importJson(
@@ -146,10 +169,41 @@ public class SastTriageAgentService {
                     "已导入 " + findings.size() + " 条 " + command.format() + " 报警",
                     findings.stream().map(finding -> "finding:" + finding.fingerprint()).toList(),
                     List.of(), "", stepStartedAt);
+            TriageExecutionOptions execution = new TriageExecutionOptions(
+                    command.projectId(), command.codeVersion(), command.ruleVersion(), command.budgetChars());
+            executePrepared(runId, sequence, execution, findings);
+        } catch (RuntimeException e) {
+            failRun(runId, sequence, capability, stepStartedAt, e);
+        }
+    }
 
-            capability = "BUILD_CONTEXT";
-            stepStartedAt = now();
-            ContextPackOptions options = contextOptions(command);
+    private void execute(String runId, VulnerabilityTriageAgentCommand command, VulnFinding vulnerability) {
+        int sequence = 1;
+        String capability = "LOAD_VULNERABILITY";
+        String stepStartedAt = now();
+        try {
+            runStore.transition(runId, AgentRunStatus.RUNNING, "", "", stepStartedAt);
+            beginStep(runId, sequence, capability, stepStartedAt);
+            ExternalFinding finding = toExternalFinding(vulnerability);
+            appendStep(runId, sequence++, capability, AgentStepStatus.COMPLETED,
+                    "已读取漏洞 " + vulnerability.id() + "，准备单条研判",
+                    List.of("vulnerability:" + vulnerability.id(), "finding:" + finding.fingerprint()),
+                    List.of(), "", stepStartedAt);
+            executePrepared(runId, sequence, new TriageExecutionOptions(
+                    vulnerability.projectId(), command.codeVersion(), command.ruleVersion(), command.budgetChars()),
+                    List.of(finding));
+        } catch (RuntimeException e) {
+            failRun(runId, sequence, capability, stepStartedAt, e);
+        }
+    }
+
+    private void executePrepared(
+            String runId, int sequence, TriageExecutionOptions execution, List<ExternalFinding> findings) {
+        String capability = "BUILD_CONTEXT";
+        String stepStartedAt = now();
+        try {
+            beginStep(runId, sequence, capability, stepStartedAt);
+            ContextPackOptions options = contextOptions(execution);
             List<FindingContext> contexts = new ArrayList<>();
             for (ExternalFinding finding : findings) {
                 contexts.add(findingContextService.build(finding, options));
@@ -169,8 +223,9 @@ public class SastTriageAgentService {
 
             capability = "TRIAGE_FINDINGS";
             stepStartedAt = now();
+            beginStep(runId, sequence, capability, stepStartedAt);
             List<TriageReport> reports = contexts.stream()
-                    .map(context -> triageReportService.build(context, reviewContext(command, context.finding())))
+                    .map(context -> triageReportService.build(context, reviewContext(execution, context.finding())))
                     .toList();
             List<String> triageMissing = reports.stream()
                     .flatMap(report -> report.missingInfo().stream())
@@ -183,6 +238,7 @@ public class SastTriageAgentService {
 
             capability = "LLM_ADVISORY";
             stepStartedAt = now();
+            beginStep(runId, sequence, capability, stepStartedAt);
             List<LlmAdvisoryResult> advisoryResults = reports.stream()
                     .map(advisoryService::review)
                     .toList();
@@ -196,13 +252,14 @@ public class SastTriageAgentService {
 
             capability = "SUBMIT_REVIEW";
             stepStartedAt = now();
+            beginStep(runId, sequence, capability, stepStartedAt);
             ReportSnapshot snapshot = new ReportSnapshot(
                     UUID.randomUUID().toString(),
-                    command.projectId().trim(),
+                    execution.projectId().trim(),
                     "1",
                     buildProperties.getVersion(),
-                    safe(command.codeVersion()),
-                    safe(command.ruleVersion()),
+                    safe(execution.codeVersion()),
+                    safe(execution.ruleVersion()),
                     now(),
                     reports);
             int entries = reviewQueueStore.submit(snapshot).size();
@@ -212,35 +269,49 @@ public class SastTriageAgentService {
             runStore.transition(runId, AgentRunStatus.WAITING_FOR_REVIEW,
                     "report-snapshot:" + snapshot.id(), "", now());
         } catch (RuntimeException e) {
-            String message = safeError(e);
-            appendStep(runId, sequence, capability, AgentStepStatus.FAILED,
-                    "步骤执行失败", List.of(), List.of(), message, stepStartedAt);
-            AgentRunStatus failureStatus = sequence > 1 ? AgentRunStatus.PARTIAL : AgentRunStatus.FAILED;
-            runStore.transition(runId, failureStatus, "",
-                    errorCode(capability) + ": " + message, now());
-            log.warn("Agent run '{}' failed at {}: {}", runId, capability, message);
+            failRun(runId, sequence, capability, stepStartedAt, e);
         }
     }
 
-    private TriageReviewContext reviewContext(SastTriageAgentCommand command, ExternalFinding finding) {
+    private TriageReviewContext reviewContext(TriageExecutionOptions execution, ExternalFinding finding) {
         TriageFeedback feedback = feedbackStore
-                .findByFingerprint(command.projectId(), finding.fingerprint())
+                .findByFingerprint(execution.projectId(), finding.fingerprint())
                 .orElse(null);
         RuleSuppression suppression = suppressionStore.findActive(
-                        command.projectId(), finding.ruleId(), finding.filePath(), clock.instant())
+                        execution.projectId(), finding.ruleId(), finding.filePath(), clock.instant())
                 .orElse(null);
         return new TriageReviewContext(
-                command.projectId(), command.codeVersion(), command.ruleVersion(), feedback, suppression);
+                execution.projectId(), execution.codeVersion(), execution.ruleVersion(), feedback, suppression);
     }
 
-    private ContextPackOptions contextOptions(SastTriageAgentCommand command) {
+    private ContextPackOptions contextOptions(TriageExecutionOptions execution) {
         GraphRagOptions defaults = GraphRagOptions.defaults();
         GraphRagOptions graphRag = new GraphRagOptions(
                 defaults.seedLimit(), defaults.graphDepth(), defaults.callGraph(),
-                defaults.impactExpansion(), defaults.rerank(), command.projectId(),
+                defaults.impactExpansion(), defaults.rerank(), execution.projectId(),
                 defaults.lang(), defaults.noTest());
-        int budget = Math.max(MIN_BUDGET_CHARS, Math.min(command.budgetChars(), MAX_BUDGET_CHARS));
+        int budget = Math.max(MIN_BUDGET_CHARS, Math.min(execution.budgetChars(), MAX_BUDGET_CHARS));
         return new ContextPackOptions("security", budget, graphRag);
+    }
+
+    private static ExternalFinding toExternalFinding(VulnFinding vulnerability) {
+        String detail = safe(vulnerability.detail()).trim();
+        String message = vulnerability.title().trim() + (detail.isEmpty() ? "" : ": " + detail);
+        return new ExternalFinding(
+                "repograph", vulnerability.ruleId(), vulnerability.cwe(),
+                ExternalFindingSeverity.from(vulnerability.severity()),
+                message, vulnerability.filePath(), vulnerability.startLine(), vulnerability.startLine(),
+                vulnerability.qualifiedName(), List.of(), "");
+    }
+
+    private void failRun(
+            String runId, int sequence, String capability, String stepStartedAt, RuntimeException error) {
+        String message = safeError(error);
+        appendStep(runId, sequence, capability, AgentStepStatus.FAILED,
+                "步骤执行失败", List.of(), List.of(), message, stepStartedAt);
+        AgentRunStatus failureStatus = sequence > 1 ? AgentRunStatus.PARTIAL : AgentRunStatus.FAILED;
+        runStore.transition(runId, failureStatus, "", errorCode(capability) + ": " + message, now());
+        log.warn("Agent run '{}' failed at {}: {}", runId, capability, message);
     }
 
     private ExternalFindingImporter importerFor(String format) {
@@ -262,9 +333,31 @@ public class SastTriageAgentService {
             String runId, int sequence, String capability, AgentStepStatus status,
             String summary, List<String> evidenceReferences, List<String> missingInfo,
             List<AgentStepResult> results, String error, String startedAt) {
-        runStore.appendStep(new AgentStep(
-                UUID.randomUUID().toString(), runId, sequence, capability, status,
+        runStore.saveStep(new AgentStep(
+                stepId(runId, sequence), runId, sequence, capability, status,
                 summary, evidenceReferences, missingInfo, results, error, startedAt, now()));
+    }
+
+    private void beginStep(String runId, int sequence, String capability, String startedAt) {
+        runStore.saveStep(new AgentStep(
+                stepId(runId, sequence), runId, sequence, capability, AgentStepStatus.RUNNING,
+                runningSummary(capability), List.of(), List.of(), List.of(), "", startedAt, ""));
+    }
+
+    private static String stepId(String runId, int sequence) {
+        return runId + ":step:" + sequence;
+    }
+
+    private static String runningSummary(String capability) {
+        return switch (capability) {
+            case "IMPORT_FINDINGS" -> "正在解析并归一化外部报警";
+            case "LOAD_VULNERABILITY" -> "正在读取平台漏洞事实";
+            case "BUILD_CONTEXT" -> "正在定位代码并构建证据上下文";
+            case "TRIAGE_FINDINGS" -> "正在生成启发式研判结论";
+            case "LLM_ADVISORY" -> "正在请求 LLM 辅助复核";
+            case "SUBMIT_REVIEW" -> "正在冻结报告快照并提交人工审核";
+            default -> "正在执行步骤";
+        };
     }
 
     private static AgentStepStatus advisoryStatus(List<LlmAdvisoryResult> results) {
@@ -348,6 +441,7 @@ public class SastTriageAgentService {
 
     private static String errorCode(String capability) {
         return switch (capability) {
+            case "LOAD_VULNERABILITY" -> "VULNERABILITY_LOAD_FAILED";
             case "IMPORT_FINDINGS" -> "IMPORT_FAILED";
             case "BUILD_CONTEXT" -> "CONTEXT_FAILED";
             case "TRIAGE_FINDINGS" -> "TRIAGE_FAILED";
@@ -355,5 +449,9 @@ public class SastTriageAgentService {
             case "SUBMIT_REVIEW" -> "REVIEW_SUBMISSION_FAILED";
             default -> "AGENT_RUN_FAILED";
         };
+    }
+
+    private record TriageExecutionOptions(
+            String projectId, String codeVersion, String ruleVersion, int budgetChars) {
     }
 }

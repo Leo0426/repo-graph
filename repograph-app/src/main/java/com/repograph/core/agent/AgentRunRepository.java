@@ -22,7 +22,16 @@ public interface AgentRunRepository {
      *
      * @param step 步骤记录
      */
-    void appendStep(AgentStep step);
+    default void appendStep(AgentStep step) {
+        saveStep(step);
+    }
+
+    /**
+     * 保存步骤的最新公开状态；同一步骤可从运行中原位更新为完成或失败。
+     *
+     * @param step 步骤记录
+     */
+    void saveStep(AgentStep step);
 
     /**
      * 更新运行状态及输出引用。
