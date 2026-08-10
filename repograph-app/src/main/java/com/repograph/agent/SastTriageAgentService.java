@@ -7,6 +7,7 @@ import com.repograph.core.agent.AgentPlaybook;
 import com.repograph.core.agent.AgentRun;
 import com.repograph.core.agent.AgentRunStatus;
 import com.repograph.core.agent.AgentStep;
+import com.repograph.core.agent.AgentStepResult;
 import com.repograph.core.agent.AgentStepStatus;
 import com.repograph.core.finding.ExternalFinding;
 import com.repograph.core.finding.FindingContext;
@@ -191,7 +192,7 @@ public class SastTriageAgentService {
                     advisorySummary(advisoryStepStatus, modelUsed, reports.size()),
                     advisoryReferences(advisoryResults),
                     advisoryResults.stream().flatMap(result -> result.missingInfo().stream()).distinct().toList(),
-                    advisoryError(advisoryResults), stepStartedAt);
+                    advisoryResults(advisoryResults), advisoryError(advisoryResults), stepStartedAt);
 
             capability = "SUBMIT_REVIEW";
             stepStartedAt = now();
@@ -253,9 +254,17 @@ public class SastTriageAgentService {
             String runId, int sequence, String capability, AgentStepStatus status,
             String summary, List<String> evidenceReferences, List<String> missingInfo,
             String error, String startedAt) {
+        appendStep(runId, sequence, capability, status, summary, evidenceReferences,
+                missingInfo, List.of(), error, startedAt);
+    }
+
+    private void appendStep(
+            String runId, int sequence, String capability, AgentStepStatus status,
+            String summary, List<String> evidenceReferences, List<String> missingInfo,
+            List<AgentStepResult> results, String error, String startedAt) {
         runStore.appendStep(new AgentStep(
                 UUID.randomUUID().toString(), runId, sequence, capability, status,
-                summary, evidenceReferences, missingInfo, error, startedAt, now()));
+                summary, evidenceReferences, missingInfo, results, error, startedAt, now()));
     }
 
     private static AgentStepStatus advisoryStatus(List<LlmAdvisoryResult> results) {
@@ -271,7 +280,8 @@ public class SastTriageAgentService {
     private static String advisorySummary(AgentStepStatus status, long modelUsed, int total) {
         return switch (status) {
             case SKIPPED -> "LLM 辅助复核未启用，保留启发式研判结果";
-            case COMPLETED -> "LLM 已辅助复核 " + modelUsed + "/" + total + " 条结果，建议仅供人工参考";
+            case COMPLETED -> "LLM 已辅助复核 " + modelUsed + "/" + total
+                    + " 条结果，建议仅供人工参考";
             default -> "LLM 辅助复核不可用，已降级保留启发式研判结果";
         };
     }
@@ -282,6 +292,18 @@ public class SastTriageAgentService {
                 .flatMap(result -> result.citations().stream()
                         .map(citation -> "finding:" + result.heuristicReport().finding().fingerprint()
                                 + "#" + citation))
+                .toList();
+    }
+
+    private static List<AgentStepResult> advisoryResults(List<LlmAdvisoryResult> results) {
+        return results.stream()
+                .filter(result -> result.status() == LlmAdvisoryStatus.COMPLETED)
+                .map(result -> new AgentStepResult(
+                        "finding:" + result.heuristicReport().finding().fingerprint(),
+                        result.heuristicReport().verdict().name(),
+                        result.suggestedVerdict() == null ? "" : result.suggestedVerdict().name(),
+                        result.uncertainty(),
+                        result.advisoryOnly()))
                 .toList();
     }
 

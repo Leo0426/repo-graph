@@ -270,6 +270,7 @@ function renderAgentStep(step, index) {
   const status = agentStepStatus(step.status);
   const refs = (step.evidenceReferences || []).map(reference =>
     `<code title="${esc(reference)}">${esc(shortAgentReference(reference))}</code>`).join('');
+  const results = (step.results || []).map(renderAgentStepResult).join('');
   const missing = (step.missingInfo || []).map(item => `<li>${esc(item)}</li>`).join('');
   return `<article class="agent-step ${status.tone}">
     <div class="agent-step-node"><span>${String(index + 1).padStart(2, '0')}</span></div>
@@ -277,11 +278,25 @@ function renderAgentStep(step, index) {
       <header><strong>${esc(step.capability.replaceAll('_', ' '))}</strong><span>${status.label}</span>
         <time>${esc(formatAgentTime(step.finishedAt || step.startedAt))}</time></header>
       <p>${esc(step.summary)}</p>
+      ${results ? `<div class="agent-step-results">${results}</div>` : ''}
       ${refs ? `<div class="agent-evidence"><b>${esc(t('agent.evidence'))}</b>${refs}</div>` : ''}
       ${missing ? `<details><summary>${esc(t('agent.missing'))} · ${step.missingInfo.length}</summary><ul>${missing}</ul></details>` : ''}
       ${step.error ? `<div class="agent-step-error">${esc(step.error)}</div>` : ''}
     </div>
   </article>`;
+}
+
+function renderAgentStepResult(result) {
+  const uncertainty = Math.round(Number(result.uncertainty || 0) * 100);
+  const recommendation = result.recommendation || '—';
+  return `<div class="agent-step-result">
+    <code title="${esc(result.subjectReference)}">${esc(shortAgentReference(result.subjectReference))}</code>
+    <span><small>${esc(t('agent.baseline'))}</small><b>${esc(result.baseline || '—')}</b></span>
+    <i>→</i>
+    <span><small>${esc(t('agent.recommendation'))}</small><b>${esc(recommendation)}</b></span>
+    <em>${esc(t('agent.uncertainty'))} ${uncertainty}%</em>
+    ${result.advisoryOnly ? `<strong>${esc(t('agent.advisoryOnly'))}</strong>` : ''}
+  </div>`;
 }
 
 function agentStatus(status) {

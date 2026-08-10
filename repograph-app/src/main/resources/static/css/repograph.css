@@ -1781,6 +1781,22 @@ kbd {
 .agent-step.skipped header span { color: var(--amber); }.agent-step.failed header span { color: var(--red); }
 .agent-step-card header time { margin-left: auto; color: var(--text-3); font-size: 8px; }
 .agent-step-card p { margin-top: 5px; color: var(--text-2); font-size: 9px; line-height: 1.5; }
+.agent-step-results { display: grid; gap: 5px; margin-top: 7px; }
+.agent-step-result {
+  display: grid; grid-template-columns: minmax(100px,1fr) auto 10px auto auto auto; align-items: center;
+  gap: 7px; padding: 6px 7px; border: 1px solid rgba(245,158,11,.16); background: rgba(245,158,11,.035);
+}
+.agent-step-result code {
+  color: var(--cyan); font-size: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.agent-step-result span small { display: block; color: var(--text-3); font-size: 6px; letter-spacing: .08em; }
+.agent-step-result span b { display: block; margin-top: 2px; color: var(--text-1); font-size: 8px; }
+.agent-step-result > i { color: var(--text-3); font-style: normal; }
+.agent-step-result > em { color: var(--amber); font: normal 7px var(--ff); white-space: nowrap; }
+.agent-step-result > strong {
+  color: var(--amber); border: 1px solid rgba(245,158,11,.24); padding: 2px 4px;
+  font-size: 6px; letter-spacing: .08em; white-space: nowrap;
+}
 .agent-evidence { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 7px; }
 .agent-evidence b { color: var(--text-3); font-size: 7px; letter-spacing: .08em; }
 .agent-evidence code { padding: 2px 5px; color: var(--cyan); background: rgba(0,207,255,.05); border: 1px solid rgba(0,207,255,.12); font-size: 7px; }
@@ -1804,6 +1820,8 @@ kbd {
   .agent-title-row { align-items: flex-start; }.agent-system-state { display: none; }
   .agent-payload-row, .agent-operations { grid-template-columns: 1fr; }
   .agent-execute-btn { min-height: 60px; }.agent-run-summary { grid-template-columns: repeat(2,1fr); }
+  .agent-step-result { grid-template-columns: 1fr auto auto; }
+  .agent-step-result span, .agent-step-result > i { display: none; }
 }
 
 /* ── Status bar ── */

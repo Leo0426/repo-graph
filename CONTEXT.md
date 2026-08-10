@@ -157,6 +157,9 @@ repograph-mcp/   独立 MCP stdio 服务（JSON-RPC，供 AI 工具调用，通�
   人工操作；通用聊天与 MCP 外部 Agent 集成是次级入口。
 - **降级语义**：LLM 未安装或未启用时，启发式研判照常完成，对应步骤显式标记“LLM 辅助未启用”；
   部分能力失败时保留已产生证据并进入 `PARTIAL`，不将降级包装为完整 Agent 结论。
+- **辅助结果可见性**：`LLM_ADVISORY` 步骤把逐报警的启发式基线、模型建议、不确定度和
+  `advisoryOnly` 标记保存为 `AgentStepResult`；时间线可直接展示，但审核快照仍只保存原启发式报告，
+  模型建议不能覆盖报告结论或改变漏洞状态。运行记录不保存提示词、源码或模型思维链。
 - **REST 与界面**：`POST /api/v1/agent-runs/sast-triage` 异步接受运行；`GET /api/v1/agent-runs`
   和 `GET /api/v1/agent-runs/{id}` 暴露项目运行台账与步骤时间线。Web 一级 Agent 作战台展示当前可用
   Playbook、报警输入、运行状态、证据引用、缺失信息、结构化错误及报告快照人工审核出口。

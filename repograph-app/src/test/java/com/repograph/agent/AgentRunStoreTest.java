@@ -4,6 +4,7 @@ import com.repograph.core.agent.AgentPlaybook;
 import com.repograph.core.agent.AgentRun;
 import com.repograph.core.agent.AgentRunStatus;
 import com.repograph.core.agent.AgentStep;
+import com.repograph.core.agent.AgentStepResult;
 import com.repograph.core.agent.AgentStepStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -47,6 +48,8 @@ class AgentRunStoreTest {
             assertThat(loaded.steps()).extracting(AgentStep::status)
                     .containsExactly(AgentStepStatus.COMPLETED, AgentStepStatus.SKIPPED);
             assertThat(loaded.steps().get(0).evidenceReferences()).containsExactly("finding:fp-1");
+            assertThat(loaded.steps().get(0).results()).containsExactly(
+                    new AgentStepResult("finding:fp-1", "NEEDS_REVIEW", "TRUE_RISK", 0.15f, true));
         });
         assertThat(store.list("project-1", 10)).extracting(AgentRun::id)
                 .containsExactly("run-2", "run-1");
@@ -75,7 +78,9 @@ class AgentRunStoreTest {
     private static AgentStep step(
             String id, String runId, int sequence, AgentStepStatus status) {
         return new AgentStep(id, runId, sequence, "IMPORT_FINDINGS", status,
-                "导入 1 条报警", List.of("finding:fp-1"), List.of(), "",
+                "导入 1 条报警", List.of("finding:fp-1"), List.of(),
+                List.of(new AgentStepResult(
+                        "finding:fp-1", "NEEDS_REVIEW", "TRUE_RISK", 0.15f, true)), "",
                 "2026-08-09T01:00:00Z", "2026-08-09T01:00:01Z");
     }
 }

@@ -3,6 +3,8 @@ package com.repograph.agent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.repograph.core.advisory.LlmAdvisoryResult;
 import com.repograph.core.advisory.LlmAdvisoryService;
+import com.repograph.core.advisory.LlmAdvisoryStatus;
+import com.repograph.core.advisory.LlmUsage;
 import com.repograph.core.agent.AgentRun;
 import com.repograph.core.agent.AgentRunStatus;
 import com.repograph.core.agent.AgentStepStatus;
@@ -108,6 +110,43 @@ class SastTriageAgentServiceTest {
         assertThat(completed.steps().get(1).missingInfo()).contains("trace unavailable");
         String snapshotId = completed.outputReference().substring("report-snapshot:".length());
         assertThat(reviewQueueStore.getSnapshot(snapshotId)).isPresent();
+    }
+
+    @Test
+    void completedLlmReviewExposesAdvisoryDecisionWithoutReplacingHeuristicVerdict() {
+        ExternalFinding finding = finding();
+        ContextPack pack = new ContextPack("query", "security", List.of(),
+                List.of(), 12000, 0, 0, 0, 0, 0);
+        FindingContext context = new FindingContext(finding, true, "unit-1", pack);
+        TriageReport report = new TriageReport(
+                finding, true, "unit-1", TriageVerdict.NEEDS_REVIEW, 0.6f,
+                List.of("存在危险调用"), List.of(), "人工确认参数来源", "需要人工复核", pack);
+        when(importer.importJson(any(java.io.InputStream.class), anyInt())).thenReturn(List.of(finding));
+        when(contextService.build(any(), any())).thenReturn(context);
+        when(reportService.build(any(), any())).thenReturn(report);
+        when(advisoryService.review(report)).thenReturn(new LlmAdvisoryResult(
+                report, LlmAdvisoryStatus.COMPLETED, true, true,
+                "OLLAMA", "qwen3:8b", TriageVerdict.TRUE_RISK, 0.15f,
+                List.of(), List.of(), 0, 1, 25L, LlmUsage.NONE));
+
+        AgentRun accepted = service.start(new SastTriageAgentCommand(
+                "project-1", "semgrep", "{\"results\":[]}", "abc123", "rules-v1", 12000, 10));
+
+        AgentRun completed = runStore.get(accepted.id()).orElseThrow();
+        assertThat(completed.steps()).filteredOn(step -> step.capability().equals("LLM_ADVISORY"))
+                .singleElement().satisfies(step -> {
+                    assertThat(step.results()).singleElement().satisfies(result -> {
+                        assertThat(result.subjectReference()).isEqualTo("finding:" + finding.fingerprint());
+                        assertThat(result.baseline()).isEqualTo("NEEDS_REVIEW");
+                        assertThat(result.recommendation()).isEqualTo("TRUE_RISK");
+                        assertThat(result.uncertainty()).isEqualTo(0.15f);
+                        assertThat(result.advisoryOnly()).isTrue();
+                    });
+                });
+        assertThat(reviewQueueStore.getSnapshot(
+                completed.outputReference().substring("report-snapshot:".length())))
+                .get().satisfies(snapshot -> assertThat(snapshot.reports().get(0).verdict())
+                        .isEqualTo(TriageVerdict.NEEDS_REVIEW));
     }
 
     @Test

@@ -13,6 +13,7 @@ import java.util.List;
  * @param summary            面向用户的结果摘要
  * @param evidenceReferences 证据或领域事实引用
  * @param missingInfo        缺失信息说明
+ * @param results            对领域事实产生的公开决策结果
  * @param error              结构化错误摘要
  * @param startedAt          开始时间，ISO-8601
  * @param finishedAt         完成时间，未完成时为空
@@ -27,6 +28,7 @@ public record AgentStep(
         String summary,
         List<String> evidenceReferences,
         List<String> missingInfo,
+        List<AgentStepResult> results,
         String error,
         String startedAt,
         String finishedAt) {
@@ -37,5 +39,6 @@ public record AgentStep(
     public AgentStep {
         evidenceReferences = evidenceReferences == null ? List.of() : List.copyOf(evidenceReferences);
         missingInfo = missingInfo == null ? List.of() : List.copyOf(missingInfo);
+        results = results == null ? List.of() : List.copyOf(results);
     }
 }

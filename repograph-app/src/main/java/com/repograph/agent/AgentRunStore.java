@@ -5,6 +5,7 @@ import com.repograph.core.agent.AgentRun;
 import com.repograph.core.agent.AgentRunRepository;
 import com.repograph.core.agent.AgentRunStatus;
 import com.repograph.core.agent.AgentStep;
+import com.repograph.core.agent.AgentStepResult;
 import com.repograph.core.agent.AgentStepStatus;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -92,6 +93,7 @@ public class AgentRunStore implements AgentRunRepository {
             }
             insertReferences(connection, step.id(), "EVIDENCE", step.evidenceReferences());
             insertReferences(connection, step.id(), "MISSING", step.missingInfo());
+            insertResults(connection, step.id(), step.results());
             connection.commit();
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to append agent step '" + step.id() + "'", e);
@@ -199,6 +201,7 @@ public class AgentRunStore implements AgentRunRepository {
                             row.getString("summary"),
                             loadReferences(connection, stepId, "EVIDENCE"),
                             loadReferences(connection, stepId, "MISSING"),
+                            loadResults(connection, stepId),
                             row.getString("error"),
                             row.getString("started_at"),
                             row.getString("finished_at")));
@@ -243,6 +246,50 @@ public class AgentRunStore implements AgentRunRepository {
         }
     }
 
+    private static void insertResults(
+            Connection connection, String stepId, List<AgentStepResult> results) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO agent_step_results
+                    (step_id, position, subject_reference, baseline, recommendation, uncertainty, advisory_only)
+                VALUES (?,?,?,?,?,?,?)
+                """)) {
+            for (int index = 0; index < results.size(); index++) {
+                AgentStepResult result = results.get(index);
+                statement.setString(1, stepId);
+                statement.setInt(2, index);
+                statement.setString(3, result.subjectReference());
+                statement.setString(4, result.baseline());
+                statement.setString(5, result.recommendation());
+                statement.setFloat(6, result.uncertainty());
+                statement.setBoolean(7, result.advisoryOnly());
+                statement.addBatch();
+            }
+            statement.executeBatch();
+        }
+    }
+
+    private static List<AgentStepResult> loadResults(
+            Connection connection, String stepId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT subject_reference, baseline, recommendation, uncertainty, advisory_only
+                FROM agent_step_results WHERE step_id = ? ORDER BY position
+                """)) {
+            statement.setString(1, stepId);
+            List<AgentStepResult> results = new ArrayList<>();
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    results.add(new AgentStepResult(
+                            resultSet.getString("subject_reference"),
+                            resultSet.getString("baseline"),
+                            resultSet.getString("recommendation"),
+                            resultSet.getFloat("uncertainty"),
+                            resultSet.getBoolean("advisory_only")));
+                }
+            }
+            return List.copyOf(results);
+        }
+    }
+
     private void initTables() {
         try (Connection connection = connection(); Statement statement = connection.createStatement()) {
             statement.execute("""
@@ -281,6 +328,18 @@ public class AgentRunStore implements AgentRunRepository {
                         position        INTEGER NOT NULL,
                         reference_value TEXT NOT NULL,
                         PRIMARY KEY(step_id, kind, position)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS agent_step_results (
+                        step_id           TEXT NOT NULL,
+                        position          INTEGER NOT NULL,
+                        subject_reference TEXT NOT NULL,
+                        baseline          TEXT NOT NULL,
+                        recommendation    TEXT NOT NULL,
+                        uncertainty       REAL NOT NULL,
+                        advisory_only     INTEGER NOT NULL,
+                        PRIMARY KEY(step_id, position)
                     )
                     """);
             statement.execute("""
