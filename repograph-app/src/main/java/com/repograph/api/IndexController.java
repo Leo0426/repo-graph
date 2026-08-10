@@ -129,10 +129,16 @@ public class IndexController {
             try {
                 IndexResult result = indexPipeline.index(Path.of(projectRoot), options);
                 resultMap.put(projectRoot, result);
-                statusMap.put(projectRoot, "done");
-                indexHistoryStore.save(projectRoot, "done", result);
-                log.info("Async indexing completed for '{}': {} units, {} edges, {}ms",
-                        projectRoot, result.totalUnits(), result.totalEdges(), result.durationMs());
+                String completedStatus = result.errors().isEmpty() ? "done" : "partial";
+                statusMap.put(projectRoot, completedStatus);
+                indexHistoryStore.save(projectRoot, completedStatus, result);
+                if (result.errors().isEmpty()) {
+                    log.info("Async indexing completed for '{}': {} units, {} edges, {}ms",
+                            projectRoot, result.totalUnits(), result.totalEdges(), result.durationMs());
+                } else {
+                    log.warn("Async indexing partially completed for '{}': {} units, {} errors, {}ms",
+                            projectRoot, result.totalUnits(), result.errors().size(), result.durationMs());
+                }
             } catch (Exception e) {
                 String errorStatus = "error: " + e.getMessage();
                 statusMap.put(projectRoot, errorStatus);
@@ -152,7 +158,7 @@ public class IndexController {
      * 查询指定项目的最新索引状态和结果。
      *
      * @param projectRoot 项目根目录绝对路径
-     * @return 状态（running / done / error）及完成后的 {@link IndexResult}
+     * @return 状态（running / done / partial / error）及完成后的 {@link IndexResult}
      */
     @GetMapping("/project/status")
     public ResponseEntity<Map<String, Object>> indexStatus(@RequestParam String projectRoot) {

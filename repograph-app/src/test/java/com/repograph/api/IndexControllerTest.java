@@ -25,6 +25,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -81,6 +82,25 @@ class IndexControllerTest {
                         .param("lang", "java")
                         .param("strategy", "precise"))
                 .andExpect(status().isAccepted());
+    }
+
+    @Test
+    void indexProject_withBatchErrorsCompletesAsPartial() throws Exception {
+        String projectRoot = "/tmp/partial-index";
+        IndexResult partial = new IndexResult(
+                10, 10, 0, 0, 7, 3, 100L,
+                List.of("Embed/upsert error at offset 0: endpoint unavailable"));
+        when(indexPipeline.index(any(Path.class), any())).thenReturn(partial);
+
+        mvc.perform(post("/api/v1/index/project").param("projectRoot", projectRoot))
+                .andExpect(status().isAccepted());
+
+        verify(indexHistoryStore, timeout(2_000)).save(projectRoot, "partial", partial);
+        mvc.perform(get("/api/v1/index/project/status").param("projectRoot", projectRoot))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("partial"))
+                .andExpect(jsonPath("$.errors[0]").value(
+                        "Embed/upsert error at offset 0: endpoint unavailable"));
     }
 
     @Test

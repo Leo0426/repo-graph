@@ -45,7 +45,7 @@ public class IndexHistoryStore {
      * 保存或覆盖指定 projectRoot 的最新索引历史。
      *
      * @param projectRoot 项目根目录绝对路径
-     * @param status      "done" 或 "error: ..."
+     * @param status      "done"、"partial" 或 "error: ..."
      * @param result      索引结果统计，status 为 error 时可为 {@code null}
      */
     public void save(String projectRoot, String status, IndexResult result) {
@@ -172,7 +172,7 @@ public class IndexHistoryStore {
      * 单条索引历史记录。
      *
      * @param projectRoot 项目根目录
-     * @param status      "done" 或 "error: ..."
+     * @param status      "done"、"partial" 或 "error: ..."
      * @param indexedAt   ISO-8601 时间戳
      * @param result      索引统计，error 时可能为 {@code null}
      */

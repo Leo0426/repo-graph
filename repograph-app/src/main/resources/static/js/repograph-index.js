@@ -65,7 +65,8 @@ function startIndexPolling(root) {
     try {
       const s = await api.indexStatus(root);
       updateIndexStatus(s);
-      if (s.status === 'done' || (s.status && s.status.startsWith('error'))) {
+      if (s.status === 'done' || s.status === 'partial'
+          || (s.status && s.status.startsWith('error'))) {
         clearInterval(state.indexPolling);
         state.indexPolling = null;
       }
@@ -79,14 +80,16 @@ function updateIndexStatus(s) {
   const isHistory = !!s.indexedAt;           // only set on SQLite-fallback responses
   document.getElementById('ring-status').textContent = status;
 
-  if (status === 'done') {
+  if (status === 'done' || status === 'partial') {
     setRingProgress(100);
     if (isHistory) {
       const rel = relativeTime(s.indexedAt);
       logLine('info', t('log.history', rel));
     } else {
-      logLine('ok', t('log.done', s.totalUnits, s.totalEdges, formatDur(s.durationMs)));
-      if (s.errors && s.errors.length) s.errors.forEach(e => logLine('error', e));
+      const logType = status === 'partial' ? 'warn' : 'ok';
+      const logKey = status === 'partial' ? 'log.partial' : 'log.done';
+      logLine(logType, t(logKey, s.totalUnits, s.totalEdges, formatDur(s.durationMs)));
+      if (s.errors && s.errors.length) s.errors.forEach(e => logLine('warn', e));
     }
     _reenableIndexBtn();
   } else if (status === 'running') {
@@ -117,7 +120,7 @@ function updateIndexStatus(s) {
   set('stat-degraded', s.degradedFiles ?? '—');
   set('stat-errors',   (s.errors || []).length || '0');
   set('stat-dur',      s.durationMs ? formatDur(s.durationMs) : '—');
-  set('ring-pct',      status === 'done' ? '✓' : status === 'running' ? '…' : '—');
+  set('ring-pct',      status === 'done' ? '✓' : status === 'partial' ? '!' : status === 'running' ? '…' : '—');
 
   // Timestamp row: show when data comes from history, hide otherwise
   const tsEl = document.getElementById('stat-indexed-at');

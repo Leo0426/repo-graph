@@ -23,6 +23,7 @@ public class ContextPackService {
 
     private static final int MIN_BUDGET_CHARS = 1000;
     private static final int MAX_BUDGET_CHARS = 60000;
+    private static final int TARGET_EVIDENCE_COUNT = 4;
 
     private final GraphRagService graphRagService;
 
@@ -78,6 +79,12 @@ public class ContextPackService {
         List<String> omitted = new ArrayList<>(extraOmittedReasons);
         int used = 0;
         int citation = 1;
+        long viableCandidates = rankedUnits.stream()
+                .map(ranked -> ranked.unit().rawSource())
+                .filter(source -> source != null && !source.isBlank())
+                .count();
+        int evidenceBudget = budget / Math.max(1,
+                Math.min(TARGET_EVIDENCE_COUNT, Math.toIntExact(viableCandidates)));
 
         for (RankedUnit ranked : rankedUnits) {
             CodeUnit unit = ranked.unit();
@@ -87,7 +94,7 @@ public class ContextPackService {
                 continue;
             }
 
-            int remaining = budget - used;
+            int remaining = Math.min(budget - used, evidenceBudget);
             if (remaining <= 0) {
                 omitted.add(unit.qualifiedName() + ": budget exhausted");
                 continue;

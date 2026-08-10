@@ -4,10 +4,12 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * 外部 SAST / SCA 工具输入报警的统一模型。
+ * SAST / SCA 报警的统一研判输入模型。
  *
- * <p>该模型表示“外部工具已经发现的一条报警”，用于后续报警解释、上下文构建和误报研判。
- * 它不同于 {@code VulnFinding}：前者是外部输入事实，后者是 RepoGraph 内部扫描或研判后的发现记录。
+ * <p>该模型表示一次研判所需的不可变报警事实，
+ * 用于后续报警解释、上下文构建和误报研判。
+ * 外部工具输入由 importer 归一化；RepoGraph 内部 {@code VulnFinding} 由 Agent 入口适配，
+ * 二者均不在运行记录中复制原始领域事实。
  *
  * @param tool      外部工具名称，如 {@code semgrep}、{@code codeql}、{@code sonarqube}
  * @param ruleId    外部规则 ID，如 {@code java.lang.security.audit.command-injection}

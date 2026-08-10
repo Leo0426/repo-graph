@@ -30,7 +30,8 @@ import java.util.Set;
  * <p>构建流程：
  *
  * <ol>
- *   <li><b>报警定位</b>：按 filePath + startLine 定位报警所在 {@link CodeUnit}，作为首条证据</li>
+ *   <li><b>报警定位</b>：先按 filePath + startLine 查询向量索引，缺失时按 symbol 查询代码图，
+ *       将命中的 {@link CodeUnit} 作为首条证据</li>
  *   <li><b>调用图扩展</b>：以定位单元为种子展开 callers / callees</li>
  *   <li><b>影响面扩展</b>：从定位单元出发补充安全相关节点</li>
  *   <li><b>关键词补充</b>：用 ruleId / cwe / symbol / message 做关键词检索，证据来源标记为 {@code KEYWORD}</li>
@@ -95,6 +96,9 @@ public class FindingContextService {
         int impactExpanded = 0;
 
         Optional<CodeUnit> located = vectorStore.locateByPosition(finding.filePath(), finding.startLine());
+        if (located.isEmpty() && !finding.symbol().isBlank()) {
+            located = graphQueryService.findSymbol(finding.symbol(), rag.projectId());
+        }
         if (located.isEmpty()) {
             omitted.add("finding location not indexed: "
                     + finding.filePath() + ":" + finding.startLine());

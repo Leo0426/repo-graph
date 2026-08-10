@@ -6,6 +6,8 @@ import com.repograph.core.finding.FindingContext;
 import com.repograph.core.graph.GraphQueryService;
 import com.repograph.core.model.CodeUnit;
 import com.repograph.core.model.CodeUnitKind;
+import com.repograph.core.retrieval.ContextPackOptions;
+import com.repograph.core.retrieval.GraphRagOptions;
 import com.repograph.core.retrieval.KeywordSearchOptions;
 import com.repograph.core.retrieval.KeywordSearchResult;
 import com.repograph.core.retrieval.KeywordSearchService;
@@ -110,6 +112,36 @@ class FindingContextServiceTest {
         assertThat(context.pack().evidence()).singleElement()
                 .satisfies(e -> assertThat(e.source()).isEqualTo("KEYWORD"));
         assertThat(context.pack().seedCount()).isZero();
+    }
+
+    @Test
+    void build_fallsBackToExactGraphSymbolWhenVectorLocationIsMissing() {
+        CodeUnit located = unit("com.example.OrderService#run()",
+                "src/main/java/com/example/OrderService.java");
+        ExternalFinding finding = new ExternalFinding(
+                "repograph", "COMMAND_INJECTION_TAINT", "CWE-78", ExternalFindingSeverity.HIGH,
+                "Detected command injection", located.filePath(), 42, 42,
+                located.qualifiedName(), List.of(), "");
+        GraphRagOptions graphRag = new GraphRagOptions(
+                10, 1, true, true, true, "project-1", null, true);
+        when(vectorStore.locateByPosition(located.filePath(), 42)).thenReturn(Optional.empty());
+        when(graphQueryService.findSymbol(located.qualifiedName(), "project-1"))
+                .thenReturn(Optional.of(located));
+        when(graphQueryService.findCallers(located.qualifiedName(), 1, "project-1"))
+                .thenReturn(List.of());
+        when(graphQueryService.findCallees(located.qualifiedName(), 1, "project-1"))
+                .thenReturn(List.of());
+        when(keywordSearchService.search(anyString(), any(KeywordSearchOptions.class)))
+                .thenReturn(List.of());
+
+        FindingContext context = service.build(finding,
+                new ContextPackOptions("security", 12_000, graphRag));
+
+        assertThat(context.located()).isTrue();
+        assertThat(context.locatedQualifiedName()).isEqualTo(located.qualifiedName());
+        assertThat(context.pack().evidence()).singleElement()
+                .satisfies(evidence -> assertThat(evidence.source()).isEqualTo("FINDING"));
+        assertThat(context.pack().omittedReasons()).noneMatch(reason -> reason.contains("not indexed"));
     }
 
     @Test

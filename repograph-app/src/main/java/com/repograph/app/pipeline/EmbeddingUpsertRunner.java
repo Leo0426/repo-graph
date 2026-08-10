@@ -35,6 +35,8 @@ class EmbeddingUpsertRunner {
     private static final int DEFAULT_EMBED_BATCH = 8;
     private static final int DEFAULT_UPSERT_BATCH = 256;
     private static final int DEFAULT_EMBED_PARALLELISM = 4;
+    private static final int MAX_EMBED_ATTEMPTS = 3;
+    private static final long RETRY_DELAY_MS = 200L;
 
     private final EmbeddingService embeddingService;
     private final VectorStore vectorStore;
@@ -88,9 +90,9 @@ class EmbeddingUpsertRunner {
             }
 
             CompletableFuture<List<float[]>> semanticFuture =
-                    CompletableFuture.supplyAsync(() -> embeddingService.embed(semanticTexts), embedExecutor);
+                    CompletableFuture.supplyAsync(() -> embedWithRetry(semanticTexts), embedExecutor);
             CompletableFuture<List<float[]>> codeFuture =
-                    CompletableFuture.supplyAsync(() -> embeddingService.embed(codeTexts), embedExecutor);
+                    CompletableFuture.supplyAsync(() -> embedWithRetry(codeTexts), embedExecutor);
 
             CompletableFuture<Void> batchFuture = semanticFuture
                     .thenCombine(codeFuture, (semanticVectors, codeVectors) -> {
@@ -112,7 +114,9 @@ class EmbeddingUpsertRunner {
                     .exceptionally(e -> {
                         Throwable cause = e.getCause() != null ? e.getCause() : e;
                         log.error("Embed/upsert failed for batch at offset {}: {}", offset, cause.getMessage());
-                        errors.add("Embed/upsert error at offset " + offset + ": " + cause.getMessage());
+                        synchronized (errors) {
+                            errors.add("Embed/upsert error at offset " + offset + ": " + cause.getMessage());
+                        }
                         return null;
                     });
 
@@ -122,6 +126,29 @@ class EmbeddingUpsertRunner {
         CompletableFuture.allOf(futures.toArray(new CompletableFuture<?>[0])).join();
         log.debug("Parallel embed+upsert complete: {} units", total.get());
         return total.get();
+    }
+
+    private List<float[]> embedWithRetry(List<String> texts) {
+        RuntimeException lastError = null;
+        for (int attempt = 1; attempt <= MAX_EMBED_ATTEMPTS; attempt++) {
+            try {
+                return embeddingService.embed(texts);
+            } catch (RuntimeException error) {
+                lastError = error;
+                if (attempt == MAX_EMBED_ATTEMPTS) {
+                    break;
+                }
+                log.warn("Embedding attempt {}/{} failed; retrying: {}",
+                        attempt, MAX_EMBED_ATTEMPTS, error.getMessage());
+                try {
+                    Thread.sleep(RETRY_DELAY_MS * attempt);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("Embedding retry interrupted", interrupted);
+                }
+            }
+        }
+        throw lastError;
     }
 
     /**

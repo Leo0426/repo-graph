@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -61,6 +62,30 @@ class EmbeddingUpsertRunnerTest {
         assertThat(progress).containsExactly(1);
         verify(vectorStore).upsert(argThat(units -> units.size() == 1), eq("project-1"));
         verify(embeddingService, org.mockito.Mockito.times(2)).embed(anyList());
+    }
+
+    @Test
+    void embedAndUpsert_retriesTransientEmbeddingFailure() {
+        runner = new EmbeddingUpsertRunner(embeddingService, vectorStore, null);
+        CodeUnit unit = new CodeUnit("id-1", CodeUnitKind.METHOD, "java",
+                "com.example.Foo#bar", "bar", "Foo.java", 2, 4,
+                "void bar() {}", "void bar()", List.of(), "com.example.Foo", Map.of());
+        AtomicInteger attempts = new AtomicInteger();
+        when(embeddingService.embed(anyList())).thenAnswer(invocation -> {
+            if (attempts.getAndIncrement() == 0) {
+                throw new IllegalStateException("temporary Ollama failure");
+            }
+            return List.of(new float[]{0.1f, 0.2f});
+        });
+        List<String> errors = new ArrayList<>();
+
+        int embedded = runner.embedAndUpsert(List.of(unit), "project-1", Path.of("/tmp/project"),
+                errors, (root, done, total) -> { });
+
+        assertThat(embedded).isEqualTo(1);
+        assertThat(errors).isEmpty();
+        assertThat(attempts).hasValue(3);
+        verify(vectorStore).upsert(argThat(units -> units.size() == 1), eq("project-1"));
     }
 
     // ── buildSemanticText ──────────────────────────────────────────────────
