@@ -66,14 +66,14 @@
 <datalist id="projects-datalist"></datalist>
 <datalist id="graph-symbols-datalist"></datalist>
 
-<!-- CDN libs -->
-<script src="https://d3js.org/d3.v7.min.js"></script>
-<script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
+<!-- Vendored libs (self-hosted, no CDN dependency) -->
+<script th:src="@{/vendor/js/d3.v7.min.js}"></script>
+<script th:src="@{/vendor/js/htmx-2.0.4.min.js}"></script>
 
 <!-- I18N constants + Alpine store (must be before Alpine defer) -->
 <script th:src="@{/js/repograph-i18n.js}"></script>
 <script th:src="@{/js/repograph-store.js}"></script>
-<script defer src="https://unpkg.com/alpinejs@3.14.9/dist/cdn.min.js"></script>
+<script defer th:src="@{/vendor/js/alpinejs-3.14.9.min.js}"></script>
 
 <!-- App scripts (defer — run after DOM + Alpine) -->
 <script defer th:src="@{/js/repograph-app.js}"></script>
