@@ -78,6 +78,14 @@
         <span>01</span><b data-i18n="agent.launch">准备研判</b>
         <em data-i18n="agent.requiredHint">标记 * 的项目为必填项</em>
       </div>
+
+      <div class="agent-input-mode" role="group" data-i18n-aria-label="agent.findingInput" aria-label="报警输入">
+        <button id="agent-mode-vuln-btn" type="button" class="active" aria-pressed="true"
+                onclick="setAgentInputMode('vuln')" data-i18n="agent.modeVulnCenter">从漏洞中心选择</button>
+        <button id="agent-mode-external-btn" type="button" aria-pressed="false"
+                onclick="setAgentInputMode('external')" data-i18n="agent.modeExternal">导入外部报警</button>
+      </div>
+
       <div class="agent-command-grid agent-command-primary">
         <label class="agent-required-field"><span><b data-i18n="agent.project">目标项目</b><i>*</i></span>
           <select id="agent-project-select" onchange="handleAgentProjectChange()">
@@ -85,7 +93,7 @@
           </select>
           <small id="agent-project-hint" data-i18n="agent.projectHint">选择已完成索引的代码仓库</small>
         </label>
-        <label><span><b data-i18n="agent.vulnerabilityScope">漏洞范围</b></span>
+        <label id="agent-scope-field"><span><b data-i18n="agent.vulnerabilityScope">漏洞范围</b></span>
           <select id="agent-vulnerability-filter" onchange="renderAgentVulnerabilities()">
             <option value="active" data-i18n="agent.scopeActive">待处理（疑似 / 已确认）</option>
             <option value="all" data-i18n="agent.scopeAll">全部漏洞</option>
@@ -93,6 +101,13 @@
             <option value="CONFIRMED" data-i18n="agent.scopeConfirmed">仅已确认</option>
           </select>
           <small data-i18n="agent.scopeHint">默认隐藏已修复和已忽略记录</small>
+        </label>
+        <label id="agent-format-field" hidden><span><b data-i18n="agent.format">报警格式</b></span>
+          <select id="agent-format" onchange="refreshExternalInputStatus()">
+            <option value="semgrep">SEMGREP JSON</option>
+            <option value="sarif">SARIF 2.1</option>
+          </select>
+          <small data-i18n="agent.formatHint">根据导入内容自动识别</small>
         </label>
       </div>
 
@@ -111,11 +126,18 @@
               <option value="60000">60K CHARS</option>
             </select>
           </label>
+          <label id="agent-maxfindings-field" hidden><span data-i18n="agent.maxFindings">最多处理</span>
+            <select id="agent-max-findings">
+              <option value="10">10</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+            </select>
+          </label>
         </div>
       </details>
 
       <div class="agent-payload-row">
-        <div class="agent-vulnerability-picker">
+        <div id="agent-mode-vuln" class="agent-vulnerability-picker">
           <div class="agent-vulnerability-head">
             <div><b data-i18n="agent.vulnerabilityInput">选择待研判漏洞</b>
               <small data-i18n="agent.vulnerabilityHint">读取漏洞中心记录，选择一条直接研判</small></div>
@@ -137,6 +159,29 @@
             </div>
           </div>
         </div>
+
+        <div id="agent-mode-external" class="agent-payload-wrap" hidden>
+          <div class="agent-payload-head">
+            <div><b data-i18n="agent.findingInput">报警输入</b>
+              <small data-i18n="agent.vulnerabilityHint">粘贴 Semgrep / SARIF JSON，或选择文件</small></div>
+            <div>
+              <input id="agent-file-input" type="file" accept=".json,.sarif,.sarif.json" hidden
+                     onchange="readAgentFile(this)">
+              <button class="btn btn-ghost" type="button"
+                      onclick="document.getElementById('agent-file-input').click()"
+                      data-i18n="agent.chooseFile">选择文件</button>
+              <button class="agent-clear-input" type="button" onclick="clearAgentFindingsInput()"
+                      data-i18n-title="agent.clear" title="清空输入" aria-label="清空输入">×</button>
+            </div>
+          </div>
+          <textarea id="agent-findings-json" spellcheck="false" oninput="refreshExternalInputStatus()"
+                    data-i18n-ph="agent.dropHint" placeholder="粘贴 JSON，或将文件拖到此处"></textarea>
+          <div class="agent-payload-tools">
+            <span id="agent-file-name">INPUT / NOT LOADED</span>
+            <span id="agent-input-status" class="agent-input-status" data-i18n="agent.awaitingInput">等待输入</span>
+          </div>
+        </div>
+
         <aside class="agent-launch-panel">
           <div class="agent-readiness-title"><span></span><b data-i18n="agent.readiness">任务准备状态</b></div>
           <ul class="agent-readiness-list">
@@ -144,7 +189,7 @@
               <i>1</i><span data-i18n="agent.readyProject">选择目标项目</span><b>WAITING</b>
             </li>
             <li id="agent-ready-vulnerability">
-              <i>2</i><span data-i18n="agent.readyVulnerability">选择一条漏洞</span><b>WAITING</b>
+              <i>2</i><span>选择一条漏洞</span><b>WAITING</b>
             </li>
             <li id="agent-ready-review">
               <i>3</i><span data-i18n="agent.readyReview">人工审核结论</span><b>CHECKPOINT</b>

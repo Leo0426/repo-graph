@@ -143,6 +143,18 @@
 .agent-section-label > em { margin-left: auto; color: var(--text-3); font-size: 8px; letter-spacing: .1em; font-style: normal; }
 .agent-section-label > button { margin-left: auto; color: var(--text-2); border: 0; background: none; cursor: pointer; font-size: 15px; }
 .agent-section-label > em + button { margin-left: 0; }
+.agent-input-mode {
+  display: inline-flex; margin-bottom: 9px; border: 1px solid rgba(245,158,11,.18);
+  background: rgba(245,158,11,.03);
+}
+.agent-input-mode button {
+  min-height: 26px; padding: 4px 12px; border: 0; border-left: 1px solid rgba(245,158,11,.14);
+  background: transparent; color: var(--text-3); cursor: pointer;
+  font: 700 9px var(--ff); letter-spacing: .09em; text-transform: uppercase;
+}
+.agent-input-mode button:first-child { border-left: 0; }
+.agent-input-mode button:hover { color: var(--text-2); background: rgba(245,158,11,.05); }
+.agent-input-mode button.active { color: var(--amber); background: rgba(245,158,11,.1); }
 .agent-command-grid { display: grid; grid-template-columns: 1.2fr .8fr 1fr 1fr; gap: 8px; }
 .agent-command-primary { grid-template-columns: minmax(250px, 1.35fr) minmax(190px, .65fr); }
 .agent-command-grid label { display: flex; flex-direction: column; gap: 4px; }
@@ -326,7 +338,8 @@
 @keyframes taint-shimmer { from { transform: translateX(-12px); opacity: .35; } to { transform: translateX(12px); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .agent-taint-track::after, .agent-taint-skeleton i { animation: none; } }
 .agent-payload-wrap {
-  border: 1px solid var(--border); background: var(--bg); transition: border-color .15s, background .15s;
+  min-width: 0; border: 1px solid var(--border); background: var(--bg);
+  transition: border-color .15s, background .15s;
 }
 .agent-payload-wrap:focus-within { border-color: rgba(245,158,11,.3); }
 .agent-payload-wrap.dragging {
@@ -635,6 +648,7 @@
 .agent-llm-settings-body input:not([type="checkbox"]) { font-size: var(--agent-text-body); }
 .agent-llm-actions .btn { font-size: var(--agent-text-small); }
 .agent-section-label > em { font-size: var(--agent-text-micro); letter-spacing: .06em; }
+.agent-input-mode button { font-size: var(--agent-text-small); }
 .agent-command-grid label > span { font-size: var(--agent-text-small); letter-spacing: .08em; }
 .agent-command-grid label > small { font-size: var(--agent-text-small); }
 .agent-command-grid select, .agent-command-grid input { font-size: var(--agent-text-control); }

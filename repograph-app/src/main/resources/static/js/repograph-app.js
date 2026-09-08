@@ -373,6 +373,11 @@ function applyLang() {
   if (typeof renderAgentVulnerabilities === 'function') renderAgentVulnerabilities();
   if (typeof renderAgentRunList === 'function') renderAgentRunList();
   if (typeof rerenderAgentCurrentRun === 'function') rerenderAgentCurrentRun();
+  if (typeof refreshExternalInputStatus === 'function' && agentUi?.inputMode === 'external') {
+    refreshExternalInputStatus();
+  } else if (typeof updateAgentLaunchState === 'function') {
+    updateAgentLaunchState();
+  }
 }
 
 function onLangChange(lang) {
