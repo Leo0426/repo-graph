@@ -121,10 +121,9 @@ roadmap（`docs/generated/roadmap-codesec-triage-agent.md`）P0 的验证重点�
 
 ## 操作者 runbook（会话前 + 会话中）
 
-**已知产品缺口**：Agent 作战台的 SAST TRIAGE 面板只研判「漏洞中心」里 RepoGraph 自己扫出来的
-记录，**没有上传外部 Semgrep/SARIF JSON 的 UI**。试用的输入是参与者的真实报警，所以试用期间
-外部报警研判走 API（下面的 curl）。如果试用通过、要继续投入，"报警上传 UI"是显而易见的下一个
-P0.5 任务。
+Agent 作战台的 SAST TRIAGE 面板有「从漏洞中心选择」和「导入外部报警」两种输入模式。试用用后者：
+选项目 → 切「导入外部报警」→ 粘贴或选择参与者的 Semgrep/SARIF JSON → 执行研判 → 运行时间线 +
+`report-snapshot` 的 MARKDOWN / JSON / PDF 导出。下面的 curl 只作为无头（headless）备选保留。
 
 ### 会话前（操作者，约 20–40 分钟，取决于仓库大小）
 
@@ -153,23 +152,24 @@ curl -X POST "http://localhost:8080/api/v1/triage/report?format=semgrep&projectI
   -H 'Content-Type: application/json' --data-binary @participant-findings.json | jq '.[0].report'
 ```
 
-### 会话中（生成给参与者看的报告）
+### 会话中（UI，给参与者看的报告）
+
+1. 打开 `http://localhost:8080` → 左侧「Agent 作战台」。
+2. 顶部选参与者项目 → 输入模式切「导入外部报警」。
+3. 选「报警格式」（`semgrep` = Semgrep `--json`；`sarif` = CodeQL 及其它工具的 SARIF 导出），
+   粘贴 JSON 或点「选择文件」。状态条显示 `SEMGREP · N 条报警 · 本次处理 M 条`（M 上限见「最多处理」，
+   REST 端硬上限 50）。
+4. 「执行研判」→ 右侧运行栏出现新 run，时间线逐步展开（定位 → 证据组装 → 研判 → 待审核）。
+5. run 完成后出现 `report-snapshot`，点 **MARKDOWN** 导出把逐条研判报告给参与者看
+   （JSON / PDF 同一处）。
+
+无头备选（无 UI 时）：
 
 ```bash
-# 批量研判 —— 直接出报告数组，每条含 verdict / confidence / reasons / citations / report(Markdown)
 curl -X POST "http://localhost:8080/api/v1/triage/report?format=semgrep&projectId=<ID>&maxFindings=10" \
   -H 'Content-Type: application/json' --data-binary @participant-findings.json > trial-reports.json
-jq -r '.[].report' trial-reports.json      # 逐条 Markdown，给参与者看这个
-
-# 可选：建审核队列快照，拿到 UI/PDF 可导出的版本
-curl -X POST "http://localhost:8080/api/v1/review-queue/snapshots?format=semgrep&projectId=<ID>" \
-  -H 'Content-Type: application/json' --data-binary @participant-findings.json > snapshot.json
-SNAP=$(jq -r '.snapshotId' snapshot.json)
-open "http://localhost:8080/api/v1/review-queue/snapshots/$SNAP/export?format=markdown"
+jq -r '.[].report' trial-reports.json      # 逐条 Markdown
 ```
-
-`format` 取值：`semgrep`（Semgrep `--json`）/ `sarif`（CodeQL 及其它工具的 SARIF 导出）。
-`maxFindings` REST 端上限 50；超过时按规则去重取代表性子集。
 
 会话结束后按上面「每次会话记录模板」填一份，5 份填完对照「决策门」分流。
 
