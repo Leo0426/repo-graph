@@ -378,6 +378,10 @@ function agentVulnerabilityStatus(status) {
 function handleAgentProjectChange() {
   const projectId = document.getElementById('agent-project-select').value;
   setGlobalProject(projectId);
+  syncAgentProjectSelection();
+}
+
+function syncAgentProjectSelection() {
   renderAgentProjectHint();
   updateAgentLaunchState();
   agentUi.selectedVulnerabilityId = '';

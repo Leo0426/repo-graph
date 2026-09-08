@@ -127,7 +127,7 @@ async function doSearch() {
   const limit = parseInt(document.getElementById('search-limit').value, 10);
   const { lang, kind } = state.filters;
   const el = document.getElementById('search-results');
-  el.innerHTML = `<div class="loading-row"><div class="spinner"></div><span>Searching…</span></div>`;
+  el.innerHTML = `<div class="loading-row"><div class="spinner"></div><span>${esc(t('search.searching'))}</span></div>`;
 
   Object.assign(searchState, { q, mode: state.searchMode, lang, kind, limit, offset: 0 });
 
@@ -144,7 +144,7 @@ async function doSearch() {
     renderLoadMore(page.hasMore);
   } catch (e) {
     el.innerHTML = `<div class="empty-state" style="color:var(--red)">
-      <p>Request failed</p><span>${esc(e.message)}</span></div>`;
+      <p>${esc(t('search.requestFailed'))}</p><span>${esc(e.message)}</span></div>`;
   }
 }
 
