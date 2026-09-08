@@ -1,0 +1,43 @@
+{
+  "version": "1.101.0",
+  "errors": [],
+  "results": [
+    {
+      "check_id": "java.lang.security.audit.command-injection",
+      "path": "repograph-app/src/main/java/com/repograph/scanner/CliProcessRunner.java",
+      "start": {"line": 48, "col": 23},
+      "end": {"line": 52, "col": 29},
+      "extra": {
+        "message": "A command reaches ProcessBuilder. Verify executable and argument provenance.",
+        "severity": "ERROR",
+        "metadata": {
+          "cwe": ["CWE-78: Improper Neutralization of Special Elements used in an OS Command"],
+          "confidence": "MEDIUM",
+          "function": "com.repograph.scanner.CliProcessRunner.run"
+        },
+        "dataflow_trace": {
+          "taint_source": {
+            "location": {
+              "path": "repograph-app/src/main/java/com/repograph/scanner/CliProcessRunner.java",
+              "start": {"line": 19},
+              "end": {"line": 19}
+            },
+            "content": "command enters the CLI runner"
+          },
+          "intermediate_vars": [],
+          "taint_sink": {
+            "location": {
+              "path": "repograph-app/src/main/java/com/repograph/scanner/CliProcessRunner.java",
+              "start": {"line": 48},
+              "end": {"line": 52}
+            },
+            "content": "new ProcessBuilder(command).start()"
+          }
+        }
+      }
+    }
+  ],
+  "paths": {
+    "scanned": ["repograph-app/src/main/java/com/repograph/scanner/CliProcessRunner.java"]
+  }
+}
