@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "CodeQL",
+          "rules": [
+            {
+              "id": "java/command-line-injection",
+              "properties": {
+                "security-severity": "9.8",
+                "tags": ["external/cwe/cwe-078"]
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "java/command-line-injection",
+          "level": "error",
+          "message": {"text": "Command arguments flow into ProcessBuilder."},
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "repograph-app/src/main/java/com/repograph/scanner/CliProcessRunner.java"
+                },
+                "region": {"startLine": 48, "endLine": 52}
+              },
+              "logicalLocations": [
+                {"fullyQualifiedName": "com.repograph.scanner.CliProcessRunner.run"}
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
