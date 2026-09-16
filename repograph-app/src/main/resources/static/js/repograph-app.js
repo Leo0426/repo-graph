@@ -310,7 +310,10 @@ function setGlobalProject(projectId) {
     if (input) input.value = value;
   });
   const agentProject = document.getElementById('agent-project-select');
-  if (agentProject) agentProject.value = state.activeProjectId;
+  if (agentProject && agentProject.value !== state.activeProjectId) {
+    agentProject.value = state.activeProjectId;
+    syncAgentProjectSelection();
+  }
   const active = document.querySelector('.panel.active');
   if (active?.id === 'panel-stats' && value) loadProjectStats();
 }
@@ -464,11 +467,11 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { hideTooltip(); return; }
 
   if (!inInput && !e.metaKey && !e.ctrlKey && !e.altKey) {
-    const panels = ['search','graph','symbol','stats','index','tools','sbom','health','benchmark'];
-    const idx = parseInt(e.key) - 1;
+    const panels = ['agent','search','graph','symbol','stats','index','tools','sbom','vulns','metrics'];
+    const idx = e.key === '0' ? 9 : parseInt(e.key) - 1;
     if (idx >= 0 && idx < panels.length) {
       switchPanel(panels[idx]);
-      if (idx === 0) setTimeout(() => document.getElementById('search-input').focus(), 80);
+      if (panels[idx] === 'search') setTimeout(() => document.getElementById('search-input').focus(), 80);
       return;
     }
     if (e.key === '/') {
