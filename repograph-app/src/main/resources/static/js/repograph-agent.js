@@ -5,6 +5,7 @@ const agentUi = {
   polling: null,
   llmSettings: null,
   llmConnection: null,
+  inputMode: 'vuln',
   vulnerabilities: [],
   selectedVulnerabilityId: '',
   currentRun: null,
@@ -27,6 +28,7 @@ function initAgentWorkbench() {
       if (!document.getElementById('agent-run-btn').disabled) startSastTriageAgent();
     }
   });
+  setAgentInputMode(agentUi.inputMode);
 }
 
 function openAgentCapability(capability) {
@@ -39,6 +41,88 @@ function openAgentCapability(capability) {
     return;
   }
   document.querySelector('.agent-command-deck')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/* ── Input mode: vulnerability center picker vs external SAST findings ── */
+function setAgentInputMode(mode) {
+  const next = mode === 'external' ? 'external' : 'vuln';
+  agentUi.inputMode = next;
+  const isExternal = next === 'external';
+  document.getElementById('agent-mode-vuln')?.toggleAttribute('hidden', isExternal);
+  document.getElementById('agent-mode-external')?.toggleAttribute('hidden', !isExternal);
+  document.getElementById('agent-scope-field')?.toggleAttribute('hidden', isExternal);
+  document.getElementById('agent-format-field')?.toggleAttribute('hidden', !isExternal);
+  document.getElementById('agent-maxfindings-field')?.toggleAttribute('hidden', !isExternal);
+  for (const [id, active] of [['agent-mode-vuln-btn', !isExternal], ['agent-mode-external-btn', isExternal]]) {
+    const button = document.getElementById(id);
+    if (!button) continue;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  }
+  showAgentError('');
+  if (isExternal) refreshExternalInputStatus();
+  updateAgentLaunchState();
+}
+
+function readAgentFile(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    document.getElementById('agent-findings-json').value = String(reader.result || '');
+    document.getElementById('agent-file-name').textContent = `INPUT / ${file.name} / ${file.size} B`;
+    refreshExternalInputStatus();
+  };
+  reader.onerror = () => showAgentError(t('agent.fileError'));
+  reader.readAsText(file);
+  input.value = '';
+}
+
+function clearAgentFindingsInput() {
+  const textarea = document.getElementById('agent-findings-json');
+  if (textarea) textarea.value = '';
+  const name = document.getElementById('agent-file-name');
+  if (name) name.textContent = 'INPUT / NOT LOADED';
+  showAgentError('');
+  refreshExternalInputStatus();
+}
+
+/* Parse the pasted/loaded findings blob and count entries for the chosen format. */
+function parseAgentFindingsInput() {
+  const raw = document.getElementById('agent-findings-json')?.value.trim() || '';
+  const format = document.getElementById('agent-format')?.value || 'semgrep';
+  if (!raw) return { state: 'empty', format, total: 0 };
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (_) {
+    return { state: 'invalid', format, total: 0 };
+  }
+  const total = format === 'sarif'
+    ? (parsed?.runs || []).reduce((sum, run) => sum + (run?.results?.length || 0), 0)
+    : (parsed?.results?.length || 0);
+  return { state: total > 0 ? 'ready' : 'unrecognized', format, total, raw };
+}
+
+function refreshExternalInputStatus() {
+  const badge = document.getElementById('agent-input-status');
+  if (badge) {
+    const result = parseAgentFindingsInput();
+    const maxFindings = Number(document.getElementById('agent-max-findings')?.value) || 10;
+    badge.classList.toggle('ready', result.state === 'ready');
+    badge.classList.toggle('error', result.state === 'invalid');
+    if (result.state === 'ready') {
+      badge.textContent = t('agent.inputReady',
+        result.format.toUpperCase(), result.total, Math.min(result.total, maxFindings));
+    } else if (result.state === 'invalid') {
+      badge.textContent = t('agent.invalidJson');
+    } else if (result.state === 'unrecognized') {
+      badge.textContent = t('agent.unrecognizedInput');
+    } else {
+      badge.textContent = t('agent.awaitingInput');
+    }
+  }
+  updateAgentLaunchState();
 }
 
 function rememberAgentDetail(element) {
@@ -383,11 +467,12 @@ function handleAgentProjectChange() {
 
 function syncAgentProjectSelection() {
   renderAgentProjectHint();
-  updateAgentLaunchState();
   agentUi.selectedVulnerabilityId = '';
   agentUi.selectedId = '';
   agentUi.currentRun = null;
   agentUi.runDetailSignature = '';
+  clearAgentFindingsInput();
+  updateAgentLaunchState();
   Promise.all([loadAgentVulnerabilities(), loadAgentRuns()]);
 }
 
@@ -409,12 +494,16 @@ function renderAgentProjectHint() {
 
 function updateAgentLaunchState() {
   const projectReady = Boolean(document.getElementById('agent-project-select')?.value);
-  const vulnerabilityReady = agentUi.vulnerabilities.some(item => item.id === agentUi.selectedVulnerabilityId);
+  const external = agentUi.inputMode === 'external';
+  const inputReady = external
+    ? parseAgentFindingsInput().state === 'ready'
+    : agentUi.vulnerabilities.some(item => item.id === agentUi.selectedVulnerabilityId);
   renderAgentReadiness('agent-ready-project', projectReady, t('agent.readyProject'));
-  renderAgentReadiness('agent-ready-vulnerability', vulnerabilityReady, t('agent.readyVulnerability'));
+  renderAgentReadiness('agent-ready-vulnerability', inputReady,
+    t(external ? 'agent.readyPayload' : 'agent.readyVulnerability'));
   const button = document.getElementById('agent-run-btn');
   if (!button || button.classList.contains('running')) return;
-  button.disabled = !(projectReady && vulnerabilityReady);
+  button.disabled = !(projectReady && inputReady);
   const hint = document.getElementById('agent-run-hint');
   if (hint) hint.textContent = button.disabled ? t('agent.completeRequired') : t('agent.readyToRun');
 }
@@ -429,20 +518,34 @@ function renderAgentReadiness(id, ready, label) {
 
 async function startSastTriageAgent() {
   const projectId = document.getElementById('agent-project-select').value;
-  const vulnerabilityId = agentUi.selectedVulnerabilityId;
   if (!projectId) return showAgentError(t('agent.projectRequired'));
-  if (!vulnerabilityId) return showAgentError(t('agent.vulnerabilityRequired'));
+
+  const external = agentUi.inputMode === 'external';
+  const codeVersion = document.getElementById('agent-code-version').value.trim();
+  const ruleVersion = document.getElementById('agent-rule-version').value.trim();
+  const budgetChars = Number(document.getElementById('agent-budget-chars').value);
+
+  let findings;
+  if (external) {
+    findings = parseAgentFindingsInput();
+    if (findings.state === 'empty') return showAgentError(t('agent.payloadRequired'));
+    if (findings.state === 'invalid') return showAgentError(t('agent.invalidJson'));
+    if (findings.state === 'unrecognized') return showAgentError(t('agent.unrecognizedInput'));
+  } else if (!agentUi.selectedVulnerabilityId) {
+    return showAgentError(t('agent.vulnerabilityRequired'));
+  }
 
   const button = document.getElementById('agent-run-btn');
   button.disabled = true;
   button.classList.add('running');
   showAgentError('');
   try {
-    const run = await api.agentStartVulnerabilityTriage(
-      vulnerabilityId,
-      document.getElementById('agent-code-version').value.trim(),
-      document.getElementById('agent-rule-version').value.trim(),
-      Number(document.getElementById('agent-budget-chars').value));
+    const run = external
+      ? await api.agentStartSastTriage(
+        projectId, findings.format, findings.raw, codeVersion, ruleVersion, budgetChars,
+        Number(document.getElementById('agent-max-findings').value) || 10)
+      : await api.agentStartVulnerabilityTriage(
+        agentUi.selectedVulnerabilityId, codeVersion, ruleVersion, budgetChars);
     agentUi.selectedId = run.id;
     showToast(t('agent.accepted'));
     await loadAgentRuns();
