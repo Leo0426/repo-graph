@@ -1,7 +1,8 @@
 package com.repograph.api;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.repograph.core.finding.ExternalFinding;
+import com.repograph.core.finding.TriageOptions;
+import com.repograph.core.finding.TriageWorkflow;
 import com.repograph.core.finding.ExternalFindingSeverity;
 import com.repograph.core.finding.ReportSnapshot;
 import com.repograph.core.finding.ReviewQueueAuditEvent;
@@ -10,10 +11,6 @@ import com.repograph.core.finding.ReviewQueueEntryNotFoundException;
 import com.repograph.core.finding.ReviewStatus;
 import com.repograph.core.finding.TriageReport;
 import com.repograph.core.finding.TriageVerdict;
-import com.repograph.core.retrieval.ContextPackOptions;
-import com.repograph.core.retrieval.GraphRagOptions;
-import com.repograph.finding.ExternalFindingImporter;
-import com.repograph.finding.FindingContextService;
 import com.repograph.finding.ReportPdfRenderer;
 import com.repograph.finding.ReviewQueueStore;
 import com.repograph.finding.TriageReportService;
@@ -48,12 +45,8 @@ import java.util.function.Function;
 @RequestMapping("/api/v1/review-queue")
 public class ReviewQueueController {
 
-    private static final int MAX_FINDINGS_PER_REQUEST = 50;
-    private static final int MIN_BUDGET_CHARS = 1000;
-    private static final int MAX_BUDGET_CHARS = 60000;
 
-    private final List<ExternalFindingImporter> importers;
-    private final FindingContextService findingContextService;
+    private final TriageWorkflow workflow;
     private final TriageReportService triageReportService;
     private final ReviewQueueStore reviewQueueStore;
     private final BuildProperties buildProperties;
@@ -63,8 +56,7 @@ public class ReviewQueueController {
     /**
      * 创建审核队列 REST 控制器。
      *
-     * @param importers             可用的外部报警导入器
-     * @param findingContextService 报警上下文构建服务
+     * @param workflow             共享研判流程
      * @param triageReportService   研判报告生成服务
      * @param reviewQueueStore      审核队列及快照存储
      * @param buildProperties       应用构建信息，用于填充快照的工具版本
@@ -72,15 +64,13 @@ public class ReviewQueueController {
      * @param reportPdfRenderer     报告 PDF 渲染器
      */
     public ReviewQueueController(
-            List<ExternalFindingImporter> importers,
-            FindingContextService findingContextService,
+            TriageWorkflow workflow,
             TriageReportService triageReportService,
             ReviewQueueStore reviewQueueStore,
             BuildProperties buildProperties,
             ObjectMapper objectMapper,
             ReportPdfRenderer reportPdfRenderer) {
-        this.importers = importers;
-        this.findingContextService = findingContextService;
+        this.workflow = workflow;
         this.triageReportService = triageReportService;
         this.reviewQueueStore = reviewQueueStore;
         this.buildProperties = buildProperties;
@@ -110,28 +100,10 @@ public class ReviewQueueController {
             @RequestParam(defaultValue = "12000") int budgetChars,
             @RequestParam(defaultValue = "10") int maxFindings,
             HttpServletRequest request) throws IOException {
-        ExternalFindingImporter importer = importers.stream()
-                .filter(i -> i.supports(format))
-                .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "unsupported format '" + format + "', expected one of: semgrep, sarif"));
-
-        int cap = Math.max(1, Math.min(maxFindings, MAX_FINDINGS_PER_REQUEST));
-        List<ExternalFinding> findings = importer.importJson(request.getInputStream(), cap);
-
-        GraphRagOptions defaults = GraphRagOptions.defaults();
-        GraphRagOptions graphRag = new GraphRagOptions(
-                defaults.seedLimit(), defaults.graphDepth(), defaults.callGraph(),
-                defaults.impactExpansion(), defaults.rerank(), projectId,
-                defaults.lang(), defaults.noTest());
-        ContextPackOptions options = new ContextPackOptions(
-                "security",
-                Math.max(MIN_BUDGET_CHARS, Math.min(budgetChars, MAX_BUDGET_CHARS)),
-                graphRag);
-
-        List<TriageReport> reports = findings.stream()
-                .map(finding -> findingContextService.build(finding, options))
-                .map(triageReportService::build)
+        TriageOptions options = new TriageOptions(projectId, codeVersion, ruleVersion, budgetChars);
+        List<TriageReport> reports = workflow.importFindings(format, request.getInputStream(), maxFindings).stream()
+                .map(finding -> workflow.buildContext(finding, options))
+                .map(context -> workflow.review(context, options))
                 .toList();
 
         ReportSnapshot snapshot = new ReportSnapshot(

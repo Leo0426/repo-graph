@@ -31,6 +31,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @WebMvcTest({IndexController.class, SymbolController.class})
 class GlobalExceptionHandlerTest {
 
+    @MockBean(name = "indexExecutor")
+    java.util.concurrent.Executor indexExecutor;
+
     @Autowired
     MockMvc mvc;
 

@@ -72,7 +72,18 @@ public interface VectorStore {
      * @param qualifiedName 全限定名，不为 {@code null}
      * @return 匹配的 {@link CodeUnit}；不存在时返回 {@link Optional#empty()}
      */
-    Optional<CodeUnit> symbolLookup(String qualifiedName);
+    default Optional<CodeUnit> symbolLookup(String qualifiedName) {
+        return symbolLookup(qualifiedName, null);
+    }
+
+    /**
+     * 在指定项目内精确查询符号。
+     *
+     * @param qualifiedName 符号全限定名
+     * @param projectId 项目范围；为空时兼容全局查询
+     * @return 匹配的代码单元
+     */
+    Optional<CodeUnit> symbolLookup(String qualifiedName, String projectId);
 
     /**
      * 按文件路径和行号定位代码单元，返回包含指定行的最小粒度符号。
@@ -81,5 +92,17 @@ public interface VectorStore {
      * @param line     目标行号，1-based
      * @return 包含该行的 {@link CodeUnit}；不存在时返回 {@link Optional#empty()}
      */
-    Optional<CodeUnit> locateByPosition(String filePath, int line);
+    default Optional<CodeUnit> locateByPosition(String filePath, int line) {
+        return locateByPosition(filePath, line, null);
+    }
+
+    /**
+     * 在指定项目内按源码位置定位。
+     *
+     * @param filePath 项目相对路径
+     * @param line 1-based 行号
+     * @param projectId 项目范围；为空时兼容全局查询
+     * @return 匹配的代码单元
+     */
+    Optional<CodeUnit> locateByPosition(String filePath, int line, String projectId);
 }

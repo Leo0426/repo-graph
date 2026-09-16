@@ -42,7 +42,7 @@ class SymbolControllerTest {
 
     @Test
     void symbol_found_returns200() throws Exception {
-        when(vectorStore.symbolLookup("com.example.Foo")).thenReturn(Optional.of(sampleUnit()));
+        when(vectorStore.symbolLookup("com.example.Foo", null)).thenReturn(Optional.of(sampleUnit()));
 
         mvc.perform(get("/api/v1/symbol/com.example.Foo"))
                 .andExpect(status().isOk())
@@ -51,7 +51,7 @@ class SymbolControllerTest {
 
     @Test
     void symbol_notFound_returns404() throws Exception {
-        when(vectorStore.symbolLookup("com.example.Missing")).thenReturn(Optional.empty());
+        when(vectorStore.symbolLookup("com.example.Missing", null)).thenReturn(Optional.empty());
 
         mvc.perform(get("/api/v1/symbol/com.example.Missing"))
                 .andExpect(status().isNotFound());
@@ -59,7 +59,7 @@ class SymbolControllerTest {
 
     @Test
     void locate_found_returns200() throws Exception {
-        when(vectorStore.locateByPosition("Foo.java", 5)).thenReturn(Optional.of(sampleUnit()));
+        when(vectorStore.locateByPosition("Foo.java", 5, null)).thenReturn(Optional.of(sampleUnit()));
 
         mvc.perform(get("/api/v1/locate")
                         .param("file", "Foo.java")
@@ -70,11 +70,24 @@ class SymbolControllerTest {
 
     @Test
     void locate_notFound_returns404() throws Exception {
-        when(vectorStore.locateByPosition("Foo.java", 999)).thenReturn(Optional.empty());
+        when(vectorStore.locateByPosition("Foo.java", 999, null)).thenReturn(Optional.empty());
 
         mvc.perform(get("/api/v1/locate")
                         .param("file", "Foo.java")
                         .param("line", "999"))
                 .andExpect(status().isNotFound());
     }
+    @Test
+    void exactEndpoints_forwardProjectScope() throws Exception {
+        when(vectorStore.locateByPosition("Foo.java", 5, "project-b"))
+                .thenReturn(Optional.of(sampleUnit()));
+        when(vectorStore.symbolLookup("com.example.Foo", "project-b"))
+                .thenReturn(Optional.of(sampleUnit()));
+        mvc.perform(get("/api/v1/locate").param("file", "Foo.java").param("line", "5")
+                        .param("projectId", "project-b"))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/v1/symbol/com.example.Foo").param("projectId", "project-b"))
+                .andExpect(status().isOk());
+    }
+
 }

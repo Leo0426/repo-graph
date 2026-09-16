@@ -42,6 +42,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * @author leolu
  */
+@org.springframework.context.annotation.Import(TriageWorkflowTestConfiguration.class)
 @WebMvcTest(ReviewQueueController.class)
 class ReviewQueueControllerTest {
 
@@ -66,6 +67,12 @@ class ReviewQueueControllerTest {
     @MockitoBean
     ReportPdfRenderer reportPdfRenderer;
 
+    @MockitoBean
+    com.repograph.finding.TriageFeedbackStore feedbackStore;
+
+    @MockitoBean
+    com.repograph.finding.RuleSuppressionStore ruleSuppressionStore;
+
     @Autowired
     ObjectMapper objectMapper;
 
@@ -86,18 +93,28 @@ class ReviewQueueControllerTest {
         when(importer.supports("semgrep")).thenReturn(true);
         when(importer.importJson(any(java.io.InputStream.class), anyInt())).thenReturn(List.of(finding));
         when(findingContextService.build(eq(finding), any())).thenReturn(context);
-        when(triageReportService.build(context)).thenReturn(report);
+        var feedback = new com.repograph.core.finding.TriageFeedback(finding.fingerprint(), "p1",
+                com.repograph.core.finding.TriageFeedbackStatus.FALSE_POSITIVE, "reviewer", "validated",
+                "commit-a", "rules-a", "2026-09-16T00:00:00Z");
+        when(feedbackStore.findByFingerprint("p1", finding.fingerprint())).thenReturn(Optional.of(feedback));
+        when(triageReportService.build(eq(context), any())).thenReturn(report);
         when(buildProperties.getVersion()).thenReturn("0.5.0-test");
         when(reviewQueueStore.submit(any())).thenReturn(List.of(entry));
 
         mvc.perform(post("/api/v1/review-queue/snapshots")
                         .param("format", "semgrep")
                         .param("projectId", "p1")
+                        .param("codeVersion", "commit-a")
+                        .param("ruleVersion", "rules-a")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"results\":[]}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.entries[0].id").value("entry-1"))
                 .andExpect(jsonPath("$.entries[0].status").value("PENDING"));
+        org.mockito.Mockito.verify(triageReportService).build(eq(context),
+                org.mockito.ArgumentMatchers.argThat(review -> review.projectId().equals("p1")
+                        && review.codeVersion().equals("commit-a") && review.ruleVersion().equals("rules-a")
+                        && feedback.equals(review.historicalFeedback())));
     }
 
     @Test

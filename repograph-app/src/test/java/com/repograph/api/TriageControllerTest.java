@@ -41,6 +41,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * @author leolu
  */
+@org.springframework.context.annotation.Import(TriageWorkflowTestConfiguration.class)
 @WebMvcTest(TriageController.class)
 class TriageControllerTest {
 

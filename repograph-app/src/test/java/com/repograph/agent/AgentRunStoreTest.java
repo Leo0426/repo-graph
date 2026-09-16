@@ -33,6 +33,29 @@ class AgentRunStoreTest {
     }
 
     @Test
+    void restartRecoveryPreservesEvidenceAndHumanReview() {
+        String now = "2026-09-16T00:00:00Z";
+        store.create(run("queued", now));
+        store.create(run("running", now));
+        store.transition("running", AgentRunStatus.RUNNING, "", "", now);
+        store.saveStep(step("done", "running", 1, AgentStepStatus.COMPLETED));
+        store.saveStep(step("busy", "running", 2, AgentStepStatus.RUNNING));
+        store.create(run("review", now));
+        store.transition("review", AgentRunStatus.WAITING_FOR_REVIEW, "snapshot:s1", "", now);
+
+        AgentRunStore restarted = new AgentRunStore(tempDir.resolve("agent-runs.db").toString());
+        assertThat(restarted.recoverInterrupted(now)).isEqualTo(2);
+        assertThat(restarted.recoverInterrupted(now)).isZero();
+        assertThat(restarted.get("queued").orElseThrow().status()).isEqualTo(AgentRunStatus.FAILED);
+        AgentRun interrupted = restarted.get("running").orElseThrow();
+        assertThat(interrupted.status()).isEqualTo(AgentRunStatus.PARTIAL);
+        assertThat(interrupted.steps()).extracting(AgentStep::status)
+                .containsExactly(AgentStepStatus.COMPLETED, AgentStepStatus.FAILED);
+        assertThat(interrupted.steps().getFirst().evidenceReferences()).containsExactly("finding:fp-1");
+        assertThat(restarted.get("review").orElseThrow().status()).isEqualTo(AgentRunStatus.WAITING_FOR_REVIEW);
+    }
+
+    @Test
     void runTimelineRoundTripsAndListsNewestFirst() {
         store.create(run("run-1", "2026-08-09T01:00:00Z"));
         store.appendStep(step("step-1", "run-1", 1, AgentStepStatus.COMPLETED));

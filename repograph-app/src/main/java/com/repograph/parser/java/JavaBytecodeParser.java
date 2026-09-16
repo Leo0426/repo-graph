@@ -105,7 +105,7 @@ public class JavaBytecodeParser implements CodeParser {
         // 匿名类（Outer$1）跳过；它们的代码已包含在外部类的源码范围内
         if (isAnonymousClass(fqn)) {
             log.debug("Skipping anonymous class: {}", fqn);
-            return ParseResult.empty();
+            return ParseResult.of(List.of(), List.of(), "JavaBytecodeParser");
         }
 
         String relativePath = projectRoot != null

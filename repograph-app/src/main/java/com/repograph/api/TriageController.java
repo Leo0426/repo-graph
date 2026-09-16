@@ -1,18 +1,14 @@
 package com.repograph.api;
 
 import com.repograph.core.finding.ExternalFinding;
-import com.repograph.core.finding.FindingContext;
+import com.repograph.core.finding.TriageOptions;
+import com.repograph.core.finding.TriageWorkflow;
 import com.repograph.core.finding.RuleSuppression;
 import com.repograph.core.finding.RuleSuppressionAuditEvent;
 import com.repograph.core.finding.RuleSuppressionScope;
 import com.repograph.core.finding.TriageFeedback;
 import com.repograph.core.finding.TriageFeedbackStatus;
 import com.repograph.core.finding.TriageReport;
-import com.repograph.core.finding.TriageReviewContext;
-import com.repograph.core.retrieval.ContextPackOptions;
-import com.repograph.core.retrieval.GraphRagOptions;
-import com.repograph.finding.ExternalFindingImporter;
-import com.repograph.finding.FindingContextService;
 import com.repograph.finding.RuleSuppressionStore;
 import com.repograph.finding.TriageFeedbackStore;
 import com.repograph.finding.TriageReportService;
@@ -42,12 +38,8 @@ import java.util.UUID;
 @RequestMapping("/api/v1/triage")
 public class TriageController {
 
-    private static final int MAX_FINDINGS_PER_REQUEST = 50;
-    private static final int MIN_BUDGET_CHARS = 1000;
-    private static final int MAX_BUDGET_CHARS = 60000;
 
-    private final List<ExternalFindingImporter> importers;
-    private final FindingContextService findingContextService;
+    private final TriageWorkflow workflow;
     private final TriageReportService triageReportService;
     private final TriageFeedbackStore feedbackStore;
     private final RuleSuppressionStore ruleSuppressionStore;
@@ -56,21 +48,18 @@ public class TriageController {
     /**
      * 创建研判 REST 控制器。
      *
-     * @param importers             可用的外部报警导入器
-     * @param findingContextService 报警上下文构建服务
+     * @param workflow             共享研判流程
      * @param triageReportService   研判报告生成服务
      * @param feedbackStore         反馈存储
      * @param ruleSuppressionStore  规则抑制及审计存储
      * @param gitHubPrCommentClient GitHub PR 评论客户端
      */
-    public TriageController(List<ExternalFindingImporter> importers,
-                            FindingContextService findingContextService,
+    public TriageController(TriageWorkflow workflow,
                             TriageReportService triageReportService,
                             TriageFeedbackStore feedbackStore,
                             RuleSuppressionStore ruleSuppressionStore,
                             GitHubPrCommentClient gitHubPrCommentClient) {
-        this.importers = importers;
-        this.findingContextService = findingContextService;
+        this.workflow = workflow;
         this.triageReportService = triageReportService;
         this.feedbackStore = feedbackStore;
         this.ruleSuppressionStore = ruleSuppressionStore;
@@ -147,50 +136,11 @@ public class TriageController {
             int budgetChars,
             int maxFindings,
             HttpServletRequest request) throws IOException {
-        ExternalFindingImporter importer = importers.stream()
-                .filter(i -> i.supports(format))
-                .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "unsupported format '" + format + "', expected one of: semgrep, sarif"));
-
-        int cap = Math.max(1, Math.min(maxFindings, MAX_FINDINGS_PER_REQUEST));
-        List<ExternalFinding> findings = importer.importJson(request.getInputStream(), cap);
-
-        GraphRagOptions defaults = GraphRagOptions.defaults();
-        GraphRagOptions graphRag = new GraphRagOptions(
-                defaults.seedLimit(), defaults.graphDepth(), defaults.callGraph(),
-                defaults.impactExpansion(), defaults.rerank(), projectId,
-                defaults.lang(), defaults.noTest());
-        ContextPackOptions options = new ContextPackOptions(
-                "security",
-                Math.max(MIN_BUDGET_CHARS, Math.min(budgetChars, MAX_BUDGET_CHARS)),
-                graphRag);
-
+        TriageOptions options = new TriageOptions(projectId, codeVersion, ruleVersion, budgetChars);
+        List<ExternalFinding> findings = workflow.importFindings(format, request.getInputStream(), maxFindings);
         List<TriageReportResponse> responses = new ArrayList<>();
         for (ExternalFinding finding : findings) {
-            FindingContext context = findingContextService.build(finding, options);
-            TriageReport report;
-            if (projectId == null || projectId.isBlank()) {
-                report = triageReportService.build(context);
-            } else {
-                TriageFeedback historicalFeedback = feedbackStore
-                        .findByFingerprint(projectId, finding.fingerprint())
-                        .orElse(null);
-                RuleSuppression suppression = ruleSuppressionStore.findActive(
-                                projectId,
-                                finding.ruleId(),
-                                finding.filePath(),
-                                Instant.now())
-                        .orElse(null);
-                report = triageReportService.build(
-                        context,
-                        new TriageReviewContext(
-                                projectId,
-                                codeVersion,
-                                ruleVersion,
-                                historicalFeedback,
-                                suppression));
-            }
+            TriageReport report = workflow.review(workflow.buildContext(finding, options), options);
             responses.add(new TriageReportResponse(
                     finding.fingerprint(), report, triageReportService.toMarkdown(report)));
         }

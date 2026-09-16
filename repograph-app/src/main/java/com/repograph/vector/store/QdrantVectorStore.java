@@ -282,15 +282,18 @@ public class QdrantVectorStore implements VectorStore {
     }
 
     @Override
-    public Optional<CodeUnit> symbolLookup(String qualifiedName) {
+    public Optional<CodeUnit> symbolLookup(String qualifiedName, String projectId) {
         Filter filter = Filter.newBuilder()
                 .addMust(ConditionFactory.matchKeyword("qualified_name", qualifiedName))
                 .build();
+        if (projectId != null && !projectId.isBlank()) {
+            filter = filter.toBuilder().addMust(ConditionFactory.matchKeyword("project_id", projectId)).build();
+        }
         return scrollFirst(filter);
     }
 
     @Override
-    public Optional<CodeUnit> locateByPosition(String filePath, int line) {
+    public Optional<CodeUnit> locateByPosition(String filePath, int line, String projectId) {
         Filter filter = Filter.newBuilder()
                 .addMust(ConditionFactory.matchKeyword("file_path", filePath))
                 .addMust(ConditionFactory.range("start_line",
@@ -298,6 +301,9 @@ public class QdrantVectorStore implements VectorStore {
                 .addMust(ConditionFactory.range("end_line",
                         Range.newBuilder().setGte(line).build()))
                 .build();
+        if (projectId != null && !projectId.isBlank()) {
+            filter = filter.toBuilder().addMust(ConditionFactory.matchKeyword("project_id", projectId)).build();
+        }
         return scrollFirst(filter);
     }
 

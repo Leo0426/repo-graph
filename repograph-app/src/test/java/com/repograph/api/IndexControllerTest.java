@@ -43,6 +43,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @WebMvcTest(IndexController.class)
 class IndexControllerTest {
 
+    @MockBean(name = "indexExecutor")
+    java.util.concurrent.Executor indexExecutor;
+
     @Autowired
     MockMvc mvc;
 
@@ -63,6 +66,34 @@ class IndexControllerTest {
 
     @MockBean
     TriageDataCleanup triageDataCleanup;
+
+    private java.util.concurrent.ExecutorService worker;
+
+    @org.junit.jupiter.api.BeforeEach
+    void prepareExecutor() {
+        worker = java.util.concurrent.Executors.newSingleThreadExecutor();
+        org.mockito.Mockito.doAnswer(invocation -> {
+            worker.execute(invocation.getArgument(0));
+            return null;
+        }).when(indexExecutor).execute(any());
+        when(indexHistoryStore.tryStart(anyString())).thenReturn(true);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void stopExecutor() throws InterruptedException {
+        worker.shutdownNow();
+        worker.awaitTermination(2, java.util.concurrent.TimeUnit.SECONDS);
+    }
+
+    @Test
+    void executorRejectionIsVisibleAndPersistsFailure() throws Exception {
+        org.mockito.Mockito.doThrow(new java.util.concurrent.RejectedExecutionException())
+                .when(indexExecutor).execute(any());
+        mvc.perform(post("/api/v1/index/project").param("projectRoot", "/tmp/rejected"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.message").value("EXECUTOR_REJECTED"));
+        verify(indexHistoryStore).save("/tmp/rejected", "error: EXECUTOR_REJECTED", null);
+    }
 
     private static IndexResult sampleResult(int files, int units) {
         return new IndexResult(files, files, 0, 0, units, 0, 100L, List.of());

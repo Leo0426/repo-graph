@@ -44,6 +44,44 @@ public class AgentRunStore implements AgentRunRepository {
         initTables();
     }
 
+    /** {@inheritDoc} */
+    @Override
+    public int recoverInterrupted(String occurredAt) {
+        Instant.parse(occurredAt);
+        try (Connection connection = connection()) {
+            connection.setAutoCommit(false);
+            try {
+                try (PreparedStatement steps = connection.prepareStatement("""
+                        UPDATE agent_steps SET status = 'FAILED', error = 'PROCESS_INTERRUPTED', finished_at = ?
+                        WHERE status = 'RUNNING' AND run_id IN
+                            (SELECT id FROM agent_runs WHERE status IN ('QUEUED', 'RUNNING'))
+                        """)) {
+                    steps.setString(1, occurredAt);
+                    steps.executeUpdate();
+                }
+                int changed;
+                try (PreparedStatement runs = connection.prepareStatement("""
+                        UPDATE agent_runs SET status = CASE WHEN EXISTS
+                            (SELECT 1 FROM agent_steps WHERE run_id = agent_runs.id AND status = 'COMPLETED')
+                            THEN 'PARTIAL' ELSE 'FAILED' END,
+                            status_reason = 'PROCESS_INTERRUPTED', updated_at = ?, completed_at = ?
+                        WHERE status IN ('QUEUED', 'RUNNING')
+                        """)) {
+                    runs.setString(1, occurredAt);
+                    runs.setString(2, occurredAt);
+                    changed = runs.executeUpdate();
+                }
+                connection.commit();
+                return changed;
+            } catch (SQLException error) {
+                connection.rollback();
+                throw error;
+            }
+        } catch (SQLException error) {
+            throw new IllegalStateException("Failed to recover interrupted agent runs", error);
+        }
+    }
+
     @Override
     public void create(AgentRun run) {
         try (Connection connection = connection();

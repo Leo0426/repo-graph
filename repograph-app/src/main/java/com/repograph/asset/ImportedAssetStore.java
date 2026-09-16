@@ -41,6 +41,24 @@ public class ImportedAssetStore {
     }
 
     /**
+     * 单进程启动时终止遗留索引，保留受控源码供诊断和显式处理。
+     * @param occurredAt 恢复时间
+     * @return 处理数量
+     */
+    public int recoverInterrupted(String occurredAt) {
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + dbPath);
+             PreparedStatement statement = conn.prepareStatement("""
+                     UPDATE imported_assets SET status = 'FAILED', error = 'PROCESS_INTERRUPTED', updated_at = ?
+                     WHERE status = 'INDEXING'
+                     """)) {
+            statement.setString(1, occurredAt);
+            return statement.executeUpdate();
+        } catch (SQLException error) {
+            throw new IllegalStateException("Failed to recover interrupted asset indexes", error);
+        }
+    }
+
+    /**
      * 保存新资产。
      *
      * @param asset 资产快照

@@ -55,10 +55,10 @@ class EmbeddingUpsertRunnerTest {
         when(embeddingService.embed(anyList())).thenReturn(List.of(new float[]{0.1f, 0.2f}));
         List<Integer> progress = new ArrayList<>();
 
-        int embedded = runner.embedAndUpsert(List.of(unit), "project-1", Path.of("/tmp/project"),
+        var embedded = runner.embedAndUpsert(List.of(unit), "project-1", Path.of("/tmp/project"),
                 new ArrayList<>(), (root, done, total) -> progress.add(done));
 
-        assertThat(embedded).isEqualTo(1);
+        assertThat(embedded.unitCount()).isEqualTo(1);
         assertThat(progress).containsExactly(1);
         verify(vectorStore).upsert(argThat(units -> units.size() == 1), eq("project-1"));
         verify(embeddingService, org.mockito.Mockito.times(2)).embed(anyList());
@@ -79,10 +79,10 @@ class EmbeddingUpsertRunnerTest {
         });
         List<String> errors = new ArrayList<>();
 
-        int embedded = runner.embedAndUpsert(List.of(unit), "project-1", Path.of("/tmp/project"),
+        var embedded = runner.embedAndUpsert(List.of(unit), "project-1", Path.of("/tmp/project"),
                 errors, (root, done, total) -> { });
 
-        assertThat(embedded).isEqualTo(1);
+        assertThat(embedded.unitCount()).isEqualTo(1);
         assertThat(errors).isEmpty();
         assertThat(attempts).hasValue(3);
         verify(vectorStore).upsert(argThat(units -> units.size() == 1), eq("project-1"));

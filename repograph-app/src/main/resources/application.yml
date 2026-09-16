@@ -12,7 +12,10 @@ repograph:
     uri: bolt://localhost:7687
     user: neo4j
     password: neo4jneo4j
+  agent:
+    queue-capacity: 128
   index:
+    queue-capacity: 128
     db-path: ${user.home}/.repograph/index.db
     batch-size:
       embed: 8

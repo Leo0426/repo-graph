@@ -15,6 +15,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -65,9 +67,9 @@ class EmbeddingUpsertRunner {
         embedExecutor.shutdownNow();
     }
 
-    int embedAndUpsert(List<CodeUnit> units, String projectId, Path projectRoot,
+    EmbeddingResult embedAndUpsert(List<CodeUnit> units, String projectId, Path projectRoot,
                        List<String> errors, ProgressCallback progressCallback) {
-        if (units.isEmpty()) return 0;
+        if (units.isEmpty()) return new EmbeddingResult(0, Set.of());
 
         // 构建父类查找表，用于语义文本增强
         // 仅类级单元（CLASS/INTERFACE/ENUM/ANNOTATION/RECORD）作为父类
@@ -76,6 +78,7 @@ class EmbeddingUpsertRunner {
                 .collect(Collectors.toMap(CodeUnit::qualifiedName, u -> u, (a, b) -> a));
 
         AtomicInteger total = new AtomicInteger();
+        Set<String> failedFiles = ConcurrentHashMap.newKeySet();
         List<CompletableFuture<Void>> futures = new ArrayList<>();
 
         for (int i = 0; i < units.size(); i += embedBatchSize) {
@@ -112,6 +115,7 @@ class EmbeddingUpsertRunner {
                         }
                     })
                     .exceptionally(e -> {
+                        batch.forEach(unit -> failedFiles.add(unit.filePath()));
                         Throwable cause = e.getCause() != null ? e.getCause() : e;
                         log.error("Embed/upsert failed for batch at offset {}: {}", offset, cause.getMessage());
                         synchronized (errors) {
@@ -125,7 +129,7 @@ class EmbeddingUpsertRunner {
 
         CompletableFuture.allOf(futures.toArray(new CompletableFuture<?>[0])).join();
         log.debug("Parallel embed+upsert complete: {} units", total.get());
-        return total.get();
+        return new EmbeddingResult(total.get(), Set.copyOf(failedFiles));
     }
 
     private List<float[]> embedWithRetry(List<String> texts) {
@@ -253,6 +257,8 @@ class EmbeddingUpsertRunner {
                 || kind == CodeUnitKind.UNION
                 || kind == CodeUnitKind.TYPEDEF;
     }
+
+    record EmbeddingResult(int unitCount, Set<String> failedFiles) {}
 
     @FunctionalInterface
     interface ProgressCallback {

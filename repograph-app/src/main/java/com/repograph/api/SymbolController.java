@@ -34,11 +34,13 @@ public class SymbolController {
      * 按全限定名精确查找代码单元。
      *
      * @param qualifiedName URL 编码的全限定名
+     * @param projectId 可选项目范围
      * @return 匹配的 {@link CodeUnit}，不存在时返回 404
      */
     @GetMapping("/symbol/{qualifiedName}")
-    public ResponseEntity<CodeUnit> symbol(@PathVariable String qualifiedName) {
-        return vectorStore.symbolLookup(qualifiedName)
+    public ResponseEntity<CodeUnit> symbol(@PathVariable String qualifiedName,
+                                           @RequestParam(required = false) String projectId) {
+        return vectorStore.symbolLookup(qualifiedName, projectId)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -48,13 +50,15 @@ public class SymbolController {
      *
      * @param file 文件相对路径，不为 {@code null}
      * @param line 目标行号，1-based
+     * @param projectId 可选项目范围
      * @return 包含该行的 {@link CodeUnit}，不存在时返回 404
      */
     @GetMapping("/locate")
     public ResponseEntity<CodeUnit> locate(
             @RequestParam String file,
-            @RequestParam int line) {
-        return vectorStore.locateByPosition(file, line)
+            @RequestParam int line,
+            @RequestParam(required = false) String projectId) {
+        return vectorStore.locateByPosition(file, line, projectId)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }

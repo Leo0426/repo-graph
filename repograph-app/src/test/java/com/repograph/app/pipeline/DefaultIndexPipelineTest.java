@@ -97,6 +97,74 @@ class DefaultIndexPipelineTest {
                 List.of(), null, Map.of());
     }
 
+    @Test
+    void failedVectorWrite_isRetriedWithoutEditingSource() throws Exception {
+        Path file = projectRoot.resolve("Foo.java");
+        Files.writeString(file, "class Foo {}");
+        IncrementalIndexCache cache = new IncrementalIndexCache(projectRoot.resolve("cache.db").toString());
+        DefaultIndexPipeline realCachePipeline = new DefaultIndexPipeline(
+                parserDispatcher, frameworkDetector, codeGraph, cache, indexStore,
+                new SourceFileScanner(), embeddingUpsertRunner, fileWatcherServiceProvider, eventPublisher);
+        when(parserDispatcher.dispatch(any(), any()))
+                .thenReturn(ParseResult.of(List.of(unit("Foo")), List.of(), "fixture"));
+        when(embeddingService.embed(anyList())).thenReturn(List.of(new float[]{0.1f}));
+        org.mockito.Mockito.doThrow(new IllegalStateException("vector unavailable"))
+                .doNothing().when(vectorStore).upsert(anyList(), any());
+
+        assertThat(realCachePipeline.index(projectRoot, null).errors()).isNotEmpty();
+        IndexResult retry = realCachePipeline.index(projectRoot, null);
+        assertThat(retry.parsedFiles()).isEqualTo(1);
+        assertThat(retry.errors()).isEmpty();
+        assertThat(realCachePipeline.index(projectRoot, null).skippedFiles()).isEqualTo(1);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"parse", "graph"})
+    void unsuccessfulStageDoesNotCommitFingerprint(String stage) throws Exception {
+        Path file = projectRoot.resolve("Foo.java");
+        Files.writeString(file, "class Foo {}");
+        IncrementalIndexCache cache = new IncrementalIndexCache(projectRoot.resolve("stages.db").toString());
+        DefaultIndexPipeline subject = new DefaultIndexPipeline(parserDispatcher, frameworkDetector,
+                codeGraph, cache, indexStore, new SourceFileScanner(), embeddingUpsertRunner,
+                fileWatcherServiceProvider, eventPublisher);
+        ParseResult parsed = ParseResult.of(List.of(unit("Foo")), List.of(), "fixture");
+        when(parserDispatcher.dispatch(any(), any())).thenReturn(parsed);
+        when(embeddingService.embed(anyList())).thenReturn(List.of(new float[]{0.1f}));
+        if (stage.equals("parse")) {
+            when(parserDispatcher.dispatch(any(), any())).thenThrow(new IllegalStateException("parse failed"))
+                    .thenReturn(parsed);
+        } else {
+            org.mockito.Mockito.doThrow(new IllegalStateException("graph failed")).doNothing()
+                    .when(codeGraph).addUnits(anyList(), any());
+        }
+        assertThat(subject.indexFile(file, projectRoot, null).errors()).isNotEmpty();
+        assertThat(subject.index(projectRoot, null).parsedFiles()).isEqualTo(1);
+        assertThat(subject.index(projectRoot, null).skippedFiles()).isEqualTo(1);
+    }
+
+    @Test
+    void partialRunCachesSuccessfulFilesOnly() throws Exception {
+        Path good = projectRoot.resolve("Foo.java");
+        Path bad = projectRoot.resolve("Broken.java");
+        Files.writeString(good, "class Foo {}");
+        Files.writeString(bad, "class Broken {}");
+        IncrementalIndexCache cache = new IncrementalIndexCache(projectRoot.resolve("partial.db").toString());
+        DefaultIndexPipeline subject = new DefaultIndexPipeline(parserDispatcher, frameworkDetector,
+                codeGraph, cache, indexStore, new SourceFileScanner(), embeddingUpsertRunner,
+                fileWatcherServiceProvider, eventPublisher);
+        when(parserDispatcher.dispatch(org.mockito.ArgumentMatchers.eq(good), any()))
+                .thenReturn(ParseResult.of(List.of(unit("Foo")), List.of(), "fixture"));
+        when(parserDispatcher.dispatch(org.mockito.ArgumentMatchers.eq(bad), any()))
+                .thenThrow(new IllegalStateException("parse failed"))
+                .thenReturn(ParseResult.of(List.of(), List.of(), "fixture"));
+        when(embeddingService.embed(anyList())).thenReturn(List.of(new float[]{0.1f}));
+        assertThat(subject.index(projectRoot, null).errors()).hasSize(1);
+        IndexResult retry = subject.index(projectRoot, null);
+        assertThat(retry.parsedFiles()).isEqualTo(1);
+        assertThat(retry.skippedFiles()).isEqualTo(1);
+        assertThat(retry.errors()).isEmpty();
+    }
+
     // ── index() ───────────────────────────────────────────────────────────────
 
     @Test
@@ -226,7 +294,7 @@ class DefaultIndexPipelineTest {
         Path javaFile = Files.createTempFile(projectRoot, "Cached", ".java");
         Files.writeString(javaFile, "public class Cached {}");
 
-        when(parserDispatcher.dispatch(any(), any())).thenReturn(ParseResult.empty());
+        when(parserDispatcher.dispatch(any(), any())).thenReturn(ParseResult.of(List.of(), List.of(), "fixture"));
         when(frameworkDetector.detect(any())).thenReturn(Map.of());
 
         pipeline.indexFile(javaFile, projectRoot, null);

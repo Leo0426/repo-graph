@@ -75,6 +75,34 @@ class ParserDispatcherTest {
         return Files.createTempFile(tempDir, "data", ".csv");
     }
 
+    @Test
+    void successfulEmptyParseIsNotReportedAsParserFailure() throws IOException {
+        ParserDispatcher dispatcher = new ParserDispatcher(List.of(
+                stubParser("java", ParseResult.of(List.of(), List.of(), "EmptyParser"))));
+        ParseResult result = dispatcher.dispatch(javaFile(), null);
+        assertThat(result.units()).isEmpty();
+        assertThat(result.parserUsed()).isEqualTo("EmptyParser");
+    }
+
+    @Test
+    void emptySourceThroughRealHeuristicRetainsSuccessProvenance() throws IOException {
+        ParserDispatcher dispatcher = new ParserDispatcher(List.of(new HeuristicCodeParser()));
+        ParseResult result = dispatcher.dispatch(javaFile(), null);
+        assertThat(result.units()).isEmpty();
+        assertThat(result.parserUsed()).isEqualTo("HeuristicCodeParser");
+    }
+
+    @Test
+    void anonymousBytecodeSkipIsSuccessfulEmptyResult() throws IOException {
+        Path file = tempDir.resolve("Outer$1.class");
+        Files.write(file, new byte[0]);
+        ParserDispatcher dispatcher = new ParserDispatcher(List.of(
+                new com.repograph.parser.java.JavaBytecodeParser()));
+        ParseResult result = dispatcher.dispatch(file, null);
+        assertThat(result.units()).isEmpty();
+        assertThat(result.parserUsed()).isEqualTo("JavaBytecodeParser");
+    }
+
     // ── Tests ─────────────────────────────────────────────────────────────────
 
     @Test

@@ -224,6 +224,22 @@ class QdrantVectorStoreTest {
         assertThat(result.get().qualifiedName()).isEqualTo("com.example.Foo#bar");
     }
 
+    @Test
+    void exactLookups_includeProjectFilter() {
+        when(client.scrollAsync(any())).thenReturn(Futures.immediateFuture(ScrollResponse.getDefaultInstance()));
+
+        store.locateByPosition("src/Foo.java", 10, "project-b");
+        store.symbolLookup("com.example.Foo#bar", "project-b");
+
+        var requests = org.mockito.ArgumentCaptor.forClass(io.qdrant.client.grpc.Points.ScrollPoints.class);
+        verify(client, org.mockito.Mockito.times(2)).scrollAsync(requests.capture());
+        assertThat(requests.getAllValues()).allSatisfy(request ->
+                assertThat(request.getFilter().getMustList()).anySatisfy(condition -> {
+                    assertThat(condition.getField().getKey()).isEqualTo("project_id");
+                    assertThat(condition.getField().getMatch().getKeyword()).isEqualTo("project-b");
+                }));
+    }
+
     // ── removeByFile ───────────────────────────────────────────────────────────
 
     @Test

@@ -11,6 +11,13 @@ import java.util.Optional;
 public interface AgentRunRepository {
 
     /**
+     * 单进程应用启动时终止上一次进程遗留的自动执行，不重放外部副作用。
+     * @param occurredAt 恢复时间
+     * @return 已恢复的运行数量
+     */
+    int recoverInterrupted(String occurredAt);
+
+    /**
      * 创建运行。
      *
      * @param run 初始运行

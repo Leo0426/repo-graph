@@ -29,6 +29,20 @@ class ScanTaskSchedulerTest {
     }
 
     @Test
+    void executorRejectionReleasesQuotaAndReportsTheRejectedTask() {
+        java.util.concurrent.atomic.AtomicInteger attempts = new java.util.concurrent.atomic.AtomicInteger();
+        ScanTaskScheduler scheduler = new ScanTaskScheduler(task -> {
+            if (attempts.getAndIncrement() == 0) throw new java.util.concurrent.RejectedExecutionException();
+            task.run();
+        }, 1, 1, 1);
+        List<String> events = new java.util.ArrayList<>();
+        scheduler.submit("first", "p", List.of("s"), () -> events.add("unexpected"),
+                error -> events.add("rejected"));
+        scheduler.submit("second", "p", List.of("s"), () -> events.add("executed"));
+        assertThat(events).containsExactly("rejected", "executed");
+    }
+
+    @Test
     void globalLimitCapsConcurrentTasksAndQueuesTheRest() throws Exception {
         // 全局上限 2，项目/扫描器上限放大以隔离全局维度。
         ScanTaskScheduler scheduler = new ScanTaskScheduler(pool, 2, 100, 100);

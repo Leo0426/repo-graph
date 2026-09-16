@@ -1,7 +1,9 @@
 # RepoGraph — Project Context
 
 > 本文件描述项目架构、领域模型和当前运行状态，供 LLM 理解代码背景使用。
-> 行为规范见 AGENTS.md。
+> 行为入口见 [AGENTS.md](AGENTS.md)，工程职责文档由该入口按任务路由。
+> 本文件仍为领域模型、metadata key 和架构决策的权威来源；[Architecture](docs/ARCHITECTURE.md)
+> 提供改动放置地图，[Glossary](docs/GLOSSARY.md) 提供已有术语的简短索引。
 
 ## 项目定位
 
@@ -104,7 +106,11 @@ repograph-mcp/   独立 MCP stdio 服务（JSON-RPC，供 AI 工具调用，通�
   通过 HTTP 请求流和 Jackson token 流式解析，单请求最多保留控制器允许的报警数，避免大文件构造完整 JSON 树。
 
 **报警研判管道**（P0 报警解释器，`com.repograph.finding`）：
-- `FindingContextService`：优先按 filePath+line 从向量索引定位 CodeUnit，缺失时按 symbol+projectId 从代码图
+
+- `TriageWorkflow` / `TriageOptions` 位于 core；`DefaultTriageWorkflow` 集中导入限额、项目范围、
+  字符预算、版本化反馈和有效规则抑制。普通报告、审核快照和 AgentRun 都通过同一流程生成启发式结果；
+  导入、上下文和研判分阶段暴露，Agent 可保留原步骤时间线，模型辅助与冻结快照仍由各自领域负责。
+- `FindingContextService`：优先按 projectId+filePath+line 从向量索引定位 CodeUnit，缺失时按 symbol+projectId 从代码图
   精确回退（source=FINDING）→ callers/callees/impact 扩展 →
   ruleId/cwe/message 关键词补充（source=KEYWORD），复用 `ContextPackService.assemble` 的预算与 citation 规则；
   定位失败写入 `omittedReasons` 不抛异常。
@@ -367,11 +373,30 @@ Java 方法调用优先使用接收者类型、方法名和可静态推断的实
    DOCUMENT CodeUnit：semantic_vec = embed(章节文本)，code_vec = embed(章节文本)（同源）
    单次 Embedding 瞬时失败最多重试 3 次并短退避；耗尽后记录批次错误，整体索引标记为 partial
 7. 批量写入 Qdrant（批大小 256）
-8. 更新 SQLite MD5 缓存
+8. 只为本轮成功完成的文件更新 SQLite MD5 缓存，失败文件失效旧指纹以便下次重试
 ```
 
 > 索引为**异步**：`POST /api/v1/index/project` 返回 202，用 `GET /api/v1/index/project/status` 轮询；
 > 无错误为 `done`，存在解析、Embedding 或写入错误但仍产出部分索引时为 `partial`，异常终止为 `error`。
+
+### 索引完成与后台任务恢复
+
+- Embedding/向量写入结果带失败文件集合；跨文件批次失败时保守重试该批次涉及的文件。
+  图批量写入异常不能可靠归属单文件时，本轮文件都保持可重试。成功文件单独更新指纹。
+- 解析器没有成功结果时记录错误且不提交指纹；合法空文件及主动忽略的匿名字节码保留 parserUsed，
+  不与解析失败混淆。图批量写入异常进入 IndexResult.errors，使 HTTP 终态准确显示 partial。
+- `VectorStore` 的精确符号查询和位置查询支持 projectId，报警研判始终转发其项目范围；HTTP
+  `/symbol/{qualifiedName}`、`/locate` 和 MCP `lookup_symbol`、`locate_at` 接受可选 projectId。
+  缺省保留旧全局查询行为，多项目调用方应显式传入范围。
+- HTTP 项目索引通过 SQLite 原子接收 running 记录；索引与 Agent 的执行器由 Spring 管理，
+  等待队列分别由 `repograph.index.queue-capacity` / `repograph.agent.queue-capacity` 控制。
+  索引提交被拒绝返回 503 并记录 EXECUTOR_REJECTED；Agent/ScanTask 留下可查询的失败状态。
+  扫描调度器在拒绝时释放配额，并通知实际被拒绝的任务，即使准入发生在稍后的线程中。
+- `InterruptedTaskRecovery` 在启动时处理上一个进程遗留的 Agent QUEUED/RUNNING、扫描任务、
+  HTTP running 索引和 INDEXING 资产。已有完成步骤、报告引用及等待人工审核记录保留；中断步骤
+  标记 FAILED，Agent 有完成步骤时为 PARTIAL，否则 FAILED；其他遗留自动任务标记失败/中断。
+- 运行数据库由单个 app 进程拥有。恢复不会自动重放原始报警、扫描或模型调用；扫描可用原重试入口，
+  索引和 Agent 由用户显式重启相应操作，失败资产保留受控源码供诊断。此机制不是多实例租约或断点续跑。
 
 ## 当前服务配置（实际运行值）
 
@@ -542,3 +567,5 @@ Neo4j Docker 启动示例：`-p 7474:7474 -p 7687:7687`（7474 浏览器 UI，76
 | 路由鉴权证据 | 注解约束候选 + 配置候选 + 有界调用图资源访问 | 不把静态注解解释成已验证运行时策略；方法级覆盖类级候选但保留来源；无本地证据与确认无鉴权严格分离 |
 | 研判决策证据 | 外部 finding 只读 + 独立 decisionEvidence | 历史反馈必须匹配项目/指纹/代码版本/规则版本；规则抑制必须有范围、有效期和审计；路径防护必须被外部 trace 证明位于所有 source 与 sink 之间 |
 | 漏洞变体召回 | CONFIRMED 种子 + Sink/动态参数/token 相似度 | 相似性只产生 SUSPECTED 候选，不直接创建或升级为 CONFIRMED；按项目、规则和候选单元指纹去重 |
+| 共享研判流程 | core 的 TriageWorkflow 契约 + finding 的 DefaultTriageWorkflow | 三个入口共享导入、预算、反馈与抑制策略；阶段化接口保留 Agent 时间线，避免 HTTP 和审核快照各自复制决策逻辑。 |
+| 后台任务启动恢复 | 单 app 进程内标记遗留任务中断，保留证据，显式重试 | 自动续跑需要持久化原始输入和每个副作用的幂等边界；当前 Agent 输入不入运行表，盲目重放可能重复创建审核快照或扫描。因此先让遗留状态可解释、可重试，未来多实例部署需另行设计租约与执行日志。 |

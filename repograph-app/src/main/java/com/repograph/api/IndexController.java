@@ -24,10 +24,8 @@ import org.springframework.web.bind.annotation.RestController;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
 
 /**
  * 索引管道 REST API，支持异步触发项目索引和增量文件索引。
@@ -44,12 +42,7 @@ public class IndexController {
 
     private static final Logger log = LoggerFactory.getLogger(IndexController.class);
 
-    /** 后台 embedding 专用单线程池，避免占用 Tomcat 请求线程。 */
-    private static final Executor INDEX_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "repograph-index");
-        t.setDaemon(true);
-        return t;
-    });
+    private final Executor indexExecutor;
 
     /** 各 projectRoot 的最新索引状态：running / done / error。 */
     private final Map<String, String> statusMap = new ConcurrentHashMap<>();
@@ -81,11 +74,15 @@ public class IndexController {
      * @param vulnStore         漏洞发现持久化（项目删除时一并清理），不为 {@code null}
      * @param assetImportService 托管归档资产清理边界
      * @param triageDataCleanup 研判反馈和规则策略清理边界
+     * @param indexExecutor 受 Spring 管理的有界后台执行器
      */
     public IndexController(IndexPipeline indexPipeline, IndexStore indexStore,
                            IndexHistoryStore indexHistoryStore, VulnStore vulnStore,
                            AssetImportService assetImportService,
-                           TriageDataCleanup triageDataCleanup) {
+                           TriageDataCleanup triageDataCleanup,
+                           @org.springframework.beans.factory.annotation.Qualifier("indexExecutor")
+                           Executor indexExecutor) {
+        this.indexExecutor = indexExecutor;
         this.indexPipeline = indexPipeline;
         this.indexStore = indexStore;
         this.indexHistoryStore = indexHistoryStore;
@@ -113,40 +110,45 @@ public class IndexController {
             @RequestParam(required = false, defaultValue = "auto") String strategy,
             @RequestParam(required = false, defaultValue = "false") boolean noIncremental) {
 
-        if ("running".equals(statusMap.get(projectRoot))) {
-            return ResponseEntity.status(409)
-                    .body(Map.of("status", "running", "message", "Indexing already in progress for this project"));
-        }
-
         List<String> languages = lang != null ? List.of(lang.split(",")) : List.of();
         ParseStrategy parseStrategy = ParseStrategy.valueOf(strategy.toUpperCase());
         IndexOptions options = new IndexOptions(languages, parseStrategy, !noIncremental, null);
 
+        if (!indexHistoryStore.tryStart(projectRoot)) {
+            return ResponseEntity.status(409)
+                    .body(Map.of("status", "running", "message", "Indexing already in progress for this project"));
+        }
         statusMap.put(projectRoot, "running");
         resultMap.remove(projectRoot);
 
-        CompletableFuture.runAsync(() -> {
-            try {
-                IndexResult result = indexPipeline.index(Path.of(projectRoot), options);
-                resultMap.put(projectRoot, result);
-                String completedStatus = result.errors().isEmpty() ? "done" : "partial";
-                statusMap.put(projectRoot, completedStatus);
-                indexHistoryStore.save(projectRoot, completedStatus, result);
-                if (result.errors().isEmpty()) {
-                    log.info("Async indexing completed for '{}': {} units, {} edges, {}ms",
-                            projectRoot, result.totalUnits(), result.totalEdges(), result.durationMs());
-                } else {
-                    log.warn("Async indexing partially completed for '{}': {} units, {} errors, {}ms",
-                            projectRoot, result.totalUnits(), result.errors().size(), result.durationMs());
+        try {
+            indexExecutor.execute(() -> {
+                try {
+                    IndexResult result = indexPipeline.index(Path.of(projectRoot), options);
+                    resultMap.put(projectRoot, result);
+                    String completedStatus = result.errors().isEmpty() ? "done" : "partial";
+                    statusMap.put(projectRoot, completedStatus);
+                    indexHistoryStore.save(projectRoot, completedStatus, result);
+                    if (result.errors().isEmpty()) {
+                        log.info("Async indexing completed for '{}': {} units, {} edges, {}ms",
+                                projectRoot, result.totalUnits(), result.totalEdges(), result.durationMs());
+                    } else {
+                        log.warn("Async indexing partially completed for '{}': {} units, {} errors, {}ms",
+                                projectRoot, result.totalUnits(), result.errors().size(), result.durationMs());
+                    }
+                } catch (Exception e) {
+                    String errorStatus = "error: " + e.getMessage();
+                    statusMap.put(projectRoot, errorStatus);
+                    progressMap.remove(projectRoot);
+                    indexHistoryStore.save(projectRoot, errorStatus, null);
+                    log.error("Async indexing failed for '{}'", projectRoot, e);
                 }
-            } catch (Exception e) {
-                String errorStatus = "error: " + e.getMessage();
-                statusMap.put(projectRoot, errorStatus);
-                progressMap.remove(projectRoot);
-                indexHistoryStore.save(projectRoot, errorStatus, null);
-                log.error("Async indexing failed for '{}'", projectRoot, e);
-            }
-        }, INDEX_EXECUTOR);
+            });
+        } catch (java.util.concurrent.RejectedExecutionException error) {
+            statusMap.put(projectRoot, "error: EXECUTOR_REJECTED");
+            indexHistoryStore.save(projectRoot, "error: EXECUTOR_REJECTED", null);
+            return ResponseEntity.status(503).body(Map.of("status", "error", "message", "EXECUTOR_REJECTED"));
+        }
 
         return ResponseEntity.accepted()
                 .body(Map.of("status", "running",

@@ -89,15 +89,33 @@ public class AppConfiguration {
     /**
      * Agent Playbook 后台执行专用单线程执行器，保证单实例内运行顺序可审计。
      *
+     * @param capacity 等待队列容量
      * @return Agent 运行执行器
      */
     @Bean(name = "agentRunExecutor", destroyMethod = "shutdown")
-    public ExecutorService agentRunExecutor() {
-        return Executors.newSingleThreadExecutor(runnable -> {
-            Thread thread = new Thread(runnable, "repograph-agent-run");
-            thread.setDaemon(true);
-            return thread;
-        });
+    public ExecutorService agentRunExecutor(
+            @org.springframework.beans.factory.annotation.Value("${repograph.agent.queue-capacity:128}") int capacity) {
+        return taskExecutor("repograph-agent-run", capacity);
+    }
+
+    /**
+     * 创建有界项目索引执行器。
+     * @param capacity 等待队列容量
+     * @return 由 Spring 关闭的执行器
+     */
+    @Bean(name = "indexExecutor", destroyMethod = "shutdown")
+    public ExecutorService indexExecutor(
+            @org.springframework.beans.factory.annotation.Value("${repograph.index.queue-capacity:128}") int capacity) {
+        return taskExecutor("repograph-index", capacity);
+    }
+
+    private static ExecutorService taskExecutor(String name, int capacity) {
+        return new java.util.concurrent.ThreadPoolExecutor(1, 1, 0, java.util.concurrent.TimeUnit.MILLISECONDS,
+                new java.util.concurrent.ArrayBlockingQueue<>(Math.max(1, capacity)), runnable -> {
+                    Thread thread = new Thread(runnable, name);
+                    thread.setDaemon(true);
+                    return thread;
+                }, new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
     }
 
     /**

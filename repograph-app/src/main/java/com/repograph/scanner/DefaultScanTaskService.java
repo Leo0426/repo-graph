@@ -86,7 +86,8 @@ public class DefaultScanTaskService implements ScanTaskService {
                 now);
         store.create(task);
         String taskId = task.id();
-        scheduler.submit(taskId, task.projectId(), task.scanners(), () -> runTask(taskId));
+        scheduler.submit(taskId, task.projectId(), task.scanners(), () -> runTask(taskId),
+                error -> store.rejectQueued(taskId, Instant.now().toString()));
         return task;
     }
 
@@ -180,7 +181,8 @@ public class DefaultScanTaskService implements ScanTaskService {
         }
         List<ScannerRunResult> kept = List.copyOf(keptRuns);
         scheduler.submit(taskId, task.projectId(), retryScanners,
-                () -> runRetry(taskId, retryScanners, kept));
+                () -> runRetry(taskId, retryScanners, kept),
+                error -> store.rejectQueued(taskId, Instant.now().toString()));
         return store.find(taskId).orElse(task);
     }
 

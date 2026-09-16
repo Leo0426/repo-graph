@@ -102,7 +102,8 @@ public class RepographMcpTools {
             "signature, file location, annotations, metadata, parent type.",
             schema(
                 Map.of(
-                    "qualified_name", strProp("Fully qualified name, e.g. 'com.example.Service#findById(Long)'")
+                    "qualified_name", strProp("Fully qualified name, e.g. 'com.example.Service#findById(Long)'"),
+                    "projectId", strProp("Optional project ID to scope the exact lookup")
                 ),
                 List.of("qualified_name")
             )
@@ -154,7 +155,8 @@ public class RepographMcpTools {
             schema(
                 Map.of(
                     "file", strProp("File path relative to the project root, e.g. 'src/main/java/com/example/Foo.java'"),
-                    "line", intProp("1-based line number", 1, 100000, 1)
+                    "line", intProp("1-based line number", 1, 100000, 1),
+                    "projectId", strProp("Optional project ID to scope the exact lookup")
                 ),
                 List.of("file", "line")
             )
@@ -548,7 +550,8 @@ public class RepographMcpTools {
         String file = require(args, "file");
         int line = args.path("line").asInt(1);
         Optional<JsonNode> result = client.get(
-                "/api/v1/locate?file=" + enc(file) + "&line=" + line);
+                "/api/v1/locate?file=" + enc(file) + "&line=" + line
+                        + opt(args, "projectId").map(v -> "&projectId=" + enc(v)).orElse(""));
         if (result.isEmpty()) {
             return "No symbol found at `" + file + "` line " + line + ".\n\n" +
                    "The file may not have been indexed, or the line is inside a comment or blank area.";
@@ -776,7 +779,9 @@ public class RepographMcpTools {
 
     private String runLookupSymbol(JsonNode args) {
         String qn = require(args, "qualified_name");
-        Optional<JsonNode> result = client.get("/api/v1/symbol/" + enc(qn));
+        String path = "/api/v1/symbol/" + enc(qn);
+        path += opt(args, "projectId").map(v -> "?projectId=" + enc(v)).orElse("");
+        Optional<JsonNode> result = client.get(path);
         if (result.isEmpty()) {
             return "Symbol not found: `" + qn + "`\n\n" +
                    "The symbol may not have been indexed yet. Make sure repograph-app is running and the " +

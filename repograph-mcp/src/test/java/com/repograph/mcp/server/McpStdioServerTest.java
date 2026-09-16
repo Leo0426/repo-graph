@@ -34,6 +34,21 @@ class McpStdioServerTest {
         server = new McpStdioServer(mapper, tools, client);
     }
 
+    @Test
+    void exactLookupToolsForwardProjectScope() throws Exception {
+        RepographApiClient client = mock(RepographApiClient.class);
+        RepographMcpTools subject = new RepographMcpTools(client);
+        when(client.get(anyString())).thenReturn(Optional.empty());
+        subject.call(mapper.readTree("""
+                {"name":"lookup_symbol","arguments":{"qualified_name":"Foo","projectId":"p2"}}
+                """));
+        subject.call(mapper.readTree("""
+                {"name":"locate_at","arguments":{"file":"Foo.java","line":5,"projectId":"p2"}}
+                """));
+        verify(client).get("/api/v1/symbol/Foo?projectId=p2");
+        verify(client).get("/api/v1/locate?file=Foo.java&line=5&projectId=p2");
+    }
+
     // ── initialize ────────────────────────────────────────────────────────────
 
     @Test

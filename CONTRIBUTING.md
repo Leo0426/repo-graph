@@ -24,7 +24,7 @@
 **Unit tests** — no external services required (Neo4j uses embedded harness):
 
 ```bash
-./gradlew test --tests "!*IT"
+./gradlew test --tests '*Test'
 ```
 
 **Integration tests** — require Qdrant, Neo4j, and Ollama:
@@ -77,6 +77,6 @@ repograph-app/src/main/java/com/repograph/
 ## Submitting a PR
 
 1. Fork the repo and create a branch from `main`
-2. Ensure `./gradlew test --tests "!*IT"` passes
+2. Ensure `./gradlew test --tests '*Test'` passes; inspect skipped tests as described in [Validation](docs/VALIDATION.md).
 3. Keep commits focused — one logical change per commit
 4. Open a PR with a clear description of what changes and why

@@ -105,6 +105,7 @@ public class DefaultIndexPipeline implements IndexPipeline {
         IndexOptions opts = options != null ? options : IndexOptions.defaults();
         long startMs = System.currentTimeMillis();
         List<String> errors = Collections.synchronizedList(new ArrayList<>());
+        Set<String> failedFiles = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
         String projectId = ProjectIdUtil.generateProjectId(projectRoot);
         log.info("Starting index for project '{}' at {}", projectId, projectRoot);
@@ -166,12 +167,17 @@ public class DefaultIndexPipeline implements IndexPipeline {
                 files.parallelStream().forEach(file -> {
                     try {
                         ParseResult result = parserDispatcher.dispatch(file, parseOptions);
+                        if (result.parserUsed() == null) {
+                            failedFiles.add(PathUtil.toRelativePath(projectRoot, file));
+                            errors.add("No parser succeeded [" + file + "]");
+                        }
                         parseResults.add(result);
                         int done = parsedCount.incrementAndGet();
                         publishProgress(projectRoot.toString(), "parsing", done, files.size());
                     } catch (Exception e) {
                         log.warn("Parse error for {}: {}", file, e.getMessage());
                         errors.add("Parse error [" + file + "]: " + e.getMessage());
+                        failedFiles.add(PathUtil.toRelativePath(projectRoot, file));
                     }
                 })
         ).join();
@@ -194,17 +200,24 @@ public class DefaultIndexPipeline implements IndexPipeline {
         List<CodeUnit> enhancedUnits = enhanceMetadata(allUnits);
 
         // 第四步：构建图
-        int graphEdges = buildGraph(enhancedUnits, allEdges, projectId);
+        int graphErrorsBefore = errors.size();
+        int graphEdges = buildGraph(enhancedUnits, allEdges, projectId, errors);
+        if (errors.size() > graphErrorsBefore) {
+            files.forEach(file -> failedFiles.add(PathUtil.toRelativePath(projectRoot, file)));
+        }
         log.info("Graph built: {} units, {} edges", enhancedUnits.size(), graphEdges);
 
         // 第五至六步：批量向量化并写入
-        int embeddedCount = embeddingUpsertRunner.embedAndUpsert(enhancedUnits, projectId, projectRoot, errors,
+        var embedding = embeddingUpsertRunner.embedAndUpsert(enhancedUnits, projectId, projectRoot, errors,
                 (root, done, total) -> publishProgress(root, "embedding", done, total));
 
-        // 第八步：更新增量缓存
-        if (opts.incremental()) {
-            incrementalCache.updateEntries(files, projectId, projectRoot);
-        }
+        failedFiles.addAll(embedding.failedFiles());
+        // Only fully indexed files may be skipped on the next incremental run.
+        List<Path> completedFiles = files.stream()
+                .filter(file -> !failedFiles.contains(PathUtil.toRelativePath(projectRoot, file))).toList();
+        failedFiles.forEach(file -> incrementalCache.removeEntry(file, projectId));
+        incrementalCache.updateEntries(completedFiles, projectId, projectRoot);
+        int embeddedCount = embedding.unitCount();
 
         long durationMs = System.currentTimeMillis() - startMs;
         log.info("Index complete: {} files, {} units, {} edges in {}ms",
@@ -253,12 +266,19 @@ public class DefaultIndexPipeline implements IndexPipeline {
         }
 
         List<CodeUnit> enhancedUnits = enhanceMetadata(new ArrayList<>(parseResult.units()));
-        int graphEdges = buildGraph(enhancedUnits, new ArrayList<>(parseResult.edges()), projectId);
-        int embeddedCount = embeddingUpsertRunner.embedAndUpsert(enhancedUnits, projectId, projectRoot, errors,
+        if (parseResult.parserUsed() == null && errors.isEmpty()) {
+            errors.add("No parser succeeded [" + file + "]");
+        }
+        int graphEdges = buildGraph(enhancedUnits, new ArrayList<>(parseResult.edges()), projectId, errors);
+        var embedding = embeddingUpsertRunner.embedAndUpsert(enhancedUnits, projectId, projectRoot, errors,
                 (root, done, total) -> publishProgress(root, "embedding", done, total));
 
-        // 更新增量缓存
-        incrementalCache.updateEntries(List.of(file), projectId, projectRoot);
+        int embeddedCount = embedding.unitCount();
+        if (errors.isEmpty()) {
+            incrementalCache.updateEntries(List.of(file), projectId, projectRoot);
+        } else {
+            incrementalCache.removeEntry(relPath, projectId);
+        }
 
         long durationMs = System.currentTimeMillis() - startMs;
         log.info("File index complete: 1 file, {} units, {} edges in {}ms",
@@ -285,17 +305,19 @@ public class DefaultIndexPipeline implements IndexPipeline {
 
     // ── 第四步：图构建 ────────────────────────────────────────────
 
-    private int buildGraph(List<CodeUnit> units, List<RelationEdge> edges, String projectId) {
+    private int buildGraph(List<CodeUnit> units, List<RelationEdge> edges, String projectId, List<String> errors) {
         try {
             codeGraph.addUnits(units, projectId);
         } catch (Exception e) {
             log.warn("Failed to write {} units to Neo4j: {}", units.size(), e.getMessage());
+            errors.add("Graph unit write failed: " + e.getMessage());
         }
         int edgeCount = edges.size();
         try {
             codeGraph.addEdges(edges);
         } catch (Exception e) {
             log.warn("Failed to write {} edges to Neo4j: {}", edges.size(), e.getMessage());
+            errors.add("Graph edge write failed: " + e.getMessage());
             edgeCount = 0;
         }
         return edgeCount;

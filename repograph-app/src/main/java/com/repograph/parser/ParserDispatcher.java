@@ -91,12 +91,14 @@ public class ParserDispatcher {
      */
     private ParseResult runWithFallback(List<CodeParser> candidates, Path file, ParseOptions options) {
         List<CodeParser> precise = preciseParsers(candidates);
+        ParseResult successfulEmpty = null;
         for (CodeParser parser : precise) {
             try {
                 ParseResult result = parser.parse(file, options);
                 if (!result.units().isEmpty() || !result.edges().isEmpty()) {
                     return result;
                 }
+                if (result.parserUsed() != null) successfulEmpty = result;
                 log.debug("Precise parser {} returned empty result for {}, trying fallback",
                         parser.getClass().getSimpleName(), file);
             } catch (ParseException e) {
@@ -113,9 +115,11 @@ public class ParserDispatcher {
         if (!heuristic.isEmpty()) {
             log.warn("Precise parser produced no result for {}, degrading to heuristic", file);
             ParseResult fallback = runFirst(heuristic, file, options);
-            return fallback.withDegraded();
+            if (fallback.parserUsed() != null) return fallback.withDegraded();
+            return successfulEmpty != null ? successfulEmpty : fallback.withDegraded();
         }
 
+        if (successfulEmpty != null) return successfulEmpty;
         log.warn("No parser succeeded for {}", file);
         return ParseResult.empty();
     }

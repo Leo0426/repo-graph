@@ -171,12 +171,12 @@ class GraphRagServiceTest {
         }
 
         @Override
-        public Optional<CodeUnit> symbolLookup(String qualifiedName) {
+        public Optional<CodeUnit> symbolLookup(String qualifiedName, String projectId) {
             return Optional.empty();
         }
 
         @Override
-        public Optional<CodeUnit> locateByPosition(String filePath, int line) {
+        public Optional<CodeUnit> locateByPosition(String filePath, int line, String projectId) {
             return Optional.empty();
         }
     }

@@ -95,7 +95,8 @@ public class FindingContextService {
         int callGraphExpanded = 0;
         int impactExpanded = 0;
 
-        Optional<CodeUnit> located = vectorStore.locateByPosition(finding.filePath(), finding.startLine());
+        Optional<CodeUnit> located = vectorStore.locateByPosition(
+                finding.filePath(), finding.startLine(), rag.projectId());
         if (located.isEmpty() && !finding.symbol().isBlank()) {
             located = graphQueryService.findSymbol(finding.symbol(), rag.projectId());
         }

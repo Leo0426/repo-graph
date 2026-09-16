@@ -1,88 +1,40 @@
 # RepoGraph — Agent Rules
 
-> 本文件是 AI Agent 的行为规范。回答问题前先看 CONTEXT.md 了解项目背景。
+先读 [CONTEXT.md](CONTEXT.md) 了解项目背景，再按任务读取下列职责文档。这里负责入口、路由和执行顺序。
 
-## 硬性约束（违反即错）
+## 项目事实和现状
 
-| 约束 | 原因                                   |
-|------|--------------------------------------|
-| `repograph-core` 禁止引入第三方依赖 | 领域模型层必须无外部耦合                         |
-| 接口定义在 `repograph-core`，实现在子模块，禁止反向依赖 | 依赖方向单向                               |
-| `repograph-graph` 不依赖 `repograph-vector` | 图与向量是并列能力，互不知晓                       |
-| `CodeUnit` 字段不可随意增删 | 影响 Qdrant payload、SQLite 缓存、Neo4j 节点属性映射的兼容性 |
-| `metadata` key 新增必须在 CONTEXT.md 注释说明 | 防止各模块各自为政                            |
-| EXTENDS 和 IMPLEMENTS 必须分开存储 | 影响分析时语义不同                            |
-| 禁止在 Java 类中硬编码连接地址或端口 | 统一从 `application.yml` 读取             |
-| 禁止 `@Autowired` 字段注入，统一构造器注入 | Spring 规范，便于测试                       |
-| 禁止 `System.out.println`，统一用 SLF4J | 日志规范                                 |
-| 多构造器时必须在注入构造器上加 `@Autowired` | 消除 Spring AOT 歧义                     |
-| `repograph-mcp` 禁止任何代码向 stdout 写非 JSON-RPC 内容 | stdout 是 MCP 传输通道，污染会导致协议解析失败 |
+- 实际 Gradle 子项目只有 `repograph-app` 和 `repograph-mcp`。`core`、`graph`、`vector` 等是 app 内的包边界。
+- `CONTEXT.md` 保留完整领域上下文、metadata key 和架构决策；没有独立 ADR 目录。
+- app 提供 Web/REST；MCP 是独立 stdio 进程，通过 HTTP 调用 app。MCP stdout 只允许 JSON-RPC。
 
-## 代码风格
+## 工作策略
 
-- 缩进 4 空格，行长 120 字符
-- 类 PascalCase，方法/变量 camelCase，常量 UPPER_SNAKE_CASE
-- 包名 `com.repograph.{module}`
-- Record 优先于 POJO；接口方法不加 `public`
-- 所有 `public` 类/接口/方法/构造器/字段必须有 Javadoc，类级别含 `@author leolu`
+| 任务 | 开始前读取 |
+|------|------------|
+| 新接口、持久状态、跨包依赖、调用链 | [Architecture](docs/ARCHITECTURE.md) |
+| 仓库特有术语、同名概念或词义不确定 | [Glossary](docs/GLOSSARY.md) |
+| Java 实现、测试用例、版本声明 | [Coding](docs/rules/CODING.md) |
+| 安装、启动、配置、排障 | [Development](docs/DEVELOPMENT.md) |
+| 解析降级、索引失败、重试、状态迁移、协议兼容 | [Reliability](docs/rules/RELIABILITY.md) |
+| 归档上传、模型输入/输出、外部扫描器、敏感信息 | [Security](docs/rules/SECURITY.md) |
+| 共享样式、字号、视觉状态 | [Design System](docs/DESIGN_SYSTEM.md) |
+| Agent 工作台、轮询、流式输出、人工审核交互 | [Interaction Design](docs/INTERACTION_DESIGN.md) |
 
-## 错误处理规则
+- 修改 `CodeUnit` 字段前核对 Qdrant payload、SQLite 缓存和 Neo4j 映射兼容性；不得随意增删。
+- 新增 metadata key 时同步 `CONTEXT.md` 的标准 key 表。
+- Issues/PRD 以 `.scratch/` 为权威版本；处理工单前读 [issue tracker](docs/agents/issue-tracker.md)
+  和 [triage labels](docs/agents/triage-labels.md)。只领取 `ready-for-agent`，不领取 `ready-for-human`。
+- [Reliability](docs/rules/RELIABILITY.md) 中的已知分析局限只记录，不作为本轮顺手修复范围。
 
-- JavaParser 解析失败 → log WARN，跳过文件，不中断索引
-- Tree-sitter native lib 加载失败 → log ERROR，跳过该语言，不崩溃
-- Tree-sitter 单文件异常 → 降级启发式解析，记录日志
-- 调用目标无法解析 → `resolved=false`，不建 CALLS 边入图
-- 图单条边失败 → log WARN，跳过该边
-- 嵌套类/匿名类 qualifiedName → `Outer$Inner` 或 `Outer$1_L{startLine}`
+## 验证入口
 
-## 测试规则
+按 [Validation](docs/VALIDATION.md) 选择真实 Gradle 检查和对应的领域测试。
+报告实际执行结果，区分失败、未运行、跳过与通过；快速构建不能证明测试通过。
 
-- 单元测试放各模块 `src/test/java`；集成测试类名后缀 `IT`，放 `repograph-app`
-- Parser 测试必须覆盖：正常文件、语法错误文件、空文件、嵌套类、C 指针函数名解包
-- 图测试必须覆盖：CALLS 边正确性、EXTENDS/IMPLEMENTS 分开存储、`resolved=false` 标记
-- VectorStore 测试用独立 collection（如 `code_units_test`），测试后清理
-- SBOM 测试每种构建系统（Maven / Gradle / npm / pip）独立覆盖，用 `@TempDir` 写 fixture
-- Vuln 测试必须覆盖：规则命中 + 规则不命中两种路径；状态机流转（SUSPECTED→CONFIRMED）
-- 禁止测试间共享可变状态
+## 漂移处理
 
-## 构建与运行
-
-```bash
-./gradlew build -x test   # 快速构建
-./gradlew test            # 跑测试
-java --enable-preview --enable-native-access=ALL-UNNAMED \
-  -jar repograph-app/build/libs/repograph-app-0.5.0.jar
-```
-
-## 版本管理
-
-所有依赖版本只在 `gradle/libs.versions.toml` 中定义，子模块通过 Version Catalog 引用，禁止在 `build.gradle.kts` 中写裸版本号。
-
-## Agent skills
-
-### Issue tracker
-Issues 和 PRD 作为 markdown 文件存放在 `.scratch/` 目录下。见 `docs/agents/issue-tracker.md`。
-### Triage labels
-使用 ForgeFlow 规范的六个 label 字符串（needs-triage / ready-for-agent / resolved 等）。见 `docs/agents/triage-labels.md`。
-### Domain docs
-单一上下文：根目录 `CONTEXT.md` 为完整上下文，架构决策内联在其末尾的表格中（无独立 ADR 目录）。见 `docs/agents/domain.md`。
-
-## 新模块约束
-
-| 约束 | 原因 |
-|------|------|
-| `VulnFinding` 创建时 status 必须为 `SUSPECTED` | 防止自动误报进入报告 |
-| `TaintVulnScanner` Callee 解析按简单名匹配，存在多重载时全部展开 | Flow-insensitive，宁多报不漏报 |
-| `ComplexityAnalyzer` 基于 rawSource 字符串统计，非 AST 精确值 | 可接受误差，不应用于严格门禁 |
-| `MarkdownDocParser` 生成的 DOCUMENT CodeUnit 不建 CALLS 边 | Markdown 无调用语义 |
-| `GraphExportService` 只做包级聚合，不暴露方法级依赖 | 避免图过大无法渲染 |
-
-## 已知局限（记录，不修复）
-
-- 无完整 classpath，外部依赖源码缺失时调用目标解析失败
-- Lombok / annotation processor 生成代码不可靠
-- 反射、动态代理调用无法静态追踪
-- C 预处理器宏展开不做，条件编译不按 build config 选择
-- C 函数指针调用无法精确解析
-- `TaintVulnScanner` 为 flow-insensitive 保守近似，Callee 按简单名匹配可多展开
-- `ComplexityAnalyzer` / `CouplingAnalyzer` 为启发式估算，注释中的关键字可产生少量误计
+先核对 `settings.gradle.kts`、构建任务、运行配置及直接实现/测试；领域含义回到 `CONTEXT.md`。
+入口或路由漂移修复本文件，工程操作与规则修复对应职责文档，领域模型/metadata/决策修复 `CONTEXT.md`。
+冲突时保留证据并明确说明，不用实现中的偶然行为改写已确认的硬性约束。
+领域读取约定见 [domain](docs/agents/domain.md)。

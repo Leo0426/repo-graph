@@ -42,6 +42,45 @@ public class IndexHistoryStore {
     }
 
     /**
+     * 原子接收项目索引并持久化运行标记，重复的运行中请求返回 false。
+     * @param projectRoot 规范化项目根目录
+     * @return 是否接收成功
+     */
+    public boolean tryStart(String projectRoot) {
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + dbPath);
+             PreparedStatement statement = conn.prepareStatement("""
+                     INSERT INTO index_history(project_root, status, indexed_at) VALUES (?, 'running', ?)
+                     ON CONFLICT(project_root) DO UPDATE SET status = 'running', indexed_at = excluded.indexed_at,
+                         total_files = NULL, parsed_files = NULL, skipped_files = NULL, degraded_files = NULL,
+                         total_units = NULL, total_edges = NULL, duration_ms = NULL, errors = NULL
+                     WHERE index_history.status <> 'running'
+                     """)) {
+            statement.setString(1, projectRoot);
+            statement.setString(2, Instant.now().toString());
+            return statement.executeUpdate() > 0;
+        } catch (SQLException error) {
+            throw new IllegalStateException("Failed to accept index job", error);
+        }
+    }
+
+    /**
+     * 单进程启动时把未完成索引标记为中断，允许显式重新索引。
+     * @return 处理数量
+     */
+    public int recoverInterrupted() {
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + dbPath);
+             PreparedStatement statement = conn.prepareStatement("""
+                     UPDATE index_history SET status = 'error: PROCESS_INTERRUPTED', indexed_at = ?
+                     WHERE status = 'running'
+                     """)) {
+            statement.setString(1, Instant.now().toString());
+            return statement.executeUpdate();
+        } catch (SQLException error) {
+            throw new IllegalStateException("Failed to recover interrupted index jobs", error);
+        }
+    }
+
+    /**
      * 保存或覆盖指定 projectRoot 的最新索引历史。
      *
      * @param projectRoot 项目根目录绝对路径
@@ -105,7 +144,7 @@ public class IndexHistoryStore {
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) return Optional.empty();
                 IndexResult result = null;
-                if (!"error".equals(rs.getString("status")) || rs.getInt("total_files") > 0) {
+                if (rs.getObject("total_files") != null) {
                     List<String> errors = rs.getString("errors") == null || rs.getString("errors").isBlank()
                             ? List.of()
                             : List.of(rs.getString("errors").split("\n"));

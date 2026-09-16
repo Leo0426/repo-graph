@@ -75,8 +75,9 @@ class SastTriageAgentServiceTest {
         properties.setProperty("version", "0.5.0-test");
         BuildProperties buildProperties = new BuildProperties(properties);
         service = new SastTriageAgentService(
-                List.of(importer), contextService, reportService,
-                mock(TriageFeedbackStore.class), mock(RuleSuppressionStore.class),
+                new com.repograph.finding.DefaultTriageWorkflow(List.of(importer), contextService, reportService,
+                        mock(TriageFeedbackStore.class), mock(RuleSuppressionStore.class),
+                        Clock.fixed(Instant.parse("2026-08-09T03:00:00Z"), ZoneOffset.UTC)),
                 advisoryService, reviewQueueStore, runStore, buildProperties,
                 vulnStore,
                 Runnable::run,

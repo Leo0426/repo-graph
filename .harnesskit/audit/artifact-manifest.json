@@ -1,0 +1,45 @@
+{
+  "schema_version": 6,
+  "artifacts": [
+    {
+      "path": "AGENTS.md",
+      "owner": "agents"
+    },
+    {
+      "path": "docs/ARCHITECTURE.md",
+      "owner": "architecture"
+    },
+    {
+      "path": "docs/DESIGN_SYSTEM.md",
+      "owner": "design-system"
+    },
+    {
+      "path": "docs/DEVELOPMENT.md",
+      "owner": "development"
+    },
+    {
+      "path": "docs/GLOSSARY.md",
+      "owner": "glossary"
+    },
+    {
+      "path": "docs/INTERACTION_DESIGN.md",
+      "owner": "interaction-design"
+    },
+    {
+      "path": "docs/VALIDATION.md",
+      "owner": "validation"
+    },
+    {
+      "path": "docs/rules/CODING.md",
+      "owner": "coding"
+    },
+    {
+      "path": "docs/rules/RELIABILITY.md",
+      "owner": "reliability"
+    },
+    {
+      "path": "docs/rules/SECURITY.md",
+      "owner": "security"
+    }
+  ]
+}

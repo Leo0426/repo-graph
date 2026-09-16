@@ -65,6 +65,19 @@ class DefaultScanTaskServiceTest {
     }
 
     @Test
+    void rejectedSubmissionLeavesRetryableFailure() {
+        ScanTaskScheduler rejected = new ScanTaskScheduler(task -> {
+            throw new java.util.concurrent.RejectedExecutionException();
+        }, 1, 1, 1);
+        DefaultScanTaskService subject = new DefaultScanTaskService(store, externalScanService,
+                assetImportService, rejected);
+        ScanTask submitted = subject.submit(asset("asset-1", "p1"), options());
+        assertThat(subject.find(submitted.id()).orElseThrow().status()).isEqualTo(ScanTaskStatus.FAILED);
+        assertThat(subject.find(submitted.id()).orElseThrow().error()).isEqualTo("EXECUTOR_REJECTED");
+        verifyNoInteractions(externalScanService);
+    }
+
+    @Test
     void submitCreatesQueuedThenRunsToTerminalStatus() {
         ImportedAsset asset = asset("asset-1", "p1");
         when(assetImportService.find("asset-1")).thenReturn(Optional.of(asset));

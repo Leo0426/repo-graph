@@ -65,7 +65,7 @@ class FindingContextServiceTest {
         CodeUnit keywordHit = unit("com.example.CommandUtil#exec()",
                 "src/main/java/com/example/CommandUtil.java");
 
-        when(vectorStore.locateByPosition("src/main/java/com/example/OrderService.java", 42))
+        when(vectorStore.locateByPosition("src/main/java/com/example/OrderService.java", 42, null))
                 .thenReturn(Optional.of(located));
         when(graphQueryService.findCallers(eq(located.qualifiedName()), anyInt(), any()))
                 .thenReturn(List.of(caller));
@@ -98,7 +98,7 @@ class FindingContextServiceTest {
     void build_reportsMissingReasonWhenLocationNotIndexed() {
         CodeUnit keywordHit = unit("com.example.CommandUtil#exec()",
                 "src/main/java/com/example/CommandUtil.java");
-        when(vectorStore.locateByPosition(anyString(), anyInt())).thenReturn(Optional.empty());
+        when(vectorStore.locateByPosition(anyString(), anyInt(), any())).thenReturn(Optional.empty());
         when(keywordSearchService.search(anyString(), any(KeywordSearchOptions.class)))
                 .thenReturn(List.of(new KeywordSearchResult(keywordHit, 0.8f, List.of("exec"))));
 
@@ -124,7 +124,7 @@ class FindingContextServiceTest {
                 located.qualifiedName(), List.of(), "");
         GraphRagOptions graphRag = new GraphRagOptions(
                 10, 1, true, true, true, "project-1", null, true);
-        when(vectorStore.locateByPosition(located.filePath(), 42)).thenReturn(Optional.empty());
+        when(vectorStore.locateByPosition(located.filePath(), 42, null)).thenReturn(Optional.empty());
         when(graphQueryService.findSymbol(located.qualifiedName(), "project-1"))
                 .thenReturn(Optional.of(located));
         when(graphQueryService.findCallers(located.qualifiedName(), 1, "project-1"))
@@ -148,7 +148,7 @@ class FindingContextServiceTest {
     void build_deduplicatesKeywordHitAgainstLocatedUnit() {
         CodeUnit located = unit("com.example.OrderService#run()",
                 "src/main/java/com/example/OrderService.java");
-        when(vectorStore.locateByPosition(anyString(), anyInt())).thenReturn(Optional.of(located));
+        when(vectorStore.locateByPosition(anyString(), anyInt(), any())).thenReturn(Optional.of(located));
         when(keywordSearchService.search(anyString(), any(KeywordSearchOptions.class)))
                 .thenReturn(List.of(new KeywordSearchResult(located, 0.9f, List.of("run"))));
 
@@ -174,7 +174,7 @@ class FindingContextServiceTest {
                 20, 30, "...", "String createToken()", List.of("@PostMapping"),
                 "com.example.JwtUtils", Map.of("is_entry_point", "true"));
 
-        when(vectorStore.locateByPosition("src/main/java/com/example/JwtUtils.java", 10))
+        when(vectorStore.locateByPosition("src/main/java/com/example/JwtUtils.java", 10, null))
                 .thenReturn(Optional.of(field));
         when(graphQueryService.findEntryPoints(any())).thenReturn(List.of(entryMethod));
         when(keywordSearchService.search(anyString(), any(KeywordSearchOptions.class)))
@@ -197,7 +197,7 @@ class FindingContextServiceTest {
                 20, 30, "...", "void handle()", List.of("@GetMapping"),
                 "com.example.OtherController", Map.of("is_entry_point", "true"));
 
-        when(vectorStore.locateByPosition("src/main/java/com/example/JwtUtils.java", 10))
+        when(vectorStore.locateByPosition("src/main/java/com/example/JwtUtils.java", 10, null))
                 .thenReturn(Optional.of(field));
         when(graphQueryService.findEntryPoints(any())).thenReturn(List.of(unrelatedEntryMethod));
         when(keywordSearchService.search(anyString(), any(KeywordSearchOptions.class)))

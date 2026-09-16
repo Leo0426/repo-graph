@@ -13,6 +13,10 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.function.Consumer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 扫描任务准入调度器：在全局、项目和扫描器三个维度限制并发在飞任务数。超额任务留在待入队列，
@@ -25,6 +29,8 @@ import java.util.concurrent.Executor;
  */
 @Component
 public class ScanTaskScheduler {
+
+    private static final Logger log = LoggerFactory.getLogger(ScanTaskScheduler.class);
 
     private final Executor executor;
     private final int globalLimit;
@@ -65,37 +71,67 @@ public class ScanTaskScheduler {
      * @param task      准入后要执行的任务体
      */
     public void submit(String taskId, String projectId, Collection<String> scanners, Runnable task) {
+        submit(taskId, projectId, scanners, task,
+                error -> log.warn("Scan task {} rejected by executor", taskId));
+    }
+
+    /**
+     * 提交任务，并在实际准入（可能晚于本次调用）被拒绝时通知所属任务。
+     * @param taskId 任务标识
+     * @param projectId 项目标识
+     * @param scanners 扫描器配额
+     * @param task 执行体
+     * @param onRejected 提交失败回调
+     */
+    public void submit(String taskId, String projectId, Collection<String> scanners, Runnable task,
+                       Consumer<RejectedExecutionException> onRejected) {
         synchronized (lock) {
-            queue.addLast(new Pending(taskId, projectId, List.copyOf(scanners), task));
+            queue.addLast(new Pending(taskId, projectId, List.copyOf(scanners), task, onRejected));
         }
         drain();
     }
 
     private void drain() {
-        List<Pending> admitted = new ArrayList<>();
-        synchronized (lock) {
-            Iterator<Pending> it = queue.iterator();
-            while (it.hasNext()) {
-                Pending pending = it.next();
-                if (canAdmit(pending)) {
-                    acquire(pending);
-                    it.remove();
-                    admitted.add(pending);
+        boolean rejected;
+        do {
+            rejected = false;
+            List<Pending> admitted = new ArrayList<>();
+            synchronized (lock) {
+                Iterator<Pending> it = queue.iterator();
+                while (it.hasNext()) {
+                    Pending pending = it.next();
+                    if (canAdmit(pending)) {
+                        acquire(pending);
+                        it.remove();
+                        admitted.add(pending);
+                    }
                 }
             }
-        }
-        for (Pending pending : admitted) {
-            executor.execute(() -> {
+            for (Pending pending : admitted) {
                 try {
-                    pending.task().run();
-                } finally {
+                    executor.execute(() -> {
+                        try {
+                            pending.task().run();
+                        } finally {
+                            synchronized (lock) {
+                                release(pending);
+                            }
+                            drain();
+                        }
+                    });
+                } catch (RejectedExecutionException error) {
                     synchronized (lock) {
                         release(pending);
                     }
-                    drain();
+                    rejected = true;
+                    try {
+                        pending.onRejected().accept(error);
+                    } catch (RuntimeException callbackError) {
+                        log.error("Failed to record executor rejection for {}", pending.taskId(), callbackError);
+                    }
                 }
-            });
-        }
+            }
+        } while (rejected);
     }
 
     private boolean canAdmit(Pending pending) {
@@ -144,5 +180,6 @@ public class ScanTaskScheduler {
         }
     }
 
-    private record Pending(String taskId, String projectId, List<String> scanners, Runnable task) {}
+    private record Pending(String taskId, String projectId, List<String> scanners, Runnable task,
+                           Consumer<RejectedExecutionException> onRejected) {}
 }

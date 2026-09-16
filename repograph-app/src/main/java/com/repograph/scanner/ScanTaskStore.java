@@ -50,6 +50,24 @@ public class ScanTaskStore {
     }
 
     /**
+     * 单进程启动时标记遗留任务为失败，保留批次证据供显式重试。
+     * @param occurredAt 恢复时间
+     * @return 处理数量
+     */
+    public int recoverInterrupted(String occurredAt) {
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + dbPath);
+             PreparedStatement statement = conn.prepareStatement("""
+                     UPDATE scan_tasks SET status = 'FAILED', error = 'PROCESS_INTERRUPTED', updated_at = ?
+                     WHERE status IN ('QUEUED', 'RUNNING')
+                     """)) {
+            statement.setString(1, occurredAt);
+            return statement.executeUpdate();
+        } catch (SQLException error) {
+            throw new IllegalStateException("Failed to recover interrupted scan tasks", error);
+        }
+    }
+
+    /**
      * 持久化一条新任务（通常为 {@code QUEUED}）。
      *
      * @param task 任务
@@ -79,6 +97,25 @@ public class ScanTaskStore {
             statement.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to create scan task '" + task.id() + "'", e);
+        }
+    }
+
+    /**
+     * 将未准入的任务标记为失败，不覆盖取消或其他终态。
+     * @param taskId 任务标识
+     * @param occurredAt 发生时间
+     */
+    public void rejectQueued(String taskId, String occurredAt) {
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + dbPath);
+             PreparedStatement statement = conn.prepareStatement("""
+                     UPDATE scan_tasks SET status = 'FAILED', error = 'EXECUTOR_REJECTED', updated_at = ?
+                     WHERE id = ? AND status = 'QUEUED'
+                     """)) {
+            statement.setString(1, occurredAt);
+            statement.setString(2, taskId);
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to record rejected scan task", e);
         }
     }
 
