@@ -33,3 +33,5 @@ MCP 日志在 `~/.repograph/mcp.log`，不会出现在 stdout。
 
 检索故障先核对 REST/gRPC、Embedding 模型/维度/collection 和实际 projectId。
 索引及 Agent 运行需检查终态、错误、missingInfo/omittedReasons，不能只看请求已接受。
+
+projectId 由规范化绝对项目根路径计算，同一仓库在不同 worktree 或导入目录中可能有不同 projectId；运行数据默认使用 user.home，Git worktree 本身不隔离 SQLite、资产目录或外部 collection。

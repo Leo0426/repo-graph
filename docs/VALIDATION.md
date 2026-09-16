@@ -35,3 +35,7 @@ Parser、图、VectorStore、SBOM、Vuln 的必测行为见 [Coding](rules/CODIN
 Web 交互变更需实际检查对应流程；后端 JUnit 通过不能证明轮询、SSE、字号或展开状态正确。
 
 项目级 CI/自动触发能力以仓库内真实配置为准；用户级 Harness 生命周期钩子的健康不代表 Gradle 检查已自动绑定。
+
+QdrantVectorStoreIT 当前将 localhost:16333 用作 gRPC，而默认 Compose 的 gRPC 端口为 16334；连接失败会通过 assumption 跳过。运行前核对测试接线与 skipped，并保持独立测试 collection。
+
+JavaBytecodeParserTest 当前仍从已移除的 repograph-parser/build/classes/java/main 查找 ParserDispatcher.class，缺少该 fixture 时相关用例通过 assumption 跳过。验证字节码能力前核对 fixture 路径和 skipped，不能以 app 编译成功代替覆盖。
