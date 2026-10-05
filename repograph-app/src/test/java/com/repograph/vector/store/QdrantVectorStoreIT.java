@@ -15,23 +15,27 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.config.YamlPropertiesFactoryBean;
+import org.springframework.core.io.ClassPathResource;
 
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * {@link QdrantVectorStore} 集成测试，连接本地真实 Qdrant 实例（{@code localhost:16333}）。
+ * {@link QdrantVectorStore} 集成测试，连接 application.yml 配置的真实 Qdrant gRPC 实例。
  *
  * <p>若 Qdrant 服务未启动，所有测试自动跳过（{@code assumeTrue} 失败），不计为错误。
- * 每个测试使用独立的集合 {@value #TEST_COLLECTION}，每次测试前后均清理，保证相互隔离。
+ * 每个测试使用独立的 {@code code_units_test_<uuid>} 集合，测试后清理，保证相互隔离。
  *
- * <p>运行前置条件：Qdrant 已在 {@code localhost:16333} 以 gRPC 模式运行。
+ * <p>可通过 {@code test.qdrant.host/port} 系统属性覆盖连接配置；不会使用应用的业务集合。
  *
  * @author leolu
  * @since 0.1.0
@@ -39,7 +43,6 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 @Tag("integration")
 class QdrantVectorStoreIT {
 
-    private static final String TEST_COLLECTION = "code_units_test";
     private static final String PROJECT_ID      = "it-project";
     private static final int    VECTOR_SIZE     = 768;
 
@@ -58,47 +61,56 @@ class QdrantVectorStoreIT {
 
     /** 用于生命周期管理（删除集合）的独立客户端，避免通过被测类执行 DDL。 */
     private static QdrantClient adminClient;
+    private static String host;
+    private static int port;
 
+    private final String testCollection = "code_units_test_" + UUID.randomUUID().toString().replace("-", "");
     private QdrantVectorStore store;
 
     // ── 生命周期 ───────────────────────────────────────────────────────────────
 
     @BeforeAll
     static void assumeQdrantAvailableAndCreateAdminClient() {
-        // 用真实 gRPC 调用探测，而不是 TCP 端口检查：
-        // 16333 可能只是 Qdrant REST 端口，gRPC 端口未暴露时需要跳过测试。
+        var yaml = new YamlPropertiesFactoryBean();
+        yaml.setResources(new ClassPathResource("application.yml"));
+        var properties = yaml.getObject();
+        assertThat(properties).isNotNull();
+        host = System.getProperty("test.qdrant.host", properties.getProperty("repograph.qdrant.host"));
+        port = Integer.parseInt(System.getProperty(
+                "test.qdrant.port", properties.getProperty("repograph.qdrant.port")));
+        // 使用真实 gRPC 调用探测，不能将 REST 端口可连接解释为 SDK 可用。
         QdrantClient probe = null;
         try {
             probe = new QdrantClient(
-                    QdrantGrpcClient.newBuilder("localhost", 16333, false).build());
+                    QdrantGrpcClient.newBuilder(host, port, false).build());
             probe.listCollectionsAsync().get(3, TimeUnit.SECONDS);
         } catch (Exception e) {
             assumeTrue(false,
-                    "跳过 QdrantVectorStoreIT：Qdrant gRPC 不可达 localhost:16333 — "
+                    "跳过 QdrantVectorStoreIT：Qdrant gRPC 不可达 " + host + ":" + port + " — "
                     + e.getMessage()
-                    + "。请确保 Qdrant 以 gRPC 模式运行并暴露该端口（通常需要 -p 16333:6334）。");
+                    + "。请核对 application.yml、Compose 或 test.qdrant.host/port 覆盖值。");
         } finally {
             if (probe != null) {
                 try { probe.close(); } catch (Exception ignored) {}
             }
         }
         adminClient = new QdrantClient(
-                QdrantGrpcClient.newBuilder("localhost", 16333, false).build());
+                QdrantGrpcClient.newBuilder(host, port, false).build());
     }
 
     @AfterAll
     static void closeAdminClient() throws Exception {
         if (adminClient != null) {
-            deleteTestCollectionIfExists();
             adminClient.close();
         }
     }
 
     @BeforeEach
     void createStoreAndEnsureCollection() {
-        QdrantProperties props = new QdrantProperties("localhost", 16333, TEST_COLLECTION, VECTOR_SIZE);
+        QdrantProperties props = new QdrantProperties(host, port, testCollection, VECTOR_SIZE);
         // 搜索时 embed 调用：任意查询均返回 VEC_A，用于验证相似度排名
-        store = new QdrantVectorStore(props, inputs -> inputs.stream().map(s -> copyVec(VEC_A)).toList());
+        store = new QdrantVectorStore(
+                props, inputs -> inputs.stream().map(s -> copyVec(VEC_A)).toList(), adminClient);
         store.ensureCollection();
     }
 
@@ -107,14 +119,11 @@ class QdrantVectorStoreIT {
         deleteTestCollectionIfExists();
     }
 
-    private static void deleteTestCollectionIfExists() throws Exception {
-        try {
-            List<String> collections = adminClient.listCollectionsAsync().get(5, TimeUnit.SECONDS);
-            if (collections.contains(TEST_COLLECTION)) {
-                adminClient.deleteCollectionAsync(TEST_COLLECTION).get(10, TimeUnit.SECONDS);
-            }
-        } catch (Exception e) {
-            // 清理失败不影响测试结果
+    private void deleteTestCollectionIfExists() throws Exception {
+        if (adminClient == null) return;
+        List<String> collections = adminClient.listCollectionsAsync().get(5, TimeUnit.SECONDS);
+        if (collections.contains(testCollection)) {
+            adminClient.deleteCollectionAsync(testCollection).get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -280,5 +289,42 @@ class QdrantVectorStoreIT {
     void removeByFile_nonExistingFile_isIdempotent() {
         // 删除不存在的文件不抛异常
         store.removeByFile("src/NonExistent.java", PROJECT_ID);
+    }
+
+    @Test
+    void removeStaleByFile_preservesRetainedIdsOtherFilesAndOtherProjects() {
+        CodeUnit kept = buildUnit("com.example.Foo#kept", "src/Foo.java", 1, 10);
+        CodeUnit stale = buildUnit("com.example.Foo#stale", "src/Foo.java", 11, 20);
+        CodeUnit otherFile = buildUnit("com.example.Bar#other", "src/Bar.java", 1, 10);
+        CodeUnit otherProject = buildUnit("com.other.Foo#other", "src/Foo.java", 1, 10);
+        store.upsert(List.of(
+                new EmbeddedUnit(kept, copyVec(VEC_A), copyVec(VEC_A)),
+                new EmbeddedUnit(stale, copyVec(VEC_A), copyVec(VEC_A)),
+                new EmbeddedUnit(otherFile, copyVec(VEC_B), copyVec(VEC_B))), PROJECT_ID);
+        store.upsert(List.of(new EmbeddedUnit(otherProject, copyVec(VEC_A), copyVec(VEC_A))), "other-project");
+
+        store.removeStaleByFile("src/Foo.java", PROJECT_ID, Set.of(kept.id()));
+
+        assertThat(store.symbolLookup(kept.qualifiedName(), PROJECT_ID)).isPresent();
+        assertThat(store.symbolLookup(stale.qualifiedName(), PROJECT_ID)).isEmpty();
+        assertThat(store.symbolLookup(otherFile.qualifiedName(), PROJECT_ID)).isPresent();
+        assertThat(store.symbolLookup(otherProject.qualifiedName(), "other-project")).isPresent();
+    }
+
+    @Test
+    void removeStaleByFile_emptyRetainedIdsRemovesOnlyTargetProjectFile() {
+        CodeUnit target = buildUnit("com.example.Foo#target", "src/Foo.java", 1, 10);
+        CodeUnit otherFile = buildUnit("com.example.Bar#other", "src/Bar.java", 1, 10);
+        CodeUnit otherProject = buildUnit("com.other.Foo#other", "src/Foo.java", 1, 10);
+        store.upsert(List.of(
+                new EmbeddedUnit(target, copyVec(VEC_A), copyVec(VEC_A)),
+                new EmbeddedUnit(otherFile, copyVec(VEC_B), copyVec(VEC_B))), PROJECT_ID);
+        store.upsert(List.of(new EmbeddedUnit(otherProject, copyVec(VEC_A), copyVec(VEC_A))), "other-project");
+
+        store.removeStaleByFile("src/Foo.java", PROJECT_ID, Set.of());
+
+        assertThat(store.symbolLookup(target.qualifiedName(), PROJECT_ID)).isEmpty();
+        assertThat(store.symbolLookup(otherFile.qualifiedName(), PROJECT_ID)).isPresent();
+        assertThat(store.symbolLookup(otherProject.qualifiedName(), "other-project")).isPresent();
     }
 }

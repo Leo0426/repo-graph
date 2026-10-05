@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -66,15 +67,13 @@ public class FileWatcherService {
             "build", "target", "out", "node_modules", ".terraform"
     );
 
-    /** 受支持的源文件扩展名，用于 ENTRY_DELETE 事件过滤（与 DefaultIndexPipeline 保持一致）。 */
-    private static final Set<String> SOURCE_EXTS = Set.of("java", "c", "h", "py");
-
     private final IndexPipeline indexPipeline;
     private final IndexStore indexStore;
     private final GraphQueryService graphQueryService;
 
     private WatchService watchService;
     private Thread watchThread;
+    private volatile boolean closed;
 
     /** projectId → 监听条目 */
     private final ConcurrentHashMap<String, WatchedProject> watched = new ConcurrentHashMap<>();
@@ -91,6 +90,13 @@ public class FileWatcherService {
     });
     private final ConcurrentHashMap<String, ScheduledFuture<?>> pending = new ConcurrentHashMap<>();
 
+    /**
+     * 创建文件监听服务。
+     *
+     * @param indexPipeline 增量索引流水线
+     * @param indexStore 项目变更协调边界
+     * @param graphQueryService 启动时恢复项目监听的查询服务
+     */
     public FileWatcherService(IndexPipeline indexPipeline, IndexStore indexStore,
                               GraphQueryService graphQueryService) {
         this.indexPipeline = indexPipeline;
@@ -98,6 +104,11 @@ public class FileWatcherService {
         this.graphQueryService = graphQueryService;
     }
 
+    /**
+     * 创建系统文件监听器并启动事件线程。
+     *
+     * @throws IOException 无法创建系统文件监听器时抛出
+     */
     @PostConstruct
     public void init() throws IOException {
         watchService = FileSystems.getDefault().newWatchService();
@@ -107,8 +118,10 @@ public class FileWatcherService {
         log.info("FileWatcherService started");
     }
 
+    /** 停止接收文件事件，并使尚未取得项目变更权限的重索引任务失效。 */
     @PreDestroy
     public void shutdown() {
+        closed = true;
         watchThread.interrupt();
         debounce.shutdownNow();
         try { watchService.close(); } catch (IOException ignored) {}
@@ -149,19 +162,22 @@ public class FileWatcherService {
      * @param root      项目根目录绝对路径
      */
     public void start(String projectId, Path root) {
-        if (watched.containsKey(projectId)) return;
-        if (!Files.isDirectory(root)) {
-            log.debug("Skipping watch for '{}': '{}' is not a directory", projectId, root);
-            return;
-        }
-        try {
-            List<WatchKey> keys = new ArrayList<>();
-            registerAll(root, projectId, keys);
-            watched.put(projectId, new WatchedProject(projectId, root, keys));
-            log.info("Watching project '{}' at {}", projectId, root);
-        } catch (IOException e) {
-            log.warn("Failed to register watch for '{}': {}", projectId, e.getMessage());
-        }
+        indexStore.withProjectMutation(projectId, () -> {
+            if (closed || watched.containsKey(projectId)) return null;
+            if (!Files.isDirectory(root)) {
+                log.debug("Skipping watch for '{}': '{}' is not a directory", projectId, root);
+                return null;
+            }
+            try {
+                List<WatchKey> keys = new ArrayList<>();
+                registerAll(root, projectId, keys);
+                watched.put(projectId, new WatchedProject(projectId, root, keys));
+                log.info("Watching project '{}' at {}", projectId, root);
+            } catch (IOException | ClosedWatchServiceException e) {
+                if (!closed) log.warn("Failed to register watch for '{}': {}", projectId, e.getMessage());
+            }
+            return null;
+        });
     }
 
     /**
@@ -170,26 +186,32 @@ public class FileWatcherService {
      * @param projectId 项目唯一标识符
      */
     public void stop(String projectId) {
-        WatchedProject wp = watched.remove(projectId);
-        if (wp == null) return;
-        ScheduledFuture<?> f = pending.remove(projectId);
-        if (f != null) f.cancel(false);
-        for (WatchKey key : wp.keys()) {
-            keyToProject.remove(key);
-            keyToDir.remove(key);
-            key.cancel();
-        }
-        log.info("Stopped watching project '{}'", projectId);
+        indexStore.withProjectMutation(projectId, () -> {
+            WatchedProject wp = watched.remove(projectId);
+            if (wp == null) return null;
+            synchronized (wp) {
+                ScheduledFuture<?> f = pending.remove(projectId);
+                if (f != null) f.cancel(false);
+                for (WatchKey key : wp.keys()) {
+                    keyToProject.remove(key);
+                    keyToDir.remove(key);
+                    key.cancel();
+                }
+            }
+            log.info("Stopped watching project '{}'", projectId);
+            return null;
+        });
     }
 
     /** 返回当前正在监听的项目列表（不可变副本）。 */
     public List<WatchedProject> list() {
+        if (closed) return List.of();
         return Collections.unmodifiableList(new ArrayList<>(watched.values()));
     }
 
     /** 判断指定项目是否正在被监听。 */
     public boolean isWatching(String projectId) {
-        return watched.containsKey(projectId);
+        return !closed && watched.containsKey(projectId);
     }
 
     // ── 内部方法 ─────────────────────────────────────────────────────────────
@@ -230,39 +252,7 @@ public class FileWatcherService {
 
             if (dir != null && projectId != null) {
                 WatchedProject wp = watched.get(projectId);
-                for (WatchEvent<?> event : key.pollEvents()) {
-                    if (event.kind() == OVERFLOW) continue;
-
-                    @SuppressWarnings("unchecked")
-                    Path child = dir.resolve(((WatchEvent<Path>) event).context());
-
-                    if (event.kind() == ENTRY_DELETE) {
-                        // 对已删除的源文件立即清理过期节点。
-                        // 文件已不存在，无法通过 Files.probeContentType 检查扩展名；
-                        // 改为通过文件名后缀匹配。
-                        if (wp != null && isSourceFile(child)) {
-                            String relPath = toRelPath(child, wp.root());
-                            log.debug("Source file deleted: {} ({})", relPath, projectId);
-                            dispatchDelete(relPath, projectId);
-                        }
-                        // 仍需调度重新索引：其他正在进行的变更可能需要处理，
-                        // 且跨文件引用（CALLS 边）可能需要刷新。
-                        scheduleReindex(projectId, wp != null ? wp.root() : null);
-                        continue;
-                    }
-
-                    // 动态注册新增子目录
-                    if (event.kind() == ENTRY_CREATE && Files.isDirectory(child) && wp != null) {
-                        try {
-                            List<WatchKey> newKeys = new ArrayList<>();
-                            registerAll(child, projectId, newKeys);
-                            wp.keys().addAll(newKeys);
-                        } catch (IOException e) {
-                            log.debug("Failed to register new dir {}: {}", child, e.getMessage());
-                        }
-                    }
-                    scheduleReindex(projectId, wp != null ? wp.root() : null);
-                }
+                if (wp != null) processEvents(key, dir, wp);
             }
 
             if (!key.reset()) {
@@ -272,53 +262,55 @@ public class FileWatcherService {
         }
     }
 
-    private static boolean isSourceFile(Path path) {
-        String name = path.getFileName().toString();
-        int dot = name.lastIndexOf('.');
-        return dot >= 0 && SOURCE_EXTS.contains(name.substring(dot + 1));
-    }
-
-    private static String toRelPath(Path file, Path root) {
-        try {
-            return root.toAbsolutePath().normalize()
-                    .relativize(file.toAbsolutePath().normalize())
-                    .toString()
-                    .replace('\\', '/');
-        } catch (IllegalArgumentException e) {
-            return file.toString().replace('\\', '/');
+    private void processEvents(WatchKey key, Path dir, WatchedProject wp) {
+        synchronized (wp) {
+            if (closed || watched.get(wp.projectId()) != wp || !wp.keys().contains(key)) return;
+            for (WatchEvent<?> event : key.pollEvents()) {
+                if (event.kind() == OVERFLOW) continue;
+                @SuppressWarnings("unchecked")
+                Path child = dir.resolve(((WatchEvent<Path>) event).context());
+                if (event.kind() == ENTRY_CREATE && Files.isDirectory(child)) {
+                    try {
+                        List<WatchKey> newKeys = new ArrayList<>();
+                        registerAll(child, wp.projectId(), newKeys);
+                        wp.keys().addAll(newKeys);
+                    } catch (IOException | ClosedWatchServiceException e) {
+                        if (!closed) log.debug("Failed to register new dir {}: {}", child, e.getMessage());
+                    }
+                }
+                // 删除与重建可能合并；由持有项目锁的下一轮扫描判断当前文件状态。
+                scheduleReindex(wp);
+            }
         }
     }
 
-    /** 在独立线程中调用 {@link IndexStore#removeFile}，不阻塞监听循环。 */
-    private void dispatchDelete(String relPath, String projectId) {
-        Thread t = new Thread(() -> {
+    private void scheduleReindex(WatchedProject wp) {
+        synchronized (wp) {
+            if (closed || watched.get(wp.projectId()) != wp) return;
+            ScheduledFuture<?> existing = pending.remove(wp.projectId());
+            if (existing != null) existing.cancel(false);
             try {
-                indexStore.removeFile(relPath, projectId);
-                log.info("Cleaned up deleted file '{}' from project '{}'", relPath, projectId);
-            } catch (Exception e) {
-                log.warn("Failed to clean up deleted file '{}': {}", relPath, e.getMessage());
+                ScheduledFuture<?> future = debounce.schedule(
+                        () -> triggerReindex(wp), DEBOUNCE_MILLIS, TimeUnit.MILLISECONDS);
+                pending.put(wp.projectId(), future);
+            } catch (RejectedExecutionException e) {
+                if (!closed) throw e;
             }
-        }, "repograph-delete-cleanup");
-        t.setDaemon(true);
-        t.start();
+        }
     }
 
-    private void scheduleReindex(String projectId, Path root) {
-        if (root == null || !watched.containsKey(projectId)) return;
-        ScheduledFuture<?> existing = pending.remove(projectId);
-        if (existing != null) existing.cancel(false);
-        ScheduledFuture<?> future = debounce.schedule(
-                () -> triggerReindex(projectId, root), DEBOUNCE_MILLIS, TimeUnit.MILLISECONDS);
-        pending.put(projectId, future);
-    }
-
-    private void triggerReindex(String projectId, Path root) {
-        pending.remove(projectId);
-        log.info("File change detected — re-indexing '{}'", projectId);
+    private void triggerReindex(WatchedProject wp) {
+        String projectId = wp.projectId();
         Thread reindexThread = new Thread(() -> {
             try {
-                indexPipeline.index(root, IndexOptions.defaults());
-                log.info("Auto re-index complete for '{}'", projectId);
+                indexStore.withProjectMutation(projectId, () -> {
+                    // 等待锁期间可能已停止或重新注册监听，旧任务不能重建已删除的项目。
+                    if (closed || watched.get(projectId) != wp) return null;
+                    log.info("File change detected — re-indexing '{}'", projectId);
+                    indexPipeline.index(wp.root(), IndexOptions.defaults());
+                    log.info("Auto re-index complete for '{}'", projectId);
+                    return null;
+                });
             } catch (Exception e) {
                 log.error("Auto re-index failed for '{}': {}", projectId, e.getMessage(), e);
             }

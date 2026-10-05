@@ -167,6 +167,10 @@ class GraphRagServiceTest {
         }
 
         @Override
+        public void removeStaleByFile(String filePath, String projectId, Set<String> retainedUnitIds) {
+        }
+
+        @Override
         public void removeByProject(String projectId) {
         }
 

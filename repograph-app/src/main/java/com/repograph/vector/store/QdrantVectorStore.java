@@ -39,6 +39,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -248,20 +249,24 @@ public class QdrantVectorStore implements VectorStore {
 
     @Override
     public void removeByFile(String filePath, String projectId) {
-        Filter filter = Filter.newBuilder()
+        removeStaleByFile(filePath, projectId, Set.of());
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public void removeStaleByFile(String filePath, String projectId, Set<String> retainedUnitIds) {
+        Filter.Builder filter = Filter.newBuilder()
                 .addMust(ConditionFactory.matchKeyword("file_path", filePath))
-                .addMust(ConditionFactory.matchKeyword("project_id", projectId))
-                .build();
-        try {
-            client.deleteAsync(properties.collection(), filter).get();
-            log.debug("Removed vectors for file '{}' in project '{}'", filePath, projectId);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted while removing vectors for file " + filePath, e);
-        } catch (ExecutionException e) {
-            log.warn("Failed to remove vectors for file '{}' in project '{}': {}",
-                    filePath, projectId, e.getCause().getMessage());
+                .addMust(ConditionFactory.matchKeyword("project_id", projectId));
+        if (!retainedUnitIds.isEmpty()) {
+            filter.addMustNot(ConditionFactory.hasId(retainedUnitIds.stream()
+                    .map(QdrantVectorStore::toUuid)
+                    .map(PointIdFactory::id)
+                    .toList()));
         }
+        deletePoints(filter.build(), "file '" + filePath + "' in project '" + projectId + "'");
+        log.debug("Removed stale vectors for file '{}' in project '{}', retaining {} unit IDs",
+                filePath, projectId, retainedUnitIds.size());
     }
 
     @Override
@@ -269,15 +274,19 @@ public class QdrantVectorStore implements VectorStore {
         Filter filter = Filter.newBuilder()
                 .addMust(ConditionFactory.matchKeyword("project_id", projectId))
                 .build();
+        deletePoints(filter, "project '" + projectId + "'");
+        log.info("Removed all vectors for project '{}'", projectId);
+    }
+
+    private void deletePoints(Filter filter, String scope) {
         try {
+            // Qdrant SDK 的 collection/filter 重载设置 wait=true；get() 等待服务端完成，避免替换顺序颠倒。
             client.deleteAsync(properties.collection(), filter).get();
-            log.info("Removed all vectors for project '{}'", projectId);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted while removing vectors for project " + projectId, e);
+            throw new IllegalStateException("Interrupted while removing vectors for " + scope, e);
         } catch (ExecutionException e) {
-            log.warn("Failed to remove vectors for project '{}': {}",
-                    projectId, e.getCause().getMessage());
+            throw new IllegalStateException("Failed to remove vectors for " + scope, e.getCause());
         }
     }
 

@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -130,6 +131,24 @@ class EmbeddingUpsertRunner {
         CompletableFuture.allOf(futures.toArray(new CompletableFuture<?>[0])).join();
         log.debug("Parallel embed+upsert complete: {} units", total.get());
         return new EmbeddingResult(total.get(), Set.copyOf(failedFiles));
+    }
+
+    /** 只为新向量已全部写入的文件清除旧单元；空文件也必须清理旧向量。 */
+    Set<String> removeStaleVectors(Map<String, List<CodeUnit>> files, String projectId,
+                                  Set<String> failedFiles, List<String> errors) {
+        Set<String> failedCleanup = new HashSet<>();
+        for (var file : files.entrySet()) {
+            if (failedFiles.contains(file.getKey())) continue;
+            Set<String> retainedIds = file.getValue().stream().map(CodeUnit::id).collect(Collectors.toSet());
+            try {
+                vectorStore.removeStaleByFile(file.getKey(), projectId, retainedIds);
+            } catch (RuntimeException error) {
+                failedCleanup.add(file.getKey());
+                log.warn("Stale vector cleanup failed for '{}': {}", file.getKey(), error.getMessage());
+                errors.add("Stale vector cleanup failed [" + file.getKey() + "]: " + error.getMessage());
+            }
+        }
+        return Set.copyOf(failedCleanup);
     }
 
     private List<float[]> embedWithRetry(List<String> texts) {

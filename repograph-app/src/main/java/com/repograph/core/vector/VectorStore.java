@@ -5,6 +5,7 @@ import com.repograph.core.model.CodeUnit;
 import java.util.List;
 
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * 向量存储接口，管理代码单元的双向量 upsert 和多维度检索。
@@ -50,19 +51,35 @@ public interface VectorStore {
      * 删除指定文件路径在指定项目下的所有向量点，用于增量重新索引前清理过时数据。
      *
      * <p>通过 {@code file_path} 和 {@code project_id} payload 过滤定位并删除点。
-     * 文件未索引时幂等返回，不报错。
+     * 文件未索引时幂等返回，不报错；正常返回表示存储端已完成删除。
      *
      * @param filePath  文件相对路径，不为 {@code null}
      * @param projectId 所属项目 ID，不为 {@code null}
+     * @throws IllegalStateException 删除失败或等待被中断；中断标记必须保留
      */
     void removeByFile(String filePath, String projectId);
 
     /**
+     * 删除指定项目、文件中不在保留集合内的旧代码单元向量，用于成功写入新结果后的文件替换。
+     *
+     * <p>保留集合使用原始 {@link CodeUnit#id()}，保留点不能被删除；空集合表示删除该文件的全部点。
+     * 其他项目或文件不受影响。正常返回表示存储端已完成删除，不支持的实现不得降级为整文件删除。
+     *
+     * @param filePath 文件相对路径，不为 {@code null}
+     * @param projectId 所属项目 ID，不为 {@code null}
+     * @param retainedUnitIds 本轮成功写入、需要保留的代码单元 ID，不为 {@code null}
+     * @throws IllegalStateException 删除失败或等待被中断；中断标记必须保留
+     */
+    void removeStaleByFile(String filePath, String projectId, Set<String> retainedUnitIds);
+
+    /**
      * 删除指定项目下的所有向量点，用于项目级清理（删除整个项目的索引）。
      *
-     * <p>通过 {@code project_id} payload 过滤定位并删除。项目无数据时幂等返回，不报错。
+     * <p>通过 {@code project_id} payload 过滤定位并删除。项目无数据时幂等返回，不报错；
+     * 正常返回表示存储端已完成删除。
      *
      * @param projectId 所属项目 ID，不为 {@code null}
+     * @throws IllegalStateException 删除失败或等待被中断；中断标记必须保留
      */
     void removeByProject(String projectId);
 

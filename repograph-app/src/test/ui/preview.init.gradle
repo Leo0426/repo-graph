@@ -1,0 +1,18 @@
+// Optional UI helper: applied only with -I, without changing the production build.
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.project(':repograph-app')
+    def runtimeClasspath = app.extensions.getByName('sourceSets').main.runtimeClasspath
+    def destination = app.layout.buildDirectory.file('ui-preview/runtime-classpath.txt')
+    app.tasks.register('writeUiPreviewClasspath') {
+        group = 'verification'
+        description = 'Exports the existing app runtime classpath for the isolated UI preview.'
+        dependsOn(app.tasks.named('classes'))
+        inputs.files(runtimeClasspath)
+        outputs.file(destination)
+        doLast {
+            def output = destination.get().asFile
+            output.parentFile.mkdirs()
+            output.setText(runtimeClasspath.asPath, 'UTF-8')
+        }
+    }
+}

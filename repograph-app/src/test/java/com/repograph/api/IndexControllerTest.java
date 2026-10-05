@@ -1,6 +1,7 @@
 package com.repograph.api;
 
 import com.repograph.app.pipeline.IndexHistoryStore;
+import com.repograph.app.watcher.FileWatcherService;
 import com.repograph.core.pipeline.IndexPipeline;
 import com.repograph.core.pipeline.IndexProgressEvent;
 import com.repograph.core.pipeline.IndexResult;
@@ -20,13 +21,19 @@ import java.nio.file.Path;
 import java.util.List;
 
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -65,6 +72,9 @@ class IndexControllerTest {
     AssetImportService assetImportService;
 
     @MockBean
+    FileWatcherService fileWatcherService;
+
+    @MockBean
     TriageDataCleanup triageDataCleanup;
 
     private java.util.concurrent.ExecutorService worker;
@@ -77,6 +87,8 @@ class IndexControllerTest {
             return null;
         }).when(indexExecutor).execute(any());
         when(indexHistoryStore.tryStart(anyString())).thenReturn(true);
+        when(indexStore.withProjectMutation(anyString(), any()))
+                .thenAnswer(invocation -> invocation.<Supplier<?>>getArgument(1).get());
     }
 
     @org.junit.jupiter.api.AfterEach
@@ -220,6 +232,58 @@ class IndexControllerTest {
     }
 
     @Test
+    void deleteProjectCoordinatesValidationAndAllCleanupInOneMutation() throws Exception {
+        String projectId = "coordinated";
+        AtomicBoolean insideMutation = new AtomicBoolean();
+        when(indexStore.withProjectMutation(org.mockito.ArgumentMatchers.eq(projectId), any()))
+                .thenAnswer(invocation -> {
+                    insideMutation.set(true);
+                    try {
+                        return invocation.<Supplier<?>>getArgument(1).get();
+                    } finally {
+                        insideMutation.set(false);
+                    }
+                });
+        org.mockito.stubbing.Answer<Void> assertCoordinated = invocation -> {
+            assertThat(insideMutation.get()).as("cleanup must hold the project mutation boundary").isTrue();
+            return null;
+        };
+        doAnswer(assertCoordinated).when(assetImportService).validateProjectDeletion(projectId);
+        doAnswer(assertCoordinated).when(fileWatcherService).stop(projectId);
+        doAnswer(assertCoordinated).when(indexStore).removeProject(projectId);
+        doAnswer(assertCoordinated).when(vulnStore).removeProject(projectId);
+        doAnswer(assertCoordinated).when(triageDataCleanup).removeProject(projectId);
+        doAnswer(assertCoordinated).when(assetImportService).cleanupManagedProject(projectId);
+        doAnswer(assertCoordinated).when(indexHistoryStore).remove("/tmp/coordinated");
+
+        mvc.perform(delete("/api/v1/index/project")
+                        .param("projectId", projectId).param("projectRoot", "/tmp/coordinated"))
+                .andExpect(status().isOk());
+
+        verify(indexHistoryStore).remove("/tmp/coordinated");
+        assertThat(insideMutation.get()).isFalse();
+    }
+
+    @Test
+    void deleteFailureStopsWatcherBeforePreservingManagedAssetsAndOtherState() throws Exception {
+        String projectId = "failed-deletion";
+        doThrow(new IllegalStateException("vector storage unavailable"))
+                .when(indexStore).removeProject(projectId);
+
+        mvc.perform(delete("/api/v1/index/project")
+                        .param("projectId", projectId).param("projectRoot", "/tmp/failed-deletion"))
+                .andExpect(status().isInternalServerError());
+
+        var order = inOrder(assetImportService, fileWatcherService, indexStore);
+        order.verify(assetImportService).validateProjectDeletion(projectId);
+        order.verify(fileWatcherService).stop(projectId);
+        order.verify(indexStore).removeProject(projectId);
+        verify(assetImportService, never()).cleanupManagedProject(anyString());
+        verify(indexHistoryStore, never()).remove(anyString());
+        verifyNoInteractions(vulnStore, triageDataCleanup);
+    }
+
+    @Test
     void deleteProject_rejectsRunningManagedAssetBeforeDeletingIndexes() throws Exception {
         doThrow(new AssetBusyException("still indexing"))
                 .when(assetImportService).validateProjectDeletion("abc123def456");
@@ -228,6 +292,7 @@ class IndexControllerTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("ASSET_BUSY"));
 
-        verifyNoInteractions(indexStore);
+        verify(indexStore, never()).removeProject(anyString());
+        verifyNoInteractions(fileWatcherService);
     }
 }

@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org" lang="zh">
 <head th:replace="~{fragments/head :: head}"></head>
-<body x-data>
+<body x-data :class="{ 'nav-open': $store.repograph.navOpen }">
+
+<a class="skip-link" href="#main-content" data-i18n="shell.skip"
+   onclick="event.preventDefault();document.getElementById('main-content').focus()">跳至主内容</a>
 
 <svg width="0" height="0" style="position:absolute">
   <defs>
@@ -16,7 +19,10 @@
 
 <div class="layout">
   <nav th:replace="~{fragments/nav :: nav}"></nav>
-  <main>
+  <button type="button" class="nav-backdrop" @click="$store.repograph.toggleNavigation()"
+          :tabindex="$store.repograph.navOpen ? 0 : -1" aria-label="关闭导航"
+          data-i18n-aria-label="shell.closeMenu"></button>
+  <main id="main-content" tabindex="-1">
     <th:block th:replace="~{panels/agent    :: panel}"></th:block>
     <th:block th:replace="~{panels/search   :: panel}"></th:block>
     <th:block th:replace="~{panels/graph    :: panel}"></th:block>
@@ -35,7 +41,8 @@
 <div class="statusbar">
   <span class="sb-brand">RG v0.5.0</span>
   <span class="sb-dot">·</span>
-  <span class="sb-status">● ONLINE</span>
+  <span class="sb-status" id="sb-health" data-state="checking" role="status"
+        data-i18n="shell.status.checking">正在检查服务</span>
   <span class="sb-dot">·</span>
   <span class="sb-clock" id="sb-clock">--:--:--</span>
   <span class="sb-flex"></span>
@@ -43,23 +50,26 @@
 </div>
 
 <div id="tooltip"></div>
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
 <!-- Delete confirm modal -->
-<div id="delete-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)hideDeleteModal()">
-  <div class="modal-card">
+<div id="delete-modal" class="modal-overlay" style="display:none" aria-hidden="true"
+     onclick="if(event.target===this)hideDeleteModal()">
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="delete-modal-title"
+       aria-describedby="delete-modal-body delete-modal-warn" tabindex="-1">
     <div class="modal-icon">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
         <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
         <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
       </svg>
     </div>
-    <div class="modal-title" id="delete-modal-title">删除项目</div>
+    <div class="modal-title" id="delete-modal-title" data-i18n="delete.title">删除项目</div>
     <div class="modal-body" id="delete-modal-body"></div>
-    <div class="modal-warn">Neo4j 节点 · Qdrant 向量 · 增量缓存</div>
+    <div class="modal-warn" id="delete-modal-warn" data-i18n="delete.scope">Neo4j 节点 · Qdrant 向量 · 增量缓存</div>
     <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="hideDeleteModal()">取消</button>
-      <button class="btn btn-danger" id="delete-modal-confirm">确认删除</button>
+      <button type="button" class="btn btn-ghost" id="delete-modal-cancel" onclick="hideDeleteModal()"
+              data-i18n="delete.cancel">取消</button>
+      <button type="button" class="btn btn-danger" id="delete-modal-confirm" data-i18n="delete.confirm">确认删除</button>
     </div>
   </div>
 </div>
@@ -77,6 +87,7 @@
 
 <!-- App scripts (defer — run after DOM + Alpine) -->
 <script defer th:src="@{/js/repograph-app.js}"></script>
+<script defer th:src="@{/js/repograph-symbol.js}"></script>
 <script defer th:src="@{/js/repograph-agent.js}"></script>
 <script defer th:src="@{/js/repograph-search.js}"></script>
 <script defer th:src="@{/js/repograph-graph.js}"></script>

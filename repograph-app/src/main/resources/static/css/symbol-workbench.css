@@ -1,0 +1,84 @@
+/* Exact symbol inspection, scoped to the symbol workbench. */
+#panel-symbol .symbol-workbench { display: flex; flex-direction: column; gap: 18px; }
+#panel-symbol .symbol-query-card { background: var(--bg-2); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
+#panel-symbol .symbol-query-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+#panel-symbol #symbol-tab-row { flex: 0 0 auto; }
+#panel-symbol .symbol-scope { display: flex; align-items: center; justify-content: flex-end; gap: 10px; min-width: 0; font-size: 12px; }
+#panel-symbol .symbol-scope > span { color: var(--text-3); flex: 0 0 auto; }
+#panel-symbol .symbol-scope strong { font-weight: 500; color: var(--mint); overflow-wrap: anywhere; text-align: right; }
+#panel-symbol .symbol-scope-hint { color: var(--text-3); font-size: 12px; margin: 12px 0 20px; line-height: 1.7; }
+#panel-symbol .symbol-query-form { display: flex; align-items: flex-end; gap: 12px; }
+#panel-symbol .symbol-field { display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 0; font-size: 12px; color: var(--text-2); }
+#panel-symbol .symbol-field input { min-width: 0; width: 100%; min-height: 42px; font-family: var(--fm); font-size: 13px; }
+#panel-symbol .symbol-line-field { flex: 0 1 112px; }
+#panel-symbol .symbol-query-form > button { min-height: 42px; flex: 0 0 auto; padding-inline: 24px; }
+#panel-symbol .symbol-input-hint { color: var(--text-3); font-size: 12px; line-height: 1.7; margin: 10px 0 0; }
+#panel-symbol .symbol-validation { color: var(--red); font-size: 12px; margin: 12px 0 0; }
+#panel-symbol .symbol-query-status { font-size: 13px; color: var(--mint); overflow-wrap: anywhere; }
+#panel-symbol .symbol-query-status[data-state="not-found"] { color: var(--text-2); }
+#panel-symbol .symbol-query-status:empty { display: none; }
+#panel-symbol .symbol-result { min-width: 0; }
+#panel-symbol .symbol-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; min-height: 200px; justify-content: center; padding: 30px 24px; border: 1px dashed var(--border); border-radius: 14px; text-align: center; }
+#panel-symbol .symbol-empty strong { color: var(--text); font-size: 16px; font-weight: 600; }
+#panel-symbol .symbol-empty p { color: var(--text-3); margin: 0; font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
+#panel-symbol .symbol-empty-icon { width: 44px; height: 44px; display: grid; place-items: center; border: 1px solid rgba(110, 231, 183, .16); border-radius: 11px; color: var(--mint); font-size: 24px; background: rgba(110, 231, 183, .04); margin-bottom: 4px; }
+#panel-symbol .symbol-error strong { color: var(--red); }
+#panel-symbol .symbol-error button { margin-top: 4px; }
+#panel-symbol .symbol-loading { min-height: 200px; padding: 28px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-2); }
+#panel-symbol .symbol-loading > div { height: 15px; margin: 14px 0; border-radius: 4px; background: linear-gradient(100deg, var(--bg-3), rgba(110, 231, 183, .06), var(--bg-3)); background-size: 200% 100%; animation: symbol-loading 1.5s ease-in-out infinite; }
+#panel-symbol .symbol-loading > div:first-child { width: 45%; height: 23px; }
+#panel-symbol .symbol-loading > div:last-child { width: 70%; }
+@keyframes symbol-loading { to { background-position: -200% 0; } }
+#panel-symbol .symbol-detail { border: 1px solid var(--border); background: var(--bg-2); border-radius: 14px; padding: 22px; min-width: 0; }
+#panel-symbol .symbol-detail-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+#panel-symbol .symbol-detail-heading > div { min-width: 0; }
+#panel-symbol .symbol-detail-heading > button { flex: 0 0 auto; }
+#panel-symbol .symbol-detail h2 { font-size: 23px; font-weight: 600; line-height: 1.5; letter-spacing: -.4px; margin: 12px 0 0; overflow-wrap: anywhere; }
+#panel-symbol .symbol-language { display: inline-block; color: var(--text-3); font-family: var(--fm); font-size: 11px; margin-left: 10px; }
+#panel-symbol .symbol-facts { display: flex; flex-direction: column; gap: 12px; margin: 20px 0 0; }
+#panel-symbol .symbol-facts > div { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 12px; }
+#panel-symbol .symbol-facts dt { color: var(--text-3); font-size: 12px; }
+#panel-symbol .symbol-facts dd { margin: 0; font-family: var(--fm); font-size: 12px; line-height: 1.7; color: var(--text-2); overflow-wrap: anywhere; }
+#panel-symbol .symbol-facts .symbol-qualified-name { color: var(--text); }
+#panel-symbol .symbol-line-range { display: inline-block; margin-left: 12px; color: var(--mint); font-size: 11px; }
+#panel-symbol .symbol-detail h3 { margin: 0 0 9px; font-size: 12px; font-weight: 500; color: var(--text-3); }
+#panel-symbol .symbol-signature { margin-top: 22px; }
+#panel-symbol pre { margin: 0; padding: 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; font: 12px/1.8 var(--fm); color: var(--text); max-width: 100%; overflow: auto; }
+#panel-symbol .symbol-signature pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+#panel-symbol .symbol-annotations { margin-top: 18px; }
+#panel-symbol .symbol-annotations > div { display: flex; flex-wrap: wrap; gap: 8px; }
+#panel-symbol .symbol-annotations > div > span { color: var(--text-2); background: var(--bg-3); padding: 3px 7px; border: 1px solid var(--border); border-radius: 5px; font: 11px/1.6 var(--fm); overflow-wrap: anywhere; max-width: 100%; }
+#panel-symbol .symbol-detail-actions { display: flex; align-items: center; gap: 12px; margin-top: 20px; }
+#panel-symbol .symbol-copy-feedback { color: var(--mint); font-size: 12px; overflow-wrap: anywhere; }
+#panel-symbol .symbol-copy-feedback[data-tone="error"] { color: var(--red); }
+#panel-symbol .symbol-source { border-top: 1px solid var(--border); margin-top: 20px; padding-top: 16px; }
+#panel-symbol .symbol-source > summary { cursor: pointer; padding: 6px 0; color: var(--text-2); font-size: 13px; font-weight: 600; }
+#panel-symbol .symbol-source-toolbar { display: flex; justify-content: flex-end; margin: 8px 0 10px; }
+#panel-symbol .symbol-source-toolbar button { font-size: 12px; }
+#panel-symbol .symbol-source pre { max-height: 500px; }
+#panel-symbol .symbol-no-source { color: var(--text-3); font-size: 12px; margin: 18px 0 0; }
+#panel-symbol summary:focus-visible, #panel-symbol pre:focus-visible { outline: 2px solid var(--mint); outline-offset: 3px; border-radius: 6px; }
+#panel-symbol [hidden] { display: none !important; }
+@media (max-width: 760px) {
+  #panel-symbol .symbol-query-card { padding: 16px; }
+  #panel-symbol .symbol-query-heading { display: block; }
+  #panel-symbol #symbol-tab-row { display: flex; }
+  #panel-symbol #symbol-tab-row > button { flex: 1; }
+  #panel-symbol .symbol-scope { justify-content: flex-start; margin-top: 14px; align-items: flex-start; }
+  #panel-symbol .symbol-scope strong { text-align: left; }
+  #panel-symbol .symbol-scope-hint { font-size: 11px; margin-bottom: 16px; }
+  #panel-symbol .symbol-query-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  #panel-symbol .symbol-locate-form { grid-template-columns: minmax(0, 1fr) 90px; }
+  #panel-symbol .symbol-locate-form > button { grid-column: 1 / -1; }
+  #panel-symbol .symbol-detail { padding: 16px; }
+  #panel-symbol .symbol-detail-heading { flex-wrap: wrap; gap: 12px; }
+  #panel-symbol .symbol-detail h2 { font-size: 21px; }
+  #panel-symbol .symbol-facts > div { display: block; }
+  #panel-symbol .symbol-facts dd { margin-top: 5px; }
+  #panel-symbol .symbol-detail-actions { align-items: flex-start; flex-direction: column; }
+  #panel-symbol .symbol-input-hint { font-size: 11px; }
+  #panel-symbol .symbol-empty { padding: 26px 18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #panel-symbol .symbol-loading > div { animation: none; }
+}

@@ -22,13 +22,21 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -129,6 +137,31 @@ class DefaultAssetImportServiceTest {
     }
 
     @Test
+    void failedIndexCleanupStopsWatcherButPreservesRegisteredSourceForRetry() throws Exception {
+        Fixture fixture = fixture(Runnable::run);
+        when(fixture.indexPipeline.index(any(Path.class), any(IndexOptions.class)))
+                .thenReturn(sampleResult());
+        Path upload = createZip("demo/Main.java", "class Main {}");
+        ImportedAsset receipt;
+        try (InputStream input = Files.newInputStream(upload)) {
+            receipt = fixture.service.importArchive(
+                    input, "demo.zip", Files.size(upload), IndexOptions.defaults());
+        }
+        doThrow(new IllegalStateException("vector storage unavailable"))
+                .when(fixture.indexStore).removeProject(receipt.projectId());
+
+        assertThatThrownBy(() -> fixture.service.delete(receipt.assetId()))
+                .isInstanceOf(IllegalStateException.class);
+
+        var order = inOrder(fixture.fileWatcherService, fixture.indexStore);
+        order.verify(fixture.fileWatcherService).stop(receipt.projectId());
+        order.verify(fixture.indexStore).removeProject(receipt.projectId());
+        assertThat(fixture.service.find(receipt.assetId())).isPresent();
+        assertThat(receipt.projectRoot().resolve("Main.java")).hasContent("class Main {}");
+        verifyNoInteractions(fixture.vulnStore, fixture.externalScanService, fixture.triageDataCleanup);
+    }
+
+    @Test
     void cleanupManagedProject_removesRegistrationAfterCallerDeletedIndexes() throws Exception {
         Fixture fixture = fixture(Runnable::run);
         when(fixture.indexPipeline.index(any(Path.class), any(IndexOptions.class)))
@@ -146,9 +179,75 @@ class DefaultAssetImportServiceTest {
 
         assertThat(fixture.service.find(receipt.assetId())).isEmpty();
         assertThat(fixture.properties.rootDir().resolve(receipt.assetId())).doesNotExist();
-        verifyNoInteractions(fixture.indexStore, fixture.vulnStore);
+        verify(fixture.indexStore, never()).removeProject(anyString());
+        verifyNoInteractions(fixture.vulnStore);
         verify(fixture.externalScanService).removeProject(ready.projectId());
         verify(fixture.fileWatcherService).stop(ready.projectId());
+    }
+
+    @Test
+    void deleteKeepsMutationBoundaryUntilAllManagedResourcesAreRemoved() throws Exception {
+        Fixture fixture = fixture(Runnable::run);
+        when(fixture.indexPipeline.index(any(Path.class), any(IndexOptions.class)))
+                .thenReturn(sampleResult());
+        Path upload = createZip("demo/Main.java", "class Main {}");
+        ImportedAsset receipt;
+        try (InputStream input = Files.newInputStream(upload)) {
+            receipt = fixture.service.importArchive(
+                    input, "demo.zip", Files.size(upload), IndexOptions.defaults());
+        }
+        AtomicBoolean insideMutation = new AtomicBoolean();
+        AtomicBoolean completedMutation = new AtomicBoolean();
+        when(fixture.indexStore.withProjectMutation(eq(receipt.projectId()), any()))
+                .thenAnswer(invocation -> {
+                    insideMutation.set(true);
+                    try {
+                        Object result = invocation.<Supplier<?>>getArgument(1).get();
+                        assertThat(fixture.service.find(receipt.assetId())).isEmpty();
+                        assertThat(fixture.properties.rootDir().resolve(receipt.assetId())).doesNotExist();
+                        completedMutation.set(true);
+                        return result;
+                    } finally {
+                        insideMutation.set(false);
+                    }
+                });
+        org.mockito.stubbing.Answer<Void> assertCoordinated = invocation -> {
+            assertThat(insideMutation.get()).as("asset cleanup must hold the project mutation boundary").isTrue();
+            return null;
+        };
+        doAnswer(assertCoordinated).when(fixture.fileWatcherService).stop(receipt.projectId());
+        doAnswer(assertCoordinated).when(fixture.indexStore).removeProject(receipt.projectId());
+        doAnswer(assertCoordinated).when(fixture.vulnStore).removeProject(receipt.projectId());
+        doAnswer(assertCoordinated).when(fixture.externalScanService).removeProject(receipt.projectId());
+        doAnswer(assertCoordinated).when(fixture.triageDataCleanup).removeProject(receipt.projectId());
+
+        assertThat(fixture.service.delete(receipt.assetId())).isTrue();
+        assertThat(completedMutation.get()).isTrue();
+    }
+
+    @Test
+    void cleanupUnmanagedProjectStillStopsItsWatcherInsideMutation() {
+        Fixture fixture = fixture(Runnable::run);
+        AtomicBoolean insideMutation = new AtomicBoolean();
+        when(fixture.indexStore.withProjectMutation(eq("external-project"), any()))
+                .thenAnswer(invocation -> {
+                    insideMutation.set(true);
+                    try {
+                        return invocation.<Supplier<?>>getArgument(1).get();
+                    } finally {
+                        insideMutation.set(false);
+                    }
+                });
+        doAnswer(invocation -> {
+            assertThat(insideMutation.get()).isTrue();
+            return null;
+        }).when(fixture.fileWatcherService).stop("external-project");
+
+        fixture.service.cleanupManagedProject("external-project");
+
+        verify(fixture.fileWatcherService).stop("external-project");
+        verify(fixture.indexStore, never()).removeProject(anyString());
+        verifyNoInteractions(fixture.externalScanService, fixture.vulnStore, fixture.triageDataCleanup);
     }
 
     private Fixture fixture(Executor executor) {
@@ -159,6 +258,8 @@ class DefaultAssetImportServiceTest {
         IndexHistoryStore historyStore = new IndexHistoryStore(db.toString());
         IndexPipeline pipeline = mock(IndexPipeline.class);
         IndexStore indexStore = mock(IndexStore.class);
+        when(indexStore.withProjectMutation(anyString(), any()))
+                .thenAnswer(invocation -> invocation.<Supplier<?>>getArgument(1).get());
         VulnStore vulnStore = mock(VulnStore.class);
         ExternalScanService externalScanService = mock(ExternalScanService.class);
         TriageDataCleanup triageDataCleanup = mock(TriageDataCleanup.class);

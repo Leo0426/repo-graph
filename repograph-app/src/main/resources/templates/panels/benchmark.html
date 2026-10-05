@@ -4,19 +4,23 @@
 <div th:fragment="panel" id="panel-benchmark" class="panel"
      :class="{ active: $store.repograph.panel === 'benchmark' }">
   <div class="panel-header">
-    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
-      <div>
-        <div class="panel-title" data-i18n="benchmark.title">检索效果评估</div>
-        <div class="bm-run-meta" id="bm-run-meta" data-i18n="benchmark.subtitle">语义检索 &amp; 代码相似检索 · Hit@K · MRR</div>
-      </div>
-      <button class="btn btn-ghost" style="flex-shrink:0;margin-top:2px" onclick="loadBenchmark()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
-        <span data-i18n="btn.refresh">刷新</span>
-      </button>
+    <div class="bm-heading-row">
+      <div><div class="panel-title" data-i18n="benchmark.title">检索效果评估</div>
+        <div class="panel-subtitle" data-i18n="benchmark.subtitle">语义检索 &amp; 代码相似检索 · Hit@K · MRR</div></div>
+      <button type="button" class="btn btn-ghost" id="bm-refresh" onclick="loadBenchmark()" data-i18n="benchmark.refreshResults">刷新结果</button>
     </div>
+    <p class="bm-scope-note" data-i18n="benchmark.scopeNote">显示最近保存的离线结果，独立于页头当前项目。</p>
+    <div id="bm-run-meta" hidden></div>
   </div>
-  <div class="panel-body" id="bm-body">
-    <div class="loading-row"><div class="spinner"></div><span data-i18n="benchmark.loading">加载评估结果…</span></div>
+  <div class="panel-body" id="bm-body" aria-busy="false">
+    <div id="bm-status" aria-live="polite"></div>
+    <div id="bm-content"></div>
+    <details class="bm-method-note"><summary data-i18n="benchmark.sourceFile">离线结果文件</summary>
+      <code>~/.repograph/benchmark-latest.json</code>
+      <p data-i18n="benchmark.readOnly">刷新只读取已保存的结果，不会启动测评。</p>
+      <p data-i18n="benchmark.hitHint">Hit@K 表示前 K 条结果中命中预期目标的查询比例。</p>
+      <p data-i18n="benchmark.mrrHint">MRR@10 为前十名中首次命中排名倒数的均值。</p>
+    </details>
   </div>
 </div>
 </body>

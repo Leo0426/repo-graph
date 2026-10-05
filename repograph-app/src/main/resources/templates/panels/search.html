@@ -8,10 +8,11 @@
     <div class="panel-subtitle" data-i18n="search.subtitle">通过自然语言或代码片段检索代码单元</div>
   </div>
   <div class="panel-body">
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
-      <div class="tab-row" id="search-tab-row">
-        <button class="tab active" onclick="setSearchMode('semantic',this)" data-i18n="tab.semantic">语义</button>
-        <button class="tab" onclick="setSearchMode('code',this)" data-i18n="tab.code">代码</button>
+    <section class="search-controls" aria-label="搜索条件">
+    <div class="search-mode-row">
+      <div class="tab-row" id="search-tab-row" role="group" aria-label="搜索方式">
+        <button class="tab active" aria-pressed="true" onclick="setSearchMode('semantic',this)" data-i18n="tab.semantic">语义</button>
+        <button class="tab" aria-pressed="false" onclick="setSearchMode('code',this)" data-i18n="tab.code">代码</button>
       </div>
       <span style="font-size:12px;color:var(--text-3);font-family:var(--fm)" id="search-mode-hint" data-i18n="hint.semantic">自然语言 → 代码单元</span>
     </div>
@@ -21,17 +22,19 @@
         <div class="search-wrap">
           <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
           <input type="text" id="search-input" placeholder="查找所有 HTTP REST 接口…"
-            autocomplete="off" data-i18n-ph="ph.semantic"
-            oninput="onSearchInput(this)"
+            autocomplete="off" data-i18n-ph="ph.semantic" data-i18n-aria-label="search.title" aria-label="语义搜索"
+            oninput="onSearchInput(this,event)"
+            oncompositionstart="invalidateSearch()"
+            oncompositionend="onSearchInput(this)"
             onfocus="showHistory()"
             onblur="hideHistoryDelayed()">
-          <button class="search-clear" id="search-clear" onclick="clearSearch()" title="Clear">
+          <button type="button" aria-label="清空搜索" data-i18n-aria-label="search.clear" class="search-clear" id="search-clear" onclick="clearSearch()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
         <div class="search-history" id="search-history"></div>
       </div>
-      <button class="btn btn-primary" onclick="doSearch()">
+      <button type="button" id="search-submit" class="btn btn-primary" onclick="doSearch()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m22 2-7 20-4-9-9-4 20-7z"/></svg>
         <span data-i18n="btn.search">搜索</span>
       </button>
@@ -44,30 +47,36 @@
       <span><kbd>1</kbd>–<kbd>9</kbd><kbd>0</kbd> <span data-i18n="kbd.panels">切换面板</span></span>
     </div>
 
-    <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:18px">
+    <details id="search-filter-disclosure" class="search-filter-disclosure" open>
+      <summary>
+        <strong data-i18n="search.filters">筛选条件</strong>
+        <span id="search-filter-summary"></span>
+      </summary>
+    <div class="search-filters">
       <div>
         <div class="filter-label" style="margin-bottom:6px" data-i18n="filter.language">语言</div>
         <div class="filter-row">
-          <div class="filter-chip active" data-group="lang" data-val="" onclick="toggleChip(this,'lang')" data-i18n="chip.all">全部</div>
-          <div class="filter-chip" data-group="lang" data-val="java" onclick="toggleChip(this,'lang')">Java</div>
-          <div class="filter-chip" data-group="lang" data-val="c" onclick="toggleChip(this,'lang')">C</div>
-          <div class="filter-chip" data-group="lang" data-val="python" onclick="toggleChip(this,'lang')">Python</div>
+          <button type="button" class="filter-chip active" data-group="lang" data-val="" onclick="toggleChip(this,'lang')" data-i18n="chip.all" aria-pressed="true">全部</button>
+          <button type="button" class="filter-chip" data-group="lang" data-val="java" onclick="toggleChip(this,'lang')" aria-pressed="false">Java</button>
+          <button type="button" class="filter-chip" data-group="lang" data-val="c" onclick="toggleChip(this,'lang')" aria-pressed="false">C</button>
+          <button type="button" class="filter-chip" data-group="lang" data-val="python" onclick="toggleChip(this,'lang')" aria-pressed="false">Python</button>
         </div>
       </div>
       <div>
         <div class="filter-label" style="margin-bottom:6px" data-i18n="filter.kind">类型</div>
         <div class="filter-row">
-          <div class="filter-chip active" data-group="kind" data-val="" onclick="toggleChip(this,'kind')" data-i18n="chip.all">全部</div>
-          <div class="filter-chip" data-group="kind" data-val="CLASS" onclick="toggleChip(this,'kind')" data-i18n="chip.class">类</div>
-          <div class="filter-chip" data-group="kind" data-val="METHOD" onclick="toggleChip(this,'kind')" data-i18n="chip.method">方法</div>
-          <div class="filter-chip" data-group="kind" data-val="FUNCTION" onclick="toggleChip(this,'kind')" data-i18n="chip.function">函数</div>
-          <div class="filter-chip" data-group="kind" data-val="INTERFACE" onclick="toggleChip(this,'kind')" data-i18n="chip.interface">接口</div>
+          <button type="button" class="filter-chip active" data-group="kind" data-val="" onclick="toggleChip(this,'kind')" data-i18n="chip.all" aria-pressed="true">全部</button>
+          <button type="button" class="filter-chip" data-group="kind" data-val="CLASS" onclick="toggleChip(this,'kind')" data-i18n="chip.class" aria-pressed="false">类</button>
+          <button type="button" class="filter-chip" data-group="kind" data-val="METHOD" onclick="toggleChip(this,'kind')" data-i18n="chip.method" aria-pressed="false">方法</button>
+          <button type="button" class="filter-chip" data-group="kind" data-val="FUNCTION" onclick="toggleChip(this,'kind')" data-i18n="chip.function" aria-pressed="false">函数</button>
+          <button type="button" class="filter-chip" data-group="kind" data-val="INTERFACE" onclick="toggleChip(this,'kind')" data-i18n="chip.interface" aria-pressed="false">接口</button>
         </div>
       </div>
       <div style="margin-left:auto;display:flex;align-items:flex-end;gap:8px">
         <div>
           <div class="filter-label" style="margin-bottom:6px" data-i18n="filter.limit">数量</div>
-          <select id="search-limit" style="width:72px;padding:6px 10px">
+          <select id="search-limit" style="width:72px;padding:6px 10px" onchange="changeSearchLimit()"
+                  data-i18n-aria-label="filter.limit" aria-label="数量">
             <option value="5">5</option>
             <option value="10" selected>10</option>
             <option value="20">20</option>
@@ -76,12 +85,26 @@
         </div>
       </div>
     </div>
+      <div class="search-filter-footer">
+        <span class="search-kind-note" data-i18n="search.kindSemanticOnly" hidden>类型筛选仅适用于语义搜索。</span>
+        <button type="button" class="btn btn-ghost" id="search-reset-filters"
+                onclick="resetSearchFilters()" data-i18n="search.resetFilters">重置筛选</button>
+      </div>
+    </details>
 
-    <div id="search-results">
+    <div class="search-scope" data-i18n="search.scope">检索范围：全部已索引项目</div>
+    </section>
+
+    <div id="search-results" aria-live="polite" aria-busy="false">
       <div class="empty-state">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
         <p data-i18n="empty.prompt">输入查询内容开始检索</p>
         <span data-i18n="empty.example">试试："graph callers impact analysis" 或 "HTTP REST 接口"</span>
+        <div class="search-examples">
+          <button type="button" onclick="useSearchExample(this)" data-i18n="search.example.http">HTTP 接口</button>
+          <button type="button" onclick="useSearchExample(this)" data-i18n="search.example.auth">身份验证</button>
+          <button type="button" onclick="useSearchExample(this)" data-i18n="search.example.data">数据库查询</button>
+        </div>
       </div>
     </div>
   </div>

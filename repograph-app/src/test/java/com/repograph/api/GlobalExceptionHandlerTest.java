@@ -1,6 +1,7 @@
 package com.repograph.api;
 
 import com.repograph.app.pipeline.IndexHistoryStore;
+import com.repograph.app.watcher.FileWatcherService;
 import com.repograph.core.asset.AssetImportService;
 import com.repograph.core.finding.TriageDataCleanup;
 import com.repograph.core.pipeline.IndexPipeline;
@@ -54,6 +55,9 @@ class GlobalExceptionHandlerTest {
 
     @MockBean
     AssetImportService assetImportService;
+
+    @MockBean
+    FileWatcherService fileWatcherService;
 
     @MockBean
     TriageDataCleanup triageDataCleanup;

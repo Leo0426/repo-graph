@@ -7,41 +7,46 @@
     <div class="panel-title" data-i18n="symbol.title">符号查询</div>
     <div class="panel-subtitle" data-i18n="symbol.subtitle">按全限定名精确查找符号，或按文件行号定位</div>
   </div>
-  <div class="panel-body">
-    <div class="tab-row" id="symbol-tab-row" style="margin-bottom:18px">
-      <button class="tab active" onclick="setSymbolMode('lookup',this)" data-i18n="symbol.tab.lookup">符号查询</button>
-      <button class="tab" onclick="setSymbolMode('locate',this)" data-i18n="symbol.tab.locate">文件定位</button>
-    </div>
-
-    <!-- Lookup -->
-    <div id="symbol-lookup-section">
-      <div class="input-row" style="margin-bottom:14px">
-        <input type="text" id="symbol-qn-input" placeholder="com.example.Foo#bar(String)"
-          autocomplete="off" data-i18n-ph="ph.symbolQn"
-          onkeydown="if(event.key==='Enter')doSymbolLookup()">
-        <button class="btn btn-primary" onclick="doSymbolLookup()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-          <span data-i18n="btn.lookup">查找</span>
-        </button>
+  <div class="panel-body symbol-workbench">
+    <section class="symbol-query-card">
+      <div class="symbol-query-heading">
+        <div class="tab-row" id="symbol-tab-row" role="group" data-i18n-aria-label="symbol.mode" aria-label="查询方式">
+          <button type="button" class="tab active" onclick="setSymbolMode('lookup')" data-mode="lookup" aria-pressed="true" data-i18n="symbol.tab.lookup">符号查询</button>
+          <button type="button" class="tab" onclick="setSymbolMode('locate')" data-mode="locate" aria-pressed="false" data-i18n="symbol.tab.locate">文件定位</button>
+        </div>
+        <div class="symbol-scope"><span data-i18n="symbol.scope">查询范围</span><strong id="symbol-scope-name"></strong></div>
       </div>
-      <div id="symbol-result"></div>
-    </div>
+      <p class="symbol-scope-hint" data-i18n="symbol.scopeHint">跟随页头当前项目；全部项目模式下同名符号可能来自不同仓库。</p>
 
-    <!-- Locate -->
-    <div id="symbol-locate-section" style="display:none">
-      <div style="display:flex;gap:10px;margin-bottom:14px">
-        <input type="text" id="locate-file-input" placeholder="src/main/java/com/example/Foo.java"
-          autocomplete="off" data-i18n-ph="ph.locateFile" style="flex:3">
-        <input type="number" id="locate-line-input" placeholder="42"
-          min="1" style="flex:1" data-i18n-ph="ph.locateLine"
-          onkeydown="if(event.key==='Enter')doLocate()">
-        <button class="btn btn-primary" onclick="doLocate()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-          <span data-i18n="btn.locate">定位</span>
-        </button>
+      <div id="symbol-lookup-section">
+        <form class="symbol-query-form" novalidate onsubmit="submitSymbolQuery(event,'lookup')"
+              onkeydown="handleSymbolKeydown(event)">
+          <label class="symbol-field"><span data-i18n="symbol.qualifiedName">完整符号名</span>
+            <input type="text" id="symbol-qn-input" placeholder="com.example.Foo#bar(String)" autocomplete="off" spellcheck="false"
+                   data-i18n-ph="ph.symbolQn" oninput="invalidateSymbolQuery()" aria-describedby="symbol-query-hint symbol-validation"></label>
+          <button type="submit" class="btn btn-primary" id="symbol-lookup-btn" data-i18n="btn.lookup">查找</button>
+        </form>
+        <p id="symbol-query-hint" class="symbol-input-hint" data-i18n="symbol.queryHint">使用索引中的完整名称，例如 Java 方法的 类名#方法名(参数类型)。</p>
+        <p id="symbol-validation" class="symbol-validation" role="alert" hidden></p>
       </div>
-      <div id="locate-result"></div>
-    </div>
+      <div id="symbol-locate-section" hidden>
+        <form class="symbol-query-form symbol-locate-form" novalidate onsubmit="submitSymbolQuery(event,'locate')"
+              onkeydown="handleSymbolKeydown(event)">
+          <label class="symbol-field"><span data-i18n="symbol.file">项目相对路径</span>
+            <input type="text" id="locate-file-input" placeholder="src/main/java/com/example/Foo.java" autocomplete="off" spellcheck="false"
+                   data-i18n-ph="ph.locateFile" oninput="invalidateSymbolQuery()" aria-describedby="symbol-locate-hint locate-validation"></label>
+          <label class="symbol-field symbol-line-field"><span data-i18n="symbol.line">行号</span>
+            <input type="number" id="locate-line-input" placeholder="42" min="1" max="2147483647" step="1" inputmode="numeric"
+                   data-i18n-ph="ph.locateLine" oninput="invalidateSymbolQuery()" aria-describedby="locate-validation"></label>
+          <button type="submit" class="btn btn-primary" id="symbol-locate-btn" data-i18n="btn.locate">定位</button>
+        </form>
+        <p id="symbol-locate-hint" class="symbol-input-hint" data-i18n="symbol.locateHint">输入相对于项目根目录的文件路径，定位包含该行的符号。</p>
+        <p id="locate-validation" class="symbol-validation" role="alert" hidden></p>
+      </div>
+    </section>
+    <div id="symbol-query-status" class="symbol-query-status" role="status" aria-live="polite"></div>
+    <div id="symbol-result" class="symbol-result" aria-busy="false"></div>
+    <div id="locate-result" class="symbol-result" aria-busy="false" hidden></div>
   </div>
 </div>
 </body>

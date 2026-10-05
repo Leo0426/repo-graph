@@ -18,17 +18,21 @@ subprojects {
     apply(plugin = "java")
     apply(plugin = "io.spring.dependency-management")
 
+    val libsCatalog = rootProject.extensions.getByType<VersionCatalogsExtension>().named("libs")
+    val asmVersion = libsCatalog.findVersion("asm").get().requiredVersion
+    val grpcVersion = libsCatalog.findVersion("grpc").get().requiredVersion
+
     configurations.all {
         resolutionStrategy {
             // SootUp 1.3.0 bundles ASM 9.6 which doesn't support Java 25 class files (major version 69).
-            force("org.ow2.asm:asm:9.10.1")
-            force("org.ow2.asm:asm-tree:9.10.1")
-            force("org.ow2.asm:asm-util:9.10.1")
-            force("org.ow2.asm:asm-commons:9.10.1")
-            force("org.ow2.asm:asm-analysis:9.10.1")
+            force("org.ow2.asm:asm:$asmVersion")
+            force("org.ow2.asm:asm-tree:$asmVersion")
+            force("org.ow2.asm:asm-util:$asmVersion")
+            force("org.ow2.asm:asm-commons:$asmVersion")
+            force("org.ow2.asm:asm-analysis:$asmVersion")
             // Qdrant ships grpc-netty-shaded:1.59.0 but other deps pull grpc-core:1.63.0,
             // causing AbstractMethodError on getSupportedSocketAddressTypes(). Align all gRPC.
-            force("io.grpc:grpc-netty-shaded:1.63.0")
+            force("io.grpc:grpc-netty-shaded:$grpcVersion")
         }
     }
 
@@ -46,7 +50,6 @@ subprojects {
         }
     }
 
-    val libsCatalog = rootProject.extensions.getByType<VersionCatalogsExtension>().named("libs")
     val springBootVersion = libsCatalog.findVersion("spring-boot").get().requiredVersion
     the<io.spring.gradle.dependencymanagement.dsl.DependencyManagementExtension>().imports {
         mavenBom("org.springframework.boot:spring-boot-dependencies:$springBootVersion")

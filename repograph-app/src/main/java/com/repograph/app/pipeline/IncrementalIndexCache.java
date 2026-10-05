@@ -14,6 +14,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.HexFormat;
@@ -27,7 +28,8 @@ import java.util.stream.Collectors;
  * 基于 SQLite 的增量索引缓存，通过比对文件 MD5 跳过未变更文件。
  *
  * <p>缓存数据库存储于 {@code repograph.index.db-path}（默认 {@code ~/.repograph/index.db}），
- * 包含一张 {@code file_cache} 表，记录文件相对路径、所属项目 ID 和 MD5。
+ * {@code file_cache} 记录文件相对路径、所属项目 ID 和 MD5；空 MD5 表示未完成的索引或清理。
+ * {@code pending_project_deletions} 保留跨存储项目删除的重试标记。
  *
  * <p>数据库文件和父目录不存在时自动创建，不需要外部预建目录。
  *
@@ -101,6 +103,110 @@ public class IncrementalIndexCache {
     }
 
     /**
+     * 在解析前捕获文件指纹，供索引完成时确认提交的是同一份源码。
+     *
+     * @param files 本轮待解析的文件
+     * @return 文件到 MD5 的不可变快照；读取失败的文件不包含在结果中
+     */
+    public Map<Path, String> captureFingerprints(List<Path> files) {
+        Map<Path, String> fingerprints = new LinkedHashMap<>();
+        for (Path file : files) {
+            String md5 = computeMd5(file);
+            if (md5 != null) fingerprints.put(file, md5);
+        }
+        return Map.copyOf(fingerprints);
+    }
+
+    /**
+     * 在写入索引前持久化文件的未完成标记，保留失败或中断后的重试资格。
+     *
+     * @param filePaths 文件相对路径
+     * @param projectId 项目标识
+     */
+    public void markDirty(List<String> filePaths, String projectId) {
+        Map<String, String> dirty = new LinkedHashMap<>();
+        filePaths.forEach(path -> dirty.put(path, ""));
+        writeHashes(dirty, projectId);
+    }
+
+    /**
+     * 持久化待完成的项目删除，包含没有图节点或文件缓存的项目。
+     *
+     * @param projectId 项目标识
+     */
+    public void markProjectDeletionPending(String projectId) {
+        updateProjectDeletion("INSERT OR IGNORE INTO pending_project_deletions(project_id) VALUES (?)", projectId);
+    }
+
+    /**
+     * 查询项目是否存在未完成删除。
+     *
+     * @param projectId 项目标识
+     * @return 是否需要先重试删除
+     */
+    public boolean hasPendingProjectDeletion(String projectId) {
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + dbPath);
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT 1 FROM pending_project_deletions WHERE project_id = ?")) {
+            ps.setString(1, projectId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read pending project deletion: " + projectId, e);
+        }
+    }
+
+    /**
+     * 所有存储清理成功后移除项目删除标记。
+     *
+     * @param projectId 项目标识
+     */
+    public void completeProjectDeletion(String projectId) {
+        updateProjectDeletion("DELETE FROM pending_project_deletions WHERE project_id = ?", projectId);
+    }
+
+    private void updateProjectDeletion(String sql, String projectId) {
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + dbPath);
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, projectId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to persist project deletion state: " + projectId, e);
+        }
+    }
+
+    /**
+     * 只提交索引期间内容未变化的文件指纹。
+     * 变化或无法读取的文件失效并等待下次重试。
+     *
+     * <p>写入的是解析前指纹。即使文件在最终检查后再次改变，
+     * 下次增量扫描仍能检测到变化。
+     *
+     * @param files 已成功完成解析及存储的文件
+     * @param fingerprints 解析前捕获的文件指纹
+     * @param projectId 项目唯一标识符
+     * @param projectRoot 项目根目录
+     * @return 索引期间变化或无法确认内容一致的文件
+     */
+    public List<Path> updateUnchangedEntries(List<Path> files, Map<Path, String> fingerprints,
+                                           String projectId, Path projectRoot) {
+        Map<Path, String> unchanged = new LinkedHashMap<>();
+        List<Path> changed = new ArrayList<>();
+        for (Path file : files) {
+            String expected = fingerprints.get(file);
+            if (expected != null && expected.equals(computeMd5(file))) {
+                unchanged.put(file, expected);
+            } else {
+                changed.add(file);
+            }
+        }
+        markDirty(changed.stream().map(file -> toRelPath(file, projectRoot)).toList(), projectId);
+        writeEntries(unchanged, projectId, projectRoot);
+        return List.copyOf(changed);
+    }
+
+    /**
      * 查找缓存中存在、但本次扫描已不存在的文件路径。
      *
      * @param currentFiles 当前全量扫描得到的文件
@@ -126,8 +232,7 @@ public class IncrementalIndexCache {
                 return List.copyOf(deleted);
             }
         } catch (SQLException e) {
-            log.warn("Failed to find deleted files for project '{}': {}", projectId, e.getMessage());
-            return List.of();
+            throw new IllegalStateException("Failed to find deleted files for project: " + projectId, e);
         }
     }
 
@@ -174,26 +279,34 @@ public class IncrementalIndexCache {
      * @param projectRoot 项目根目录，不为 {@code null}
      */
     public void updateEntries(List<Path> files, String projectId, Path projectRoot) {
-        if (files.isEmpty()) return;
+        writeEntries(captureFingerprints(files), projectId, projectRoot);
+    }
+
+    private void writeEntries(Map<Path, String> fingerprints, String projectId, Path projectRoot) {
+        Map<String, String> hashes = new LinkedHashMap<>();
+        fingerprints.forEach((path, hash) -> hashes.put(toRelPath(path, projectRoot), hash));
+        writeHashes(hashes, projectId);
+    }
+
+    private void writeHashes(Map<String, String> hashes, String projectId) {
+        if (hashes.isEmpty()) return;
         String url = "jdbc:sqlite:" + dbPath;
         try (Connection conn = DriverManager.getConnection(url)) {
             conn.setAutoCommit(false);
             try (PreparedStatement ps = conn.prepareStatement(
                     "INSERT INTO file_cache(project_id, file_path, md5) VALUES(?,?,?) " +
                     "ON CONFLICT(project_id, file_path) DO UPDATE SET md5=excluded.md5")) {
-                for (Path file : files) {
-                    String md5 = computeMd5(file);
-                    if (md5 == null) continue;
+                for (Map.Entry<String, String> entry : hashes.entrySet()) {
                     ps.setString(1, projectId);
-                    ps.setString(2, toRelPath(file, projectRoot));
-                    ps.setString(3, md5);
+                    ps.setString(2, entry.getKey());
+                    ps.setString(3, entry.getValue());
                     ps.addBatch();
                 }
                 ps.executeBatch();
             }
             conn.commit();
         } catch (SQLException e) {
-            log.warn("Failed to batch-update cache entries: {}", e.getMessage());
+            throw new IllegalStateException("Failed to persist index cache state: " + projectId, e);
         }
     }
 
@@ -213,7 +326,7 @@ public class IncrementalIndexCache {
             ps.setString(2, relPath);
             ps.executeUpdate();
         } catch (SQLException e) {
-            log.warn("Failed to remove cache entry '{}' for project '{}': {}", relPath, projectId, e.getMessage());
+            throw new IllegalStateException("Failed to remove cache entry: " + projectId + "/" + relPath, e);
         }
     }
 
@@ -234,7 +347,7 @@ public class IncrementalIndexCache {
             int deleted = ps.executeUpdate();
             log.info("Removed {} cache entry/entries for project '{}'", deleted, projectId);
         } catch (SQLException e) {
-            log.warn("Failed to clear cache for project '{}': {}", projectId, e.getMessage());
+            throw new IllegalStateException("Failed to clear cache for project: " + projectId, e);
         }
     }
 
@@ -257,10 +370,15 @@ public class IncrementalIndexCache {
                         PRIMARY KEY (project_id, file_path)
                     )
                     """);
+                stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS pending_project_deletions (
+                        project_id TEXT PRIMARY KEY NOT NULL
+                    )
+                    """);
             }
             log.debug("Incremental index cache initialised at '{}'", dbPath);
         } catch (Exception e) {
-            log.warn("Failed to initialise incremental cache at '{}': {}", dbPath, e.getMessage());
+            throw new IllegalStateException("Failed to initialise incremental cache: " + dbPath, e);
         }
     }
 

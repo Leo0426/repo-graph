@@ -3,98 +3,81 @@
 <body>
 <div th:fragment="panel" id="panel-index" class="panel"
      :class="{ active: $store.repograph.panel === 'index' }">
-  <div class="panel-header">
-    <div class="panel-title" data-i18n="index.title">索引项目</div>
-    <div class="panel-subtitle" data-i18n="index.subtitle">触发并监控索引管道执行过程</div>
+  <div class="panel-header index-heading">
+    <div><div class="panel-title" data-i18n="index.title">索引项目</div>
+      <div class="panel-subtitle" data-i18n="index.subtitle">触发并监控索引管道执行过程</div></div>
+    <button type="button" class="btn btn-ghost" onclick="focusIndexExecution()" data-i18n="index.viewExecution">查看执行</button>
   </div>
-  <div class="panel-body">
+  <div class="panel-body index-workbench">
     <div class="index-layout">
-      <!-- Form -->
-      <div class="index-form-col">
-        <div class="card">
-          <div class="field-label" data-i18n="index.root">项目根目录</div>
-          <input type="text" id="index-root" placeholder="/path/to/project" autocomplete="off"
-            style="margin-top:6px" data-i18n-ph="ph.root"
-            oninput="localStorage.setItem('repograph_index_root', this.value)">
-        </div>
-
-        <div class="card">
-          <div class="field-label" data-i18n="index.languages">解析语言</div>
-          <div class="checkbox-row" style="margin-top:8px">
-            <label class="check-item"><input type="checkbox" value="java" checked id="lang-java"> Java</label>
-            <label class="check-item"><input type="checkbox" value="c" id="lang-c"> C</label>
-            <label class="check-item"><input type="checkbox" value="python" id="lang-py"> Python</label>
+      <details class="index-configuration" id="index-configuration" open>
+        <summary><span data-i18n="index.configuration">索引配置</span><span aria-hidden="true">⌄</span></summary>
+        <div class="index-configuration-body">
+          <p class="index-helper" data-i18n="index.configurationHint">先选择目录和解析方式，再启动后台索引。</p>
+          <label class="index-field"><span data-i18n="index.root">项目根目录</span>
+            <input type="text" id="index-root" placeholder="/path/to/project" autocomplete="off" spellcheck="false"
+                   data-i18n-ph="ph.root" oninput="onIndexRootChange()" aria-describedby="index-validation"></label>
+          <p id="index-validation" class="index-validation" role="alert" hidden></p>
+          <fieldset class="index-languages"><legend data-i18n="index.languages">解析语言</legend>
+            <div class="checkbox-row">
+              <label class="check-item"><input type="checkbox" value="java" checked id="lang-java"> Java</label>
+              <label class="check-item"><input type="checkbox" value="c" id="lang-c"> C</label>
+              <label class="check-item"><input type="checkbox" value="python" id="lang-py"> Python</label>
+            </div>
+            <p class="index-helper" data-i18n="index.noLanguagesHint">未选中语言时使用全部支持的语言。</p>
+          </fieldset>
+          <label class="index-field"><span data-i18n="index.strategy">解析策略</span>
+            <select id="index-strategy">
+              <option value="auto" data-i18n="strategy.auto">自动（精确 → 启发式降级）</option>
+              <option value="precise" data-i18n="strategy.precise">仅精确解析</option>
+              <option value="heuristic" data-i18n="strategy.heuristic">仅启发式解析</option>
+            </select></label>
+          <label class="index-rebuild"><input type="checkbox" id="no-incremental">
+            <span><strong data-i18n="index.forceReindex">强制重建索引</strong>
+              <small data-i18n="index.skipCache">忽略 MD5 缓存</small></span></label>
+          <div class="index-form-actions">
+            <button type="button" class="btn btn-primary" onclick="triggerIndex()" id="index-btn"><span data-i18n="btn.startIndex">开始索引</span></button>
+            <button type="button" class="btn btn-ghost" onclick="checkIndexStatus()" id="status-btn"><span data-i18n="btn.checkStatus">查询状态</span></button>
           </div>
         </div>
+      </details>
 
-        <div class="card">
-          <div class="field-label" data-i18n="index.strategy">解析策略</div>
-          <select id="index-strategy" style="margin-top:8px">
-            <option value="auto" data-i18n="strategy.auto">自动（精确 → 启发式降级）</option>
-            <option value="precise" data-i18n="strategy.precise">仅精确解析</option>
-            <option value="heuristic" data-i18n="strategy.heuristic">仅启发式解析</option>
-          </select>
-        </div>
-
-        <div class="card" style="display:flex;align-items:center;justify-content:space-between">
-          <div>
-            <div style="font-size:14px;font-weight:600" data-i18n="index.forceReindex">强制重建索引</div>
-            <div style="font-size:12px;color:var(--text-2);margin-top:2px" data-i18n="index.skipCache">忽略 MD5 缓存</div>
+      <section class="index-execution" id="index-execution" tabindex="-1" aria-labelledby="index-execution-title">
+        <div class="index-state-card" id="index-state-card" data-state="ready">
+          <div class="index-state-heading"><h2 id="index-execution-title" data-i18n="index.execution">执行状态</h2>
+            <span id="ring-status" class="index-state-badge">准备就绪</span></div>
+          <div class="index-root-context"><span data-i18n="index.observedRoot">当前查看目录</span>
+            <code id="index-observed-root">—</code></div>
+          <p id="index-state-note" class="index-state-note" role="status" aria-live="polite"></p>
+          <div id="index-connection-error" class="index-connection-error" role="alert" hidden></div>
+          <div id="index-progress" class="index-progress" hidden>
+            <div class="index-progress-label"><span id="index-stage-label"></span><strong id="ring-pct">—</strong></div>
+            <progress id="index-stage-progress" max="100" data-i18n-aria-label="index.stageProgress" aria-label="当前阶段进度"></progress>
+            <div class="index-progress-caption"><span id="index-stage-count"></span><span data-i18n="index.stageHint">各阶段工作量不同，此百分比不代表整体完成度。</span></div>
           </div>
-          <label style="position:relative;display:inline-block;width:42px;height:24px">
-            <input type="checkbox" id="no-incremental" style="opacity:0;width:0;height:0">
-            <span id="toggle-track" onclick="toggleSwitch()" style="
-              position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;
-              background:var(--border);border-radius:24px;transition:0.3s;">
-              <span id="toggle-thumb" style="
-                position:absolute;top:3px;left:3px;width:18px;height:18px;
-                background:var(--text-2);border-radius:50%;transition:0.3s;
-              "></span>
-            </span>
-          </label>
+          <button type="button" class="btn btn-ghost" id="index-retry-status" onclick="checkIndexStatus()" hidden data-i18n="index.retryStatus">重试状态查询</button>
+          <div id="stat-indexed-at-row" class="index-history" hidden><span data-i18n="index.history">历史记录</span>
+            <time id="stat-indexed-at"></time></div>
         </div>
-
-        <button class="btn btn-primary" style="width:100%;justify-content:center;padding:12px" onclick="triggerIndex()" id="index-btn">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/></svg>
-          <span data-i18n="btn.startIndex">开始索引</span>
-        </button>
-
-        <button class="btn btn-ghost" style="width:100%;justify-content:center" onclick="checkIndexStatus()" id="status-btn">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-          <span data-i18n="btn.checkStatus">查询状态</span>
-        </button>
-      </div>
-
-      <!-- Status -->
-      <div class="status-col">
-        <div class="progress-ring-wrap">
-          <svg class="progress-ring" width="120" height="120">
-            <circle class="progress-ring-bg" cx="60" cy="60" r="50" stroke-width="8"/>
-            <circle class="progress-ring-fill" id="ring-fill" cx="60" cy="60" r="50" stroke-width="8"
-              stroke-dasharray="314" stroke-dashoffset="314"/>
-          </svg>
-          <div class="ring-label">
-            <div class="ring-pct" id="ring-pct">—</div>
-            <div class="ring-status" id="ring-status">idle</div>
-          </div>
+        <div class="index-results" aria-label="Index result">
+          <div><strong id="stat-files">—</strong><span data-i18n="stat.files">文件</span></div>
+          <div><strong id="stat-parsed">—</strong><span data-i18n="index.parsedFiles">已解析文件</span></div>
+          <div><strong id="stat-units">—</strong><span data-i18n="stat.units">单元</span></div>
+          <div><strong id="stat-edges">—</strong><span data-i18n="stat.edges">边</span></div>
+          <div><strong id="stat-errors">—</strong><span data-i18n="stat.errors">错误</span></div>
+          <div><strong id="stat-dur">—</strong><span data-i18n="stat.duration">耗时</span></div>
         </div>
-
-        <div class="stats-grid">
-          <div class="stat-card"><div class="stat-val" id="stat-files">—</div><div class="stat-lbl" data-i18n="stat.files">文件</div></div>
-          <div class="stat-card"><div class="stat-val" id="stat-units">—</div><div class="stat-lbl" data-i18n="stat.units">单元</div></div>
-          <div class="stat-card"><div class="stat-val" id="stat-edges">—</div><div class="stat-lbl" data-i18n="stat.edges">边</div></div>
-          <div class="stat-card"><div class="stat-val" id="stat-degraded" style="color:var(--amber)">—</div><div class="stat-lbl" data-i18n="stat.degraded">降级</div></div>
-          <div class="stat-card"><div class="stat-val" id="stat-errors" style="color:var(--red)">—</div><div class="stat-lbl" data-i18n="stat.errors">错误</div></div>
-          <div class="stat-card"><div class="stat-val" id="stat-dur">—</div><div class="stat-lbl" data-i18n="stat.duration">耗时</div></div>
-        </div>
-        <div id="stat-indexed-at-row" style="display:none;margin-top:8px;font-size:12px;color:var(--text-3);text-align:center">
-          <span data-i18n="stat.lastIndexed">上次索引：</span><span id="stat-indexed-at"></span>
-        </div>
-
-        <div class="index-log" id="index-log">
-          <span class="log-info" data-i18n="log.waiting">— 等待索引任务 —</span>
-        </div>
-      </div>
+        <details id="index-errors-panel" class="index-errors-panel" hidden>
+          <summary><span data-i18n="index.errorDetails">索引错误</span> <span id="index-error-count"></span></summary>
+          <ul id="index-errors"></ul>
+        </details>
+        <details class="index-log-panel" open>
+          <summary data-i18n="index.logTitle">执行日志</summary>
+          <div class="index-log-toolbar"><p data-i18n="index.logHint">最近100条状态变化；查阅旧日志时保留滚动位置。</p>
+            <button type="button" class="btn btn-ghost" onclick="clearIndexLog()" data-i18n="index.clearLog">清空日志</button></div>
+          <div class="index-log" id="index-log" tabindex="0" role="log" aria-live="polite" aria-relevant="additions" data-i18n-aria-label="index.logTitle" aria-label="执行日志"></div>
+        </details>
+      </section>
     </div>
   </div>
 </div>

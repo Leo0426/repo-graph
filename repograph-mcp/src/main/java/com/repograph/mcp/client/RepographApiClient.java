@@ -31,6 +31,7 @@ public class RepographApiClient {
 
     private final ObjectMapper mapper;
     private final HttpClient http;
+    private final Duration requestTimeout;
     private volatile String baseUrl;
 
     /**
@@ -40,6 +41,7 @@ public class RepographApiClient {
     public RepographApiClient(ObjectMapper mapper,
                         @Value("${repograph.timeout-seconds:30}") int timeoutSeconds) {
         this.mapper = mapper;
+        this.requestTimeout = Duration.ofSeconds(timeoutSeconds);
         this.http = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(5))
                 .build();
@@ -68,7 +70,7 @@ public class RepographApiClient {
         var uri = URI.create(baseUrl + path);
         var req = HttpRequest.newBuilder(uri)
                 .header("Accept", "application/json")
-                .timeout(Duration.ofSeconds(30))
+                .timeout(requestTimeout)
                 .GET()
                 .build();
 
@@ -87,6 +89,9 @@ public class RepographApiClient {
         } catch (java.net.ConnectException e) {
             throw new RepographApiException(
                     "Cannot connect to repograph-app at " + baseUrl + ". Is the Web service running?", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RepographApiException("HTTP request interrupted", e);
         } catch (Exception e) {
             throw new RepographApiException("HTTP request failed: " + e.getMessage(), e);
         }
@@ -105,7 +110,7 @@ public class RepographApiClient {
         var uri = URI.create(baseUrl + path);
         var req = HttpRequest.newBuilder(uri)
                 .header("Content-Type", "application/json")
-                .timeout(Duration.ofSeconds(30))
+                .timeout(requestTimeout)
                 .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
 
@@ -122,6 +127,9 @@ public class RepographApiClient {
         } catch (java.net.ConnectException e) {
             throw new RepographApiException(
                     "Cannot connect to repograph-app at " + baseUrl + ". Is the Web service running?", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RepographApiException("HTTP request interrupted", e);
         } catch (Exception e) {
             throw new RepographApiException("HTTP request failed: " + e.getMessage(), e);
         }
@@ -142,7 +150,7 @@ public class RepographApiClient {
         var req = HttpRequest.newBuilder(uri)
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json")
-                .timeout(Duration.ofSeconds(60))
+                .timeout(requestTimeout)
                 .POST(HttpRequest.BodyPublishers.ofString(json != null ? json : "", StandardCharsets.UTF_8))
                 .build();
 
@@ -159,6 +167,9 @@ public class RepographApiClient {
         } catch (java.net.ConnectException e) {
             throw new RepographApiException(
                     "Cannot connect to repograph-app at " + baseUrl + ". Is the Web service running?", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RepographApiException("HTTP request interrupted", e);
         } catch (Exception e) {
             throw new RepographApiException("HTTP request failed: " + e.getMessage(), e);
         }

@@ -1,0 +1,120 @@
+/* Vulnerability review: compact overview, deliberate detail disclosure. */
+#panel-vulns .vuln-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+#panel-vulns .vuln-workbench { display: flex; flex-direction: column; gap: 18px; }
+#panel-vulns .vuln-controls { border: 1px solid var(--border); border-radius: 14px; padding: 18px; background: var(--bg-2); }
+#panel-vulns .vuln-project-row { display: flex; align-items: flex-end; gap: 20px; }
+#panel-vulns label { display: flex; flex-direction: column; gap: 6px; min-width: 0; color: var(--text-2); font-size: 12px; }
+#panel-vulns .vuln-project-field { flex: 1; max-width: 420px; }
+#panel-vulns select { width: 100%; min-width: 0; min-height: 38px; font-family: var(--ui); font-size: 13px; }
+#panel-vulns .vuln-scan-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
+#panel-vulns .vuln-filter-row { display: flex; align-items: flex-end; gap: 12px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+#panel-vulns .vuln-filter-row label { flex: 0 1 220px; }
+#panel-vulns .vuln-filter-row > button { margin-left: auto; }
+#panel-vulns .vuln-scan-status { color: var(--mint); font-size: 13px; overflow-wrap: anywhere; }
+#panel-vulns .vuln-scan-status:not(:empty) { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+#panel-vulns [data-tone="error"] { color: var(--red); }
+#panel-vulns .vuln-summary { display: flex; align-items: center; gap: 24px; padding: 2px 2px 0; }
+#panel-vulns .vuln-result-total { display: flex; align-items: baseline; gap: 10px; flex: 0 0 auto; }
+#panel-vulns .vuln-result-total strong { font-size: 32px; line-height: 1.2; letter-spacing: -1px; font-variant-numeric: tabular-nums; }
+#panel-vulns .vuln-result-total > span { color: var(--text-2); font-size: 13px; }
+#panel-vulns .vuln-summary p { color: var(--text-3); font-size: 12px; margin: 4px 0 0; }
+#panel-vulns .vuln-result-breakdown { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+#panel-vulns .vuln-status-count { font-size: 12px; color: var(--text-2); }
+#panel-vulns .vuln-status-count b { margin-left: 3px; font-variant-numeric: tabular-nums; color: var(--text); }
+#panel-vulns #vuln-list { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+#panel-vulns .vuln-empty, #panel-vulns .vuln-loading { padding: 36px 24px; border: 1px dashed var(--border); border-radius: 14px; text-align: center; color: var(--text-2); }
+#panel-vulns .vuln-empty strong { font-size: 15px; color: var(--text); }
+#panel-vulns .vuln-empty p { margin: 8px 0 16px; overflow-wrap: anywhere; }
+#panel-vulns .vuln-error strong, #panel-vulns .vuln-evidence-error strong { color: var(--red); }
+#panel-vulns .vuln-loading { padding: 22px 18px; text-align: left; }
+#panel-vulns .vuln-skeleton { height: 60px; border-radius: 8px; margin-top: 16px; background: linear-gradient(100deg, var(--bg-2), var(--bg-3), var(--bg-2)); background-size: 200% 100%; animation: vuln-loading 1.6s ease-in-out infinite; }
+@keyframes vuln-loading { to { background-position: -200% 0; } }
+#panel-vulns .vuln-finding { min-width: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-2); overflow: clip; }
+#panel-vulns .vuln-finding > summary { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px 12px; padding: 17px 18px; cursor: pointer; list-style: none; align-items: start; }
+#panel-vulns .vuln-finding > summary::-webkit-details-marker { display: none; }
+#panel-vulns .vuln-finding > summary:hover { background: rgba(110, 231, 183, .025); }
+#panel-vulns .vuln-finding[open] { border-color: rgba(110, 231, 183, .25); }
+#panel-vulns .vuln-finding[open] > summary { border-bottom: 1px solid var(--border); }
+#panel-vulns summary:focus-visible, #panel-vulns .vuln-source pre:focus-visible { outline: 2px solid var(--mint); outline-offset: -3px; border-radius: 8px; }
+#panel-vulns .vuln-severity, #panel-vulns .vuln-status { padding: 3px 7px; border: 1px solid var(--border); border-radius: 5px; font-size: 11px; font-weight: 600; line-height: 1.3; white-space: nowrap; }
+#panel-vulns .vuln-severity { color: var(--text-2); font-family: var(--fm); }
+#panel-vulns .vuln-severity[data-severity="CRITICAL"], #panel-vulns .vuln-severity[data-severity="HIGH"] { color: #fca5a5; border-color: rgba(248, 113, 113, .35); background: rgba(248, 113, 113, .07); }
+#panel-vulns .vuln-severity[data-severity="MEDIUM"] { color: var(--amber); border-color: rgba(251, 191, 36, .28); background: rgba(251, 191, 36, .04); }
+#panel-vulns .vuln-status[data-status="SUSPECTED"] { color: var(--amber); }
+#panel-vulns .vuln-status[data-status="CONFIRMED"] { color: #fca5a5; }
+#panel-vulns .vuln-status[data-status="FIXED"] { color: var(--mint); }
+#panel-vulns .vuln-status[data-status="DISMISSED"] { color: var(--text-3); }
+#panel-vulns .vuln-finding-title { font-size: 15px; font-weight: 600; line-height: 1.6; overflow-wrap: anywhere; }
+#panel-vulns .vuln-finding-location { grid-column: 2; color: var(--text-3); font-family: var(--fm); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+#panel-vulns .vuln-disclosure { grid-column: 3; grid-row: 2; font-size: 11px; color: var(--text-3); white-space: nowrap; }
+#panel-vulns .vuln-disclosure > span:last-child { display: inline-block; margin-left: 4px; transition: transform .15s; }
+#panel-vulns .vuln-finding[open] .vuln-disclosure > span:last-child { transform: rotate(180deg); }
+#panel-vulns .vuln-finding-body { padding: 18px; min-width: 0; }
+#panel-vulns .vuln-facts { display: flex; flex-direction: column; gap: 10px; margin: 0; }
+#panel-vulns .vuln-facts > div { display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 12px; }
+#panel-vulns .vuln-facts dt { color: var(--text-3); font-size: 12px; }
+#panel-vulns .vuln-facts dd { margin: 0; font-family: var(--fm); font-size: 12px; overflow-wrap: anywhere; }
+#panel-vulns .vuln-cwe { display: inline-block; color: var(--text-3); margin-left: 8px; }
+#panel-vulns .vuln-finding-body h3 { font-size: 12px; font-weight: 600; margin: 0 0 8px; color: var(--text-2); }
+#panel-vulns .vuln-description { margin-top: 18px; }
+#panel-vulns .vuln-description p { margin: 0; color: var(--text-2); line-height: 1.8; overflow-wrap: anywhere; white-space: pre-wrap; }
+#panel-vulns .vuln-evidence { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 18px; }
+#panel-vulns .vuln-evidence > p { color: var(--text-3); margin: 0; }
+#panel-vulns .vuln-evidence-steps { margin: 0; padding-left: 28px; }
+#panel-vulns .vuln-evidence-steps > li { padding: 2px 0 16px 8px; color: var(--text-3); }
+#panel-vulns .vuln-evidence-steps > li:last-child { padding-bottom: 0; }
+#panel-vulns .vuln-evidence-steps > li::marker { color: var(--mint); font-variant-numeric: tabular-nums; }
+#panel-vulns .vuln-step-role { color: var(--mint); font-size: 12px; font-weight: 600; margin-bottom: 5px; }
+#panel-vulns .vuln-step-role[data-role="SINK"] { color: var(--amber); }
+#panel-vulns .vuln-step-symbol { font-family: var(--fm); color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
+#panel-vulns .vuln-step-path, #panel-vulns .vuln-slot-flow { font-family: var(--fm); font-size: 11px; margin-top: 5px; overflow-wrap: anywhere; }
+#panel-vulns .vuln-source { margin-top: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 7px; }
+#panel-vulns .vuln-source summary { cursor: pointer; padding: 8px 10px; font-size: 12px; color: var(--text-2); }
+#panel-vulns .vuln-source pre { margin: 0; padding: 12px; max-width: 100%; overflow: auto; color: var(--text); font-size: 12px; line-height: 1.7; }
+#panel-vulns .vuln-finding-actions { margin-top: 20px; display: flex; align-items: flex-end; gap: 12px; border-top: 1px solid var(--border); padding-top: 16px; }
+#panel-vulns .vuln-finding-actions label { width: 190px; }
+#panel-vulns .vuln-review-hint { color: var(--text-3); font-size: 11px; line-height: 1.6; margin: 10px 0 0; }
+#panel-vulns .vuln-report-dialog { width: min(900px, calc(100vw - 40px)); max-width: none; max-height: calc(100dvh - 40px); margin: auto; padding: 0; border: 1px solid var(--border); border-radius: 16px; color: var(--text); background: var(--bg-2); box-shadow: 0 24px 80px rgba(0, 0, 0, .5); }
+#panel-vulns .vuln-report-dialog::backdrop { background: rgba(0, 0, 0, .72); backdrop-filter: blur(4px); }
+#panel-vulns .vuln-report-dialog:not([open]) { display: none; }
+#panel-vulns .vuln-report-card { display: flex; flex-direction: column; gap: 14px; padding: 22px; }
+#panel-vulns .vuln-report-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+#panel-vulns .vuln-report-heading h2 { font-size: 17px; margin: 0; }
+#panel-vulns #vuln-report-state { color: var(--text-2); overflow-wrap: anywhere; }
+#panel-vulns #vuln-report-state:empty { display: none; }
+#panel-vulns #vuln-report-text { width: 100%; min-height: 180px; height: min(58dvh, 600px); resize: vertical; font: 12px/1.7 var(--fm); }
+#panel-vulns .vuln-report-actions { display: flex; justify-content: flex-end; gap: 8px; }
+#panel-vulns [hidden] { display: none !important; }
+@media (max-width: 760px) {
+  #panel-vulns .vuln-heading { align-items: flex-start; flex-wrap: wrap; gap: 10px; }
+  #panel-vulns .vuln-heading > button { flex: 0 0 auto; }
+  #panel-vulns .vuln-controls { padding: 14px; }
+  #panel-vulns .vuln-project-row { display: block; }
+  #panel-vulns .vuln-project-field { max-width: none; }
+  #panel-vulns .vuln-scan-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 12px; }
+  #panel-vulns .vuln-scan-actions .btn { padding: 8px 6px; white-space: normal; line-height: 1.4; min-height: 42px; }
+  #panel-vulns .vuln-filter-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; padding-top: 12px; }
+  #panel-vulns .vuln-filter-row > button { grid-column: 1 / -1; justify-self: stretch; margin-left: 0; }
+  #panel-vulns .vuln-summary { align-items: flex-start; gap: 14px; }
+  #panel-vulns .vuln-result-total { flex-direction: column; gap: 2px; }
+  #panel-vulns .vuln-summary p { font-size: 11px; }
+  #panel-vulns .vuln-finding > summary { grid-template-columns: 1fr auto; padding: 14px; gap: 8px; }
+  #panel-vulns .vuln-severity { justify-self: start; }
+  #panel-vulns .vuln-status { grid-row: 1; grid-column: 2; }
+  #panel-vulns .vuln-finding-title { grid-column: 1 / -1; grid-row: 2; }
+  #panel-vulns .vuln-finding-location { grid-column: 1 / -1; grid-row: 3; }
+  #panel-vulns .vuln-disclosure { grid-column: 1 / -1; grid-row: 4; margin-top: 2px; }
+  #panel-vulns .vuln-finding-body { padding: 14px; }
+  #panel-vulns .vuln-facts > div { display: block; }
+  #panel-vulns .vuln-facts dd { margin-top: 4px; }
+  #panel-vulns .vuln-finding-actions label { width: auto; flex: 1; }
+  #panel-vulns .vuln-evidence-steps { padding-left: 20px; }
+  #panel-vulns .vuln-evidence-steps > li { padding-left: 2px; }
+  #panel-vulns .vuln-report-dialog { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); border-radius: 12px; }
+  #panel-vulns .vuln-report-card { padding: 16px; }
+  #panel-vulns .vuln-empty { padding: 28px 18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #panel-vulns .vuln-skeleton { animation: none; }
+  #panel-vulns .vuln-disclosure > span:last-child { transition: none; }
+}

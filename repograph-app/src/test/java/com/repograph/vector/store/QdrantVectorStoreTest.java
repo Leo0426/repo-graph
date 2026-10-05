@@ -8,9 +8,12 @@ import com.repograph.core.vector.SearchOptions;
 import com.repograph.core.vector.SearchPage;
 import com.repograph.vector.config.QdrantProperties;
 import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+import io.qdrant.client.ConditionFactory;
 import io.qdrant.client.QdrantClient;
 import io.qdrant.client.grpc.JsonWithInt;
 import io.qdrant.client.grpc.Points.Filter;
+import io.qdrant.client.grpc.Points.PointStruct;
 import io.qdrant.client.grpc.Points.RetrievedPoint;
 import io.qdrant.client.grpc.Points.ScrollResponse;
 import io.qdrant.client.grpc.Points.ScoredPoint;
@@ -18,6 +21,9 @@ import io.qdrant.client.grpc.Points.UpdateResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -27,12 +33,15 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -93,8 +102,12 @@ class QdrantVectorStoreTest {
 
     /** 构建用于 upsert 测试的 CodeUnit，id 长度满足 toUuid 前 32 字符要求。 */
     private static CodeUnit sampleUnit(String qualifiedName) {
+        return sampleUnit("abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890", qualifiedName);
+    }
+
+    private static CodeUnit sampleUnit(String id, String qualifiedName) {
         return new CodeUnit(
-                "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+                id,
                 CodeUnitKind.METHOD, "java",
                 qualifiedName, "bar", "src/Foo.java", 5, 20,
                 "void bar(){}", "void bar()", List.of(), null, Map.of());
@@ -243,13 +256,118 @@ class QdrantVectorStoreTest {
     // ── removeByFile ───────────────────────────────────────────────────────────
 
     @Test
-    void removeByFile_callsDeleteAsync() {
+    void removeByFile_matchesExactProjectAndFile() {
         when(client.deleteAsync(anyString(), any(Filter.class)))
                 .thenReturn(Futures.immediateFuture(UpdateResult.getDefaultInstance()));
 
         store.removeByFile("src/Foo.java", "proj");
 
-        verify(client).deleteAsync(anyString(), any(Filter.class));
+        ArgumentCaptor<Filter> filter = ArgumentCaptor.forClass(Filter.class);
+        verify(client).deleteAsync(org.mockito.ArgumentMatchers.eq("test_coll"), filter.capture());
+        assertFileScope(filter.getValue());
+        assertThat(filter.getValue().getMustNotList()).isEmpty();
+    }
+
+    @Test
+    void removeByProject_matchesOnlyRequestedProject() {
+        when(client.deleteAsync(anyString(), any(Filter.class)))
+                .thenReturn(Futures.immediateFuture(UpdateResult.getDefaultInstance()));
+
+        store.removeByProject("proj");
+
+        ArgumentCaptor<Filter> filter = ArgumentCaptor.forClass(Filter.class);
+        verify(client).deleteAsync(org.mockito.ArgumentMatchers.eq("test_coll"), filter.capture());
+        assertThat(filter.getValue().getMustList())
+                .containsExactly(ConditionFactory.matchKeyword("project_id", "proj"));
+        assertThat(filter.getValue().getMustNotList()).isEmpty();
+        assertThat(filter.getValue().getShouldList()).isEmpty();
+    }
+
+    @Test
+    void removeStaleByFile_preservesIdsUsingTheSameMappingAsUpsert() {
+        CodeUnit hexUnit = sampleUnit("com.example.Foo#kept");
+        CodeUnit namedUnit = sampleUnit("not-a-hexadecimal-identifier-with-more-than-32-characters",
+                "com.example.Foo#named");
+        when(client.upsertAsync(anyString(), anyList()))
+                .thenReturn(Futures.immediateFuture(UpdateResult.getDefaultInstance()));
+        when(client.deleteAsync(anyString(), any(Filter.class)))
+                .thenReturn(Futures.immediateFuture(UpdateResult.getDefaultInstance()));
+        store.upsert(List.of(new EmbeddedUnit(hexUnit, VEC, VEC), new EmbeddedUnit(namedUnit, VEC, VEC)), "proj");
+
+        store.removeStaleByFile("src/Foo.java", "proj", Set.of(hexUnit.id(), namedUnit.id()));
+
+        ArgumentCaptor<Filter> filter = ArgumentCaptor.forClass(Filter.class);
+        verify(client).deleteAsync(org.mockito.ArgumentMatchers.eq("test_coll"), filter.capture());
+        assertFileScope(filter.getValue());
+        assertThat(filter.getValue().getMustNotList()).singleElement().satisfies(condition -> {
+            assertThat(condition.hasHasId()).isTrue();
+            assertThat(condition.getHasId().getHasIdList()).hasSize(2)
+                    .anySatisfy(pointId -> assertThat(pointId.getUuid())
+                            .isEqualTo("abcdef12-3456-7890-abcd-ef1234567890"));
+        });
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<PointStruct>> points = ArgumentCaptor.forClass(List.class);
+        verify(client).upsertAsync(org.mockito.ArgumentMatchers.eq("test_coll"), points.capture());
+        assertThat(filter.getValue().getMustNot(0).getHasId().getHasIdList())
+                .containsExactlyInAnyOrderElementsOf(points.getValue().stream().map(PointStruct::getId).toList());
+    }
+
+    @Test
+    void removeStaleByFile_emptyRetainedIdsRemovesWholeFileWithinProject() {
+        when(client.deleteAsync(anyString(), any(Filter.class)))
+                .thenReturn(Futures.immediateFuture(UpdateResult.getDefaultInstance()));
+
+        store.removeStaleByFile("src/Foo.java", "proj", Set.of());
+
+        ArgumentCaptor<Filter> filter = ArgumentCaptor.forClass(Filter.class);
+        verify(client).deleteAsync(org.mockito.ArgumentMatchers.eq("test_coll"), filter.capture());
+        assertFileScope(filter.getValue());
+        assertThat(filter.getValue().getMustNotList()).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"file", "project", "stale"})
+    void deletionFailurePropagatesOriginalCause(String operation) {
+        IllegalStateException unavailable = new IllegalStateException("Qdrant unavailable");
+        when(client.deleteAsync(anyString(), any(Filter.class)))
+                .thenReturn(Futures.immediateFailedFuture(unavailable));
+
+        assertThatThrownBy(() -> remove(operation)).isInstanceOf(IllegalStateException.class)
+                .hasCause(unavailable);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"file", "project", "stale"})
+    void deletionInterruptionPreservesInterruptFlag(String operation) throws Exception {
+        @SuppressWarnings("unchecked")
+        ListenableFuture<UpdateResult> pending = mock(ListenableFuture.class);
+        InterruptedException interrupted = new InterruptedException("cancelled while awaiting deletion");
+        when(pending.get()).thenThrow(interrupted);
+        when(client.deleteAsync(anyString(), any(Filter.class))).thenReturn(pending);
+
+        try {
+            assertThatThrownBy(() -> remove(operation)).isInstanceOf(IllegalStateException.class)
+                    .hasCause(interrupted);
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    private void remove(String operation) {
+        switch (operation) {
+            case "file" -> store.removeByFile("src/Foo.java", "proj");
+            case "project" -> store.removeByProject("proj");
+            case "stale" -> store.removeStaleByFile("src/Foo.java", "proj", Set.of(sampleUnit("kept").id()));
+            default -> throw new IllegalArgumentException("Unknown deletion operation: " + operation);
+        }
+    }
+
+    private static void assertFileScope(Filter filter) {
+        assertThat(filter.getMustList()).containsExactlyInAnyOrder(
+                ConditionFactory.matchKeyword("file_path", "src/Foo.java"),
+                ConditionFactory.matchKeyword("project_id", "proj"));
+        assertThat(filter.getShouldList()).isEmpty();
     }
 
     // ── isHealthy ──────────────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 package com.repograph.api;
 
 import com.repograph.app.pipeline.IndexHistoryStore;
+import com.repograph.app.watcher.FileWatcherService;
 import com.repograph.core.pipeline.IndexOptions;
 import com.repograph.core.pipeline.IndexPipeline;
 import com.repograph.core.pipeline.IndexProgressEvent;
@@ -63,6 +64,7 @@ public class IndexController {
     private final IndexHistoryStore indexHistoryStore;
     private final VulnStore vulnStore;
     private final AssetImportService assetImportService;
+    private final FileWatcherService fileWatcherService;
     private final TriageDataCleanup triageDataCleanup;
 
     /**
@@ -73,12 +75,14 @@ public class IndexController {
      * @param indexHistoryStore 索引历史持久化，不为 {@code null}
      * @param vulnStore         漏洞发现持久化（项目删除时一并清理），不为 {@code null}
      * @param assetImportService 托管归档资产清理边界
+     * @param fileWatcherService 项目删除前停止自动索引的监听服务
      * @param triageDataCleanup 研判反馈和规则策略清理边界
      * @param indexExecutor 受 Spring 管理的有界后台执行器
      */
     public IndexController(IndexPipeline indexPipeline, IndexStore indexStore,
                            IndexHistoryStore indexHistoryStore, VulnStore vulnStore,
                            AssetImportService assetImportService,
+                           FileWatcherService fileWatcherService,
                            TriageDataCleanup triageDataCleanup,
                            @org.springframework.beans.factory.annotation.Qualifier("indexExecutor")
                            Executor indexExecutor) {
@@ -88,6 +92,7 @@ public class IndexController {
         this.indexHistoryStore = indexHistoryStore;
         this.vulnStore = vulnStore;
         this.assetImportService = assetImportService;
+        this.fileWatcherService = fileWatcherService;
         this.triageDataCleanup = triageDataCleanup;
     }
 
@@ -243,17 +248,20 @@ public class IndexController {
             @RequestParam String projectId,
             @RequestParam(required = false) String projectRoot) {
         log.info("DELETE project '{}'", projectId);
-        assetImportService.validateProjectDeletion(projectId);
-        indexStore.removeProject(projectId);
-        vulnStore.removeProject(projectId);
-        triageDataCleanup.removeProject(projectId);
-        assetImportService.cleanupManagedProject(projectId);
-        if (projectRoot != null) {
-            indexHistoryStore.remove(projectRoot);
-            statusMap.remove(projectRoot);
-            resultMap.remove(projectRoot);
-            progressMap.remove(projectRoot);
-        }
-        return ResponseEntity.ok(Map.of("status", "deleted", "projectId", projectId));
+        return indexStore.withProjectMutation(projectId, () -> {
+            assetImportService.validateProjectDeletion(projectId);
+            fileWatcherService.stop(projectId);
+            indexStore.removeProject(projectId);
+            vulnStore.removeProject(projectId);
+            triageDataCleanup.removeProject(projectId);
+            assetImportService.cleanupManagedProject(projectId);
+            if (projectRoot != null) {
+                indexHistoryStore.remove(projectRoot);
+                statusMap.remove(projectRoot);
+                resultMap.remove(projectRoot);
+                progressMap.remove(projectRoot);
+            }
+            return ResponseEntity.ok(Map.of("status", "deleted", "projectId", projectId));
+        });
     }
 }

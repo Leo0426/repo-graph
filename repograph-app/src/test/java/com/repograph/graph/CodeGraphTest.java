@@ -11,11 +11,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.neo4j.driver.Result;
 import org.neo4j.driver.Session;
+import org.neo4j.driver.exceptions.ClientException;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * {@link CodeGraph} 写入路径测试，运行在 Neo4j Test Harness 内嵌实例上。
@@ -206,6 +209,146 @@ class CodeGraphTest {
 
         assertThat(countEdges(EdgeKind.CALLS)).isEqualTo(1);
         assertThat(countEdges(EdgeKind.IMPLEMENTS)).isEqualTo(1);
+    }
+
+    @Test
+    void replaceFiles_preservesIncomingCallsForSurvivingIds() {
+        graph.addUnits(List.of(unit("a", "A#run()", "A.java"), unit("b", "B#run()", "B.java")), "proj");
+        graph.addEdges(List.of(new RelationEdge("a", "b", EdgeKind.CALLS, true, "A.java", 5)));
+        String originalElementId;
+        try (Session session = fixture.driver().session()) {
+            originalElementId = session.run("MATCH (n:CodeUnit {id: 'b'}) RETURN elementId(n) AS id")
+                    .single().get("id").asString();
+        }
+
+        graph.replaceFiles(Map.of("B.java", List.of(unit("b", "B#run()", "B.java"))), List.of(), "proj");
+
+        try (Session session = fixture.driver().session()) {
+            var result = session.run("""
+                    MATCH (:CodeUnit {id: 'a'})-[r:CALLS]->(target:CodeUnit {id: 'b'})
+                    RETURN elementId(target) AS id, r.sourceLine AS sourceLine
+                    """).single();
+            assertThat(result.get("id").asString()).isEqualTo(originalElementId);
+            assertThat(result.get("sourceLine").asInt()).isEqualTo(5);
+        }
+    }
+
+    @Test
+    void replaceFiles_removesDeletedSymbolsOutgoingCallsAndStaleMetadata() {
+        graph.addUnits(List.of(entryPoint("keep", "B#keep()", "B.java"),
+                unit("deleted", "B#deleted()", "B.java"), unit("target", "C#run()", "C.java")), "proj");
+        graph.addEdges(List.of(new RelationEdge("keep", "target", EdgeKind.CALLS, true, "B.java", 5)));
+        CodeUnit updated = new CodeUnit("keep", CodeUnitKind.METHOD, "java", "B#keep()", "keep", "B.java",
+                2, 7, "void keep() {}", "void keep()", List.of(), "B", Map.of());
+
+        graph.replaceFiles(Map.of("B.java", List.of(updated)), List.of(), "proj");
+
+        assertThat(countNodes()).isEqualTo(2);
+        assertThat(countEdges(EdgeKind.CALLS)).isZero();
+        try (Session session = fixture.driver().session()) {
+            Map<String, Object> properties = session.run("MATCH (n:CodeUnit {id: 'keep'}) RETURN n")
+                    .single().get("n").asNode().asMap();
+            assertThat(properties).doesNotContainKey("is_entry_point");
+            assertThat(properties).containsEntry("rawSource", "void keep() {}").containsEntry("startLine", 2L);
+            assertThat(session.run("MATCH (n:CodeUnit {id: 'deleted'}) RETURN count(n) AS count")
+                    .single().get("count").asLong()).isZero();
+        }
+    }
+
+    @Test
+    void replaceFiles_emptyFileDeletesItsNodesAndAttachedEdges() {
+        graph.addUnits(List.of(unit("a", "A#run()", "A.java"), unit("b", "B#run()", "B.java")), "proj");
+        graph.addEdges(List.of(new RelationEdge("a", "b", EdgeKind.CALLS, true, "A.java", 5)));
+
+        graph.replaceFiles(Map.of("B.java", List.of()), List.of(), "proj");
+
+        assertThat(countNodes()).isEqualTo(1);
+        assertThat(countEdges(EdgeKind.CALLS)).isZero();
+        assertThat(graph.findFilePaths("proj")).containsExactly("A.java");
+    }
+
+    @Test
+    void replaceFiles_resolvesEdgesAcrossEntireReplacementBatch() {
+        Map<String, List<CodeUnit>> files = new LinkedHashMap<>();
+        files.put("Client.java", List.of(unit("source", "Client#run()", "Client.java")));
+        files.put("Service.java", List.of(unit("target", "Service#save(String)", "Service.java")));
+
+        graph.replaceFiles(files, List.of(new RelationEdge("source", "Service#save::arity=1",
+                EdgeKind.CALLS, false, "Client.java", 4)), "proj");
+
+        try (Session session = fixture.driver().session()) {
+            var result = session.run("""
+                    MATCH (:CodeUnit {id: 'source'})-[r:CALLS]->(target)
+                    RETURN target.id AS id, r.resolved AS resolved
+                    """).single();
+            assertThat(result.get("id").asString()).isEqualTo("target");
+            assertThat(result.get("resolved").asBoolean()).isTrue();
+        }
+    }
+
+    @Test
+    void replaceFiles_preservesOtherProjectsWithSamePathsAndSymbols() {
+        graph.addUnits(List.of(unit("a1", "A#run()", "A.java"), unit("b1", "B#run()", "B.java")), "proj-a");
+        graph.addUnits(List.of(entryPoint("a2", "A#run()", "A.java"), unit("b2", "B#run()", "B.java")), "proj-b");
+        graph.addEdges(List.of(new RelationEdge("a1", "b1", EdgeKind.CALLS, true, "A.java", 5),
+                new RelationEdge("a2", "b2", EdgeKind.CALLS, true, "A.java", 9)));
+
+        graph.replaceFiles(Map.of("A.java", List.of()), List.of(), "proj-a");
+
+        assertThat(countNodes()).isEqualTo(3);
+        assertThat(countEdges(EdgeKind.CALLS)).isEqualTo(1);
+        try (Session session = fixture.driver().session()) {
+            var result = session.run("""
+                    MATCH (source:CodeUnit {id: 'a2'})-[r:CALLS]->(target)
+                    RETURN source.is_entry_point AS entryPoint, source.projectId AS projectId,
+                           target.id AS targetId, r.sourceLine AS sourceLine
+                    """).single();
+            assertThat(result.get("entryPoint").asString()).isEqualTo("true");
+            assertThat(result.get("projectId").asString()).isEqualTo("proj-b");
+            assertThat(result.get("targetId").asString()).isEqualTo("b2");
+            assertThat(result.get("sourceLine").asInt()).isEqualTo(9);
+        }
+    }
+
+    @Test
+    void replaceFiles_keepsInheritanceKindsSeparateAndSkipsUnresolvedTargets() {
+        graph.replaceFiles(Map.of("Child.java", List.of(unit("child", "Child", "Child.java")),
+                        "Parent.java", List.of(unit("parent", "Parent", "Parent.java")),
+                        "Contract.java", List.of(unit("contract", "Contract", "Contract.java"))),
+                List.of(new RelationEdge("child", "parent", EdgeKind.EXTENDS, true, "Child.java", 1),
+                        new RelationEdge("child", "contract", EdgeKind.IMPLEMENTS, true, "Child.java", 1),
+                        new RelationEdge("child", "External#missing", EdgeKind.CALLS, false, "Child.java", 4)),
+                "proj");
+
+        assertThat(countEdges(EdgeKind.EXTENDS)).isEqualTo(1);
+        assertThat(countEdges(EdgeKind.IMPLEMENTS)).isEqualTo(1);
+        assertThat(countEdges(EdgeKind.CALLS)).isZero();
+    }
+
+    @Test
+    void replaceFiles_rollsBackNodeAndEdgeCleanupWhenWriteFails() {
+        graph.addUnits(List.of(entryPoint("b", "B#run()", "B.java"), unit("deleted", "B#old()", "B.java"),
+                unit("c", "C#run()", "C.java")), "proj");
+        graph.addEdges(List.of(new RelationEdge("b", "c", EdgeKind.CALLS, true, "B.java", 5)));
+        try (Session session = fixture.driver().session()) {
+            session.run("""
+                    CREATE CONSTRAINT replacement_rollback_test FOR (n:CodeUnit) REQUIRE n.qualifiedName IS UNIQUE
+                    """).consume();
+            try {
+                assertThatThrownBy(() -> graph.replaceFiles(
+                        Map.of("B.java", List.of(unit("b", "C#run()", "B.java"))), List.of(), "proj"))
+                        .isInstanceOf(ClientException.class);
+
+                assertThat(countNodes()).isEqualTo(3);
+                assertThat(countEdges(EdgeKind.CALLS)).isEqualTo(1);
+                Map<String, Object> original = session.run("MATCH (n:CodeUnit {id: 'b'}) RETURN n")
+                        .single().get("n").asNode().asMap();
+                assertThat(original).containsEntry("qualifiedName", "B#run()")
+                        .containsEntry("is_entry_point", "true");
+            } finally {
+                session.run("DROP CONSTRAINT replacement_rollback_test").consume();
+            }
+        }
     }
 
     @Test

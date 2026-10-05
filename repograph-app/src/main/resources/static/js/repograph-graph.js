@@ -3,11 +3,89 @@ let graphSvgEl = null;
 // Track running simulations so we can stop them before starting a new render
 let _currentGraphSim = null;
 let _currentFlowSim  = null;
+let graphQuerySequence = 0;
+let graphSymbolsSequence = 0;
+let graphFitNodes = [];
+let graphFitTop = 24;
+
+function graphMotionDuration() {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 220;
+}
+
+function stopGraphSimulations() {
+  _currentGraphSim?.stop();
+  _currentFlowSim?.stop();
+  _currentGraphSim = null;
+  _currentFlowSim = null;
+}
+
+function clearGraphSelection() {
+  state.selectedNode = null;
+  document.getElementById('node-detail').style.display = 'none';
+  document.getElementById('node-detail-content').replaceChildren();
+  d3.selectAll('#graph-svg .graph-node').attr('aria-pressed', 'false');
+}
+
+function clearGraphCanvas() {
+  stopGraphSimulations();
+  clearGraphSelection();
+  hideTooltip();
+  graphFitNodes = [];
+  d3.select('#graph-svg').interrupt().select('.zoom-g').selectAll('*').remove();
+  document.getElementById('flow-summary').classList.remove('visible');
+  document.getElementById('flow-view-switch').classList.remove('visible');
+}
+
+function setGraphBusy(busy) {
+  document.getElementById('graph-query-btn').disabled = busy;
+  document.getElementById('graph-query-label').textContent = t(busy ? 'graph.loading' : 'graph.queryAction');
+  document.querySelector('#panel-graph .graph-canvas').setAttribute('aria-busy', String(busy));
+}
+
+function setGraphMessage(status, message) {
+  const hint = document.getElementById('graph-hint');
+  hint.removeAttribute('data-i18n');
+  hint.textContent = message;
+  const overlay = document.getElementById('graph-state');
+  overlay.hidden = status === 'loaded';
+  overlay.dataset.status = status;
+  document.getElementById('graph-state-title').textContent = t(status === 'ready'
+    ? 'graph.readyTitle' : status === 'loading' ? 'graph.loading' : 'graph.emptyTitle');
+  document.getElementById('graph-state-message').textContent = message;
+  document.getElementById('graph-retry').hidden = status !== 'error';
+}
+
+function graphQueryContext() {
+  const mode = state.graphMode;
+  const projectMode = ['entrypoints', 'deadcode', 'testgap'].includes(mode);
+  const rawProject = document.getElementById(projectMode ? 'entrypoints-project' : 'graph-project').value.trim();
+  return {
+    mode,
+    projectId: resolveProjectId(rawProject) || state.activeProjectId,
+    target: projectMode ? '' : document.getElementById('graph-target').value.trim(),
+    depth: Number(document.getElementById('graph-depth').value),
+    lang: mode === 'entrypoints' ? document.getElementById('entrypoints-lang').value : '',
+  };
+}
+
+function invalidateGraphQuery() {
+  graphQuerySequence++;
+  graphSymbolsSequence++;
+  clearGraphCanvas();
+  state.flowResult = null;
+  setGraphBusy(false);
+  setGraphMessage('ready', t('graph.queryChanged'));
+}
 
 function setGraphMode(mode, btn) {
+  invalidateGraphQuery();
   state.graphMode = mode;
-  document.getElementById('graph-tab-row').querySelectorAll('.tab').forEach(tb => tb.classList.remove('active'));
+  document.getElementById('graph-tab-row').querySelectorAll('.tab').forEach(tb => {
+    tb.classList.remove('active');
+    tb.setAttribute('aria-pressed', 'false');
+  });
   btn.classList.add('active');
+  btn.setAttribute('aria-pressed', 'true');
   const isEntrypoints = mode === 'entrypoints';
   const isDeadCode    = mode === 'deadcode';
   const isTestGap     = mode === 'testgap';
@@ -19,36 +97,55 @@ function setGraphMode(mode, btn) {
   document.getElementById('flow-view-switch').classList.toggle('visible', isFlow && !!state.flowResult);
   document.getElementById('graph-legend-label').style.display = isFlow ? 'none' : '';
   document.querySelector('.graph-legend').style.display = isFlow ? 'none' : '';
-  if (isFlow && state.flowResult) renderFlowGraph(state.flowView);
+  document.getElementById('graph-related-hint').hidden = !['callers', 'callees', 'impact'].includes(mode);
 }
 
 function initGraphCanvas() {
   const svg = d3.select('#graph-svg');
   const el = svg.node();
   if (!el) return;
+  if (graphSvgEl?.node() === el && graphZoomBehavior) return;
   graphSvgEl = svg;
 
   graphZoomBehavior = d3.zoom()
     .scaleExtent([0.05, 4])
-    .on('zoom', e => svg.select('.zoom-g').attr('transform', e.transform));
+    .on('zoom', e => {
+      svg.select('.zoom-g').attr('transform', e.transform);
+      document.getElementById('graph-zoom-level').textContent = `${Math.round(e.transform.k * 100)}%`;
+    });
 
-  svg.call(graphZoomBehavior);
+  svg.call(graphZoomBehavior).on('dblclick.zoom', null);
 
   if (!svg.select('.zoom-g').size()) {
     svg.append('g').attr('class', 'zoom-g');
   }
 }
 
-function graphZoomIn()  { if (graphSvgEl && graphZoomBehavior) graphSvgEl.transition().call(graphZoomBehavior.scaleBy, 1.4); }
-function graphZoomOut() { if (graphSvgEl && graphZoomBehavior) graphSvgEl.transition().call(graphZoomBehavior.scaleBy, 0.7); }
+function graphZoomIn() {
+  if (graphSvgEl && graphZoomBehavior) graphSvgEl.interrupt().transition().duration(graphMotionDuration()).call(graphZoomBehavior.scaleBy, 1.4);
+}
+function graphZoomOut() {
+  if (graphSvgEl && graphZoomBehavior) graphSvgEl.interrupt().transition().duration(graphMotionDuration()).call(graphZoomBehavior.scaleBy, 0.7);
+}
 function graphReset() {
-  if (graphSvgEl && graphZoomBehavior) {
-    const el = graphSvgEl.node();
-    graphSvgEl.transition().duration(500).call(
-      graphZoomBehavior.transform,
-      d3.zoomIdentity.translate(el.clientWidth / 2, el.clientHeight / 2).scale(1)
-    );
-  }
+  if (!graphSvgEl || !graphZoomBehavior) return;
+  const el = graphSvgEl.node();
+  const nodes = graphFitNodes.filter(node => Number.isFinite(node.x) && Number.isFinite(node.y));
+  if (!nodes.length || !el.clientWidth || !el.clientHeight) return;
+  const minX = Math.min(...nodes.map(node => node.x)) - 100;
+  const maxX = Math.max(...nodes.map(node => node.x)) + 100;
+  const minY = Math.min(...nodes.map(node => node.y)) - 52;
+  const maxY = Math.max(...nodes.map(node => node.y)) + 52;
+  const width = Math.max(1, el.clientWidth - 48);
+  const height = Math.max(1, el.clientHeight - graphFitTop - 92);
+  const scale = Math.max(0.01, Math.min(1, width / (maxX - minX), height / (maxY - minY)));
+  // Keep Fit reachable even when a large graph needs more zoom-out than the normal wheel limit.
+  graphZoomBehavior.scaleExtent([Math.min(0.05, scale), 4]);
+  graphSvgEl.interrupt().transition().duration(graphMotionDuration()).call(
+    graphZoomBehavior.transform,
+    d3.zoomIdentity.translate(el.clientWidth / 2 - (minX + maxX) / 2 * scale,
+      graphFitTop + height / 2 - (minY + maxY) / 2 * scale).scale(scale)
+  );
 }
 
 function updateGraphClassHint(val) {
@@ -59,6 +156,7 @@ function updateGraphClassHint(val) {
 }
 
 async function loadGraphSymbols() {
+  const sequence = ++graphSymbolsSequence;
   const input = document.getElementById('graph-target');
   const query = input ? input.value.trim() : '';
   const dl = document.getElementById('graph-symbols-datalist');
@@ -70,80 +168,72 @@ async function loadGraphSymbols() {
   const projectId = resolveProjectId(rawProject) || state.activeProjectId;
   try {
     const symbols = await api.graphSymbols(query, projectId);
+    if (sequence !== graphSymbolsSequence || input.value.trim() !== query
+      || (resolveProjectId(document.getElementById('graph-project').value.trim()) || state.activeProjectId) !== projectId) return;
     dl.innerHTML = symbols.map(unit =>
       `<option value="${esc(unit.qualifiedName)}" label="${esc(unit.kind + ' · ' + unit.filePath)}"></option>`
     ).join('');
   } catch (_) {
-    dl.innerHTML = '';
+    if (sequence === graphSymbolsSequence) dl.innerHTML = '';
   }
 }
 
 const debouncedGraphSymbols = debounce(loadGraphSymbols, 180);
 
 async function doGraphQuery() {
-  const mode = state.graphMode;
-  document.getElementById('graph-hint').textContent = 'Loading…';
-
+  const sequence = ++graphQuerySequence;
+  const context = graphQueryContext();
+  const { mode, target, projectId, depth, lang } = context;
+  const projectMode = ['entrypoints', 'deadcode', 'testgap'].includes(mode);
+  const current = () => sequence === graphQuerySequence
+    && JSON.stringify(context) === JSON.stringify(graphQueryContext());
+  clearGraphCanvas();
+  state.flowResult = null;
+  setGraphBusy(false);
+  if (!projectMode && !target) {
+    setGraphMessage('ready', t('graph.targetRequired'));
+    document.getElementById('graph-target').focus();
+    return;
+  }
+  if (['deadcode', 'testgap'].includes(mode) && !projectId) {
+    setGraphMessage('ready', t(`graph.${mode}.noProject`));
+    document.getElementById('entrypoints-project').focus();
+    return;
+  }
+  setGraphBusy(true);
+  setGraphMessage('loading', t('graph.loading'));
   try {
-    if (mode === 'entrypoints') {
-      const rawPid    = document.getElementById('entrypoints-project').value.trim();
-      const projectId = resolveProjectId(rawPid) || state.activeProjectId;
-      const lang      = document.getElementById('entrypoints-lang').value;
-      const units = await api.entrypoints(projectId, lang);
-      const rootLabel = rawPid ? `Entry Points (${rawPid})` : 'Entry Points';
-      renderGraph(rootLabel, units);
-      return;
-    }
-
-    if (mode === 'deadcode') {
-      const rawPid    = document.getElementById('entrypoints-project').value.trim();
-      const projectId = resolveProjectId(rawPid) || state.activeProjectId;
-      if (!projectId) {
-        document.getElementById('graph-hint').textContent = t('graph.deadcode.noProject') || '请先选择项目';
-        return;
-      }
-      const units = await api.deadCode(projectId);
-      const rootLabel = t('graph.deadcode.label') || `Dead Code (${projectId.slice(0, 8)}…)`;
-      renderGraph(rootLabel, units);
-      return;
-    }
-
-    if (mode === 'testgap') {
-      const rawPid    = document.getElementById('entrypoints-project').value.trim();
-      const projectId = resolveProjectId(rawPid) || state.activeProjectId;
-      if (!projectId) {
-        document.getElementById('graph-hint').textContent = t('graph.testgap.noProject');
-        return;
-      }
-      const units = await api.testGaps(projectId);
-      const rootLabel = t('graph.testgap.label');
-      renderGraph(rootLabel, units);
-      return;
-    }
-
-    const target = document.getElementById('graph-target').value.trim();
-    if (!target) return;
-    const depth = parseInt(document.getElementById('graph-depth').value);
-    const rawProject = document.getElementById('graph-project').value.trim();
-    const projectId = resolveProjectId(rawProject) || state.activeProjectId;
-
     if (mode === 'flow') {
-      document.getElementById('graph-hint').textContent = 'Analyzing…';
       const result = await api.flowAnalyze(target, projectId);
-      renderFlowAnalysis(result);
+      if (current()) renderFlowAnalysis(result);
       return;
     }
-
-    document.getElementById('flow-summary').classList.remove('visible');
-    document.getElementById('flow-view-switch').classList.remove('visible');
-    let units = [];
-    if (mode === 'callers') units = await api.callers(target, depth, projectId);
+    let units;
+    let rootLabel = target;
+    if (mode === 'entrypoints') {
+      units = await api.entrypoints(projectId, lang);
+      rootLabel = t('graph.entrypoints');
+    } else if (mode === 'deadcode') {
+      units = await api.deadCode(projectId);
+      rootLabel = t('graph.deadcode.label');
+    } else if (mode === 'testgap') {
+      units = await api.testGaps(projectId);
+      rootLabel = t('graph.testgap.label');
+    } else if (mode === 'callers') units = await api.callers(target, depth, projectId);
     else if (mode === 'callees') units = await api.callees(target, depth, projectId);
     else if (mode === 'impact') units = await api.impact(target, projectId);
     else units = await api.subtypes(target, projectId);
-    renderGraph(target, units);
-  } catch (e) {
-    document.getElementById('graph-hint').textContent = 'Query failed: ' + e.message;
+    if (current()) renderGraph(rootLabel, units);
+  } catch (error) {
+    if (current()) {
+      clearGraphCanvas();
+      setGraphMessage('error', t('graph.queryFailed', error.message));
+    }
+  } finally {
+    if (sequence === graphQuerySequence) {
+      setGraphBusy(false);
+      if (!current()) setGraphMessage('ready', t('graph.queryChanged'));
+    }
   }
 }
 
@@ -180,19 +270,20 @@ function switchFlowView(view, btn) {
 
 function renderFlowGraph(view) {
   // Stop previous flow simulation before starting a new one
-  if (_currentFlowSim) { _currentFlowSim.stop(); _currentFlowSim = null; }
+  stopGraphSimulations();
+  clearGraphSelection();
 
   const result = state.flowResult;
   if (!result) return;
-  const graph = view === 'pdg' ? result.programDependenceGraph : result.controlFlowGraph;
+  const graph = (view === 'pdg' ? result.programDependenceGraph : result.controlFlowGraph) || {};
   const svg = d3.select('#graph-svg');
   const el = svg.node();
-  const W = el.clientWidth;
-  const H = el.clientHeight;
   const g = svg.select('.zoom-g');
   g.selectAll('*').remove();
 
   const nodes = (graph.nodes || []).map(node => ({ ...node }));
+  graphFitNodes = nodes;
+  graphFitTop = document.getElementById('flow-summary').offsetHeight + 64;
   const links = (graph.edges || []).map(edge => ({
     ...edge,
     source: edge.sourceId,
@@ -200,7 +291,7 @@ function renderFlowGraph(view) {
   }));
 
   if (!nodes.length) {
-    document.getElementById('graph-hint').textContent = 'No flow nodes';
+    setGraphMessage('empty', t('graph.flow.empty'));
     return;
   }
 
@@ -274,15 +365,25 @@ function renderFlowGraph(view) {
       .attr('y', d => (d.source.y + d.target.y) / 2 - 4);
     node.attr('transform', d => `translate(${d.x},${d.y})`);
   });
-  _currentFlowSim.on('end', () => { _currentFlowSim = null; });
-  setTimeout(() => { if (_currentFlowSim) { _currentFlowSim.stop(); _currentFlowSim = null; } }, 2500);
+  const simulation = _currentFlowSim;
+  simulation.on('end', () => { if (_currentFlowSim === simulation) _currentFlowSim = null; });
+  setTimeout(() => {
+    simulation.stop();
+    if (_currentFlowSim === simulation) _currentFlowSim = null;
+  }, 2500);
 
-  document.getElementById('graph-hint').textContent =
-    `${result.target.split('#').pop()} · ${view.toUpperCase()} · ${nodes.length} nodes · ${links.length} edges`;
-  svg.transition().duration(400).call(
-    graphZoomBehavior.transform,
-    d3.zoomIdentity.translate(W / 2, H / 2 + 35).scale(Math.min(1.1, 8 / Math.sqrt(nodes.length)))
-  );
+  setGraphMessage('loaded', `${result.target.split('#').pop()} · ${view.toUpperCase()} · ${nodes.length} nodes · ${links.length} edges`);
+  simulation.tick(40);
+  if (!graphMotionDuration()) {
+    simulation.stop();
+    _currentFlowSim = null;
+    link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+      .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    edgeText.attr('x', d => (d.source.x + d.target.x) / 2)
+      .attr('y', d => (d.source.y + d.target.y) / 2 - 4);
+    node.attr('transform', d => `translate(${d.x},${d.y})`);
+  }
+  graphReset();
 }
 
 // Above this node count, use a static radial layout instead of force simulation.
@@ -293,29 +394,29 @@ const GRAPH_MAX_NODES = 400;
 
 function renderGraph(rootQn, units) {
   // Kill any running simulation from a previous render
-  if (_currentGraphSim) { _currentGraphSim.stop(); _currentGraphSim = null; }
+  stopGraphSimulations();
+  clearGraphSelection();
 
   const svg = d3.select('#graph-svg');
-  const hint = document.getElementById('graph-hint');
-  const el = svg.node();
-  const W = el.clientWidth, H = el.clientHeight;
-
   const cappedUnits = units.length > GRAPH_MAX_NODES ? units.slice(0, GRAPH_MAX_NODES) : units;
   const wasCapped   = cappedUnits.length < units.length;
   const isLarge     = cappedUnits.length >= GRAPH_LARGE_THRESHOLD;
 
   const rootNode = { id: rootQn, qualifiedName: rootQn, kind: 'ROOT', isRoot: true, x: 0, y: 0 };
   const allNodes = [rootNode, ...cappedUnits.map(u => ({ ...u, id: u.qualifiedName || u.id, isRoot: false }))];
-  const links    = cappedUnits.map(u => ({ source: rootQn, target: u.qualifiedName || u.id }));
+  const links = allNodes.slice(1).map(node => ({ source: rootNode, target: node }));
+  graphFitNodes = allNodes;
+  graphFitTop = 24;
 
   if (cappedUnits.length === 0) {
-    hint.textContent = t('graph.hint.noResult', state.graphMode, rootQn);
+    graphFitNodes = [];
+    setGraphMessage('empty', t('graph.hint.noResult', state.graphMode, rootQn));
     svg.select('.zoom-g').selectAll('*').remove();
     return;
   }
 
-  hint.textContent = t('graph.hint.result', cappedUnits.length, state.graphMode, rootQn)
-    + (wasCapped ? `（限显 ${GRAPH_MAX_NODES} / 共 ${units.length}）` : '');
+  setGraphMessage('loaded', t('graph.hint.result', cappedUnits.length, state.graphMode, rootQn)
+    + (wasCapped ? ` · ${t('graph.limit', GRAPH_MAX_NODES, units.length)}` : ''));
 
   const g = svg.select('.zoom-g');
   g.selectAll('*').remove();
@@ -338,7 +439,13 @@ function renderGraph(rootQn, units) {
 
   // ── Nodes ─────────────────────────────────────────────────────────────────
   const node = g.append('g').attr('class', 'nodes').selectAll('g').data(allNodes).join('g')
+    .attr('class', 'graph-node')
+    .attr('role', 'button').attr('tabindex', 0).attr('aria-pressed', 'false')
+    .attr('aria-label', d => `${d.kind}: ${d.qualifiedName || d.id}`)
     .attr('cursor', 'pointer')
+    .on('keydown', (e, d) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectNode(d); }
+    })
     .call(d3.drag()
       .on('start', (e, d) => {
         if (_currentGraphSim && !e.active) _currentGraphSim.alphaTarget(0.3).restart();
@@ -368,22 +475,24 @@ function renderGraph(rootQn, units) {
     .attr('fill',   d => d.isRoot ? 'rgba(248,113,113,0.2)' : `${kindColor(d.kind)}22`)
     .attr('stroke', d => d.isRoot ? '#F87171' : kindColor(d.kind))
     .attr('stroke-width', d => d.isRoot ? 2 : 1.5)
-    // Glow SVG filters are expensive (per-node compositing pass); skip them for large graphs
-    .attr('filter', d => isLarge ? null : (d.isRoot ? 'url(#glow-strong)' : 'url(#glow)'));
+    // Keep nodes crisp without per-node SVG glow compositing.
+    .attr('filter', null);
 
   node.append('text')
     .attr('text-anchor', 'middle')
-    .attr('dy', '0.35em')
+    .attr('dy', d => d.isRoot ? 38 : 30)
     .attr('fill', d => d.isRoot ? '#F87171' : kindColor(d.kind))
     .attr('font-family', 'var(--fm)')
-    .attr('font-size', d => d.isRoot ? 10 : 9)
+    .attr('font-size', 12)
     .attr('font-weight', '700')
+    .attr('stroke', 'var(--bg)').attr('stroke-width', 4).attr('stroke-linejoin', 'round')
+    .attr('paint-order', 'stroke fill')
     .attr('pointer-events', 'none')
     // Hide per-node labels in large mode (too crowded; hover tooltip still works)
     .text(d => {
       if (isLarge && !d.isRoot) return '';
       const n = (d.simpleName || d.qualifiedName || d.id || '').split('#').pop().split('.').pop();
-      return n.length > 12 ? n.slice(0, 11) + '…' : n;
+      return n.length > 22 ? n.slice(0, 21) + '…' : n;
     });
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -400,17 +509,18 @@ function renderGraph(rootQn, units) {
       .force('center', d3.forceCenter(0, 0))
       .force('collision', d3.forceCollide(40));
     _currentGraphSim.on('tick', () => _updateGraphPositions(link, node));
-    _currentGraphSim.on('end',  () => { _currentGraphSim = null; });
-    setTimeout(() => { if (_currentGraphSim) { _currentGraphSim.stop(); _currentGraphSim = null; } }, 3000);
+    const simulation = _currentGraphSim;
+    simulation.on('end', () => { if (_currentGraphSim === simulation) _currentGraphSim = null; });
+    setTimeout(() => {
+      simulation.stop();
+      if (_currentGraphSim === simulation) _currentGraphSim = null;
+    }, 3000);
+    simulation.tick(40);
+    if (!graphMotionDuration()) { simulation.stop(); _currentGraphSim = null; }
+    _updateGraphPositions(link, node);
   }
 
-  // ── Zoom to fit ────────────────────────────────────────────────────────────
-  const fitR  = isLarge ? Math.max(260, cappedUnits.length * 11) * 2.5 : Math.sqrt(allNodes.length) * 120;
-  const scale = Math.min(isLarge ? 0.88 : 1, Math.min(W, H) / fitR);
-  svg.transition().duration(600).call(
-    graphZoomBehavior.transform,
-    d3.zoomIdentity.translate(W / 2, H / 2).scale(scale)
-  );
+  graphReset();
 }
 
 function _updateGraphPositions(link, node) {
@@ -422,6 +532,7 @@ function _updateGraphPositions(link, node) {
 
 function selectNode(d) {
   state.selectedNode = d;
+  d3.selectAll('#graph-svg .graph-node').attr('aria-pressed', node => String(node === d));
   const el = document.getElementById('node-detail');
   el.style.display = '';
   document.getElementById('node-detail-content').innerHTML = `
@@ -441,6 +552,12 @@ function pivotToNode() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('#graph-tab-row .tab').forEach(button =>
+    button.setAttribute('aria-pressed', String(button.classList.contains('active'))));
+  ['graph-target', 'graph-project', 'entrypoints-project', 'graph-depth'].forEach(id => {
+    document.getElementById(id).addEventListener('input', invalidateGraphQuery);
+  });
+  document.getElementById('global-project')?.addEventListener('change', invalidateGraphQuery);
   document.getElementById('graph-target').addEventListener('keydown', e => {
     if (e.key === 'Enter') doGraphQuery();
   });

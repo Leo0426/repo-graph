@@ -10,6 +10,12 @@
         <div class="panel-subtitle" data-i18n="agent.subtitle">可追踪的安全工作流 · 证据链 · 人工检查点</div>
       </div>
       <div class="agent-header-controls">
+        <div class="agent-workflow-actions">
+          <button id="agent-prepare-btn" class="btn btn-ghost" type="button" onclick="showAgentPreparation()"
+                  aria-controls="agent-preparation" data-i18n="agent.launch">准备研判</button>
+          <button id="agent-view-runs" class="btn btn-ghost" type="button" onclick="showAgentRuns()"
+                  aria-controls="agent-run-workspace" data-i18n="agent.viewRuns">查看运行</button>
+        </div>
         <div class="agent-text-size" role="group" data-i18n-aria-label="agent.textSize"
              aria-label="显示字号">
           <span data-i18n="agent.textSize">显示字号</span>
@@ -46,7 +52,8 @@
     </section>
 
     <section id="agent-llm-module" class="agent-llm-module">
-      <button class="agent-llm-header" onclick="toggleLlmSettings()" aria-controls="agent-llm-settings-body">
+      <button class="agent-llm-header" type="button" onclick="toggleLlmSettings()"
+              aria-controls="agent-llm-settings-body" aria-expanded="false">
         <span class="agent-llm-mark">AI</span>
         <span class="agent-llm-name"><b>LLM REVIEW MODULE</b><small data-i18n="agent.llm.desc">本地 Ollama · 仅辅助建议 · 不自动修改漏洞状态</small></span>
         <span id="agent-llm-state" class="agent-llm-state loading"><i></i><b>LOADING</b><small>—</small></span>
@@ -73,11 +80,13 @@
       </div>
     </section>
 
-    <section class="agent-command-deck">
-      <div class="agent-section-label">
+    <details id="agent-preparation" class="agent-command-deck" open>
+      <summary id="agent-preparation-toggle" class="agent-section-label agent-preparation-toggle">
         <span>01</span><b data-i18n="agent.launch">准备研判</b>
-        <em data-i18n="agent.requiredHint">标记 * 的项目为必填项</em>
-      </div>
+        <em class="agent-preparation-required" data-i18n="agent.requiredHint">标记 * 的项目为必填项</em>
+        <em id="agent-preparation-context" class="agent-preparation-context"></em>
+        <span class="agent-preparation-chevron" aria-hidden="true">▾</span>
+      </summary>
 
       <div class="agent-input-mode" role="group" data-i18n-aria-label="agent.findingInput" aria-label="报警输入">
         <button id="agent-mode-vuln-btn" type="button" class="active" aria-pressed="true"
@@ -206,9 +215,9 @@
         </aside>
       </div>
       <div id="agent-command-error" class="agent-command-error" role="alert" aria-live="assertive"></div>
-    </section>
+    </details>
 
-    <section class="agent-operations">
+    <section id="agent-run-workspace" class="agent-operations" tabindex="-1">
       <aside class="agent-run-rail">
         <div class="agent-section-label"><span>02</span><b data-i18n="agent.runs">运行记录</b>
           <em id="agent-run-count">—</em>
@@ -219,7 +228,7 @@
         </div>
       </aside>
       <div class="agent-run-detail">
-        <div class="agent-section-label"><span>03</span><b data-i18n="agent.timeline">执行时间线</b><em id="agent-run-id">NO RUN SELECTED</em></div>
+        <div id="agent-timeline-heading" class="agent-section-label" tabindex="-1"><span>03</span><b data-i18n="agent.timeline">执行时间线</b><em id="agent-run-id">NO RUN SELECTED</em></div>
         <div id="agent-run-detail" class="agent-detail-empty">
           <div class="agent-radar"><i></i><i></i><i></i></div>
           <strong data-i18n="agent.noRun">尚未选择运行</strong>

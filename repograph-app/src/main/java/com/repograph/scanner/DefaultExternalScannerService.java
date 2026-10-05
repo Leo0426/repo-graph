@@ -156,13 +156,13 @@ public class DefaultExternalScannerService implements ExternalScanService {
 
     private static ScanBatchStatus batchStatus(List<ScannerRunResult> results) {
         long succeeded = results.stream()
-                .filter(result -> result.status() == ScannerRunStatus.SUCCEEDED
-                        || result.status() == ScannerRunStatus.PARTIAL)
+                .filter(result -> result.status() == ScannerRunStatus.SUCCEEDED)
                 .count();
         if (succeeded == results.size()) {
             return ScanBatchStatus.SUCCEEDED;
         }
-        return succeeded == 0 ? ScanBatchStatus.FAILED : ScanBatchStatus.PARTIAL;
+        boolean hasPartial = results.stream().anyMatch(result -> result.status() == ScannerRunStatus.PARTIAL);
+        return succeeded > 0 || hasPartial ? ScanBatchStatus.PARTIAL : ScanBatchStatus.FAILED;
     }
 
     private static Map<String, ScannerAdapter> indexAdapters(List<ScannerAdapter> adapters) {

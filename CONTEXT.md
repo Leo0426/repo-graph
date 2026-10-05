@@ -92,6 +92,9 @@ repograph-app/   Spring Boot Web/REST 服务
 repograph-mcp/   独立 MCP stdio 服务（JSON-RPC，供 AI 工具调用，通过 HTTP 转发至 repograph-app）
 ```
 
+MCP 的 GET、POST 和 JSON POST 均使用 `repograph.timeout-seconds` 请求超时配置；
+HTTP 调用被中断时保留线程中断标志，让上层取消流程可以继续传播。
+
 > **状态**：WALA IFDS 字节码精确污点引擎已从主仓库移除，完整历史归档于
 > Git tag `archive/taint-engine-20260809`。主线保留源码级跨过程污点和外部扫描器接入。
 
@@ -264,6 +267,9 @@ repograph-mcp/   独立 MCP stdio 服务（JSON-RPC，供 AI 工具调用，通�
 - **幂等重试（T10-4）**：`POST /api/v1/scan-tasks/{id}/retry` 对 `FAILED/PARTIAL` 任务只重跑未成功的
   扫描器，保留已成功扫描器的 run，合并后重算状态并 `attempt+1`；靠 `(project_id, fingerprint)` 幂等 +
   findings 页按指纹去重保证不重复。`runTask` 与重试统一到 `execute(task, scanners, keptRuns)`。
+  只有所有扫描器都为 `SUCCEEDED` 才能汇总为成功；单扫描器内部的多语言 `PARTIAL` 仍令批次和任务
+  保持 `PARTIAL`，允许补扫失败语言所属扫描器。执行线程注册后复查持久状态，防止 RUNNING 已落库、
+  线程尚未注册的窗口遗漏取消；线程移除与取消中断同步，避免中断已归还线程池的线程。
 - **Slither 接入（T10-5）**：`SlitherFindingImporter` 解析 `results.detectors[]` → `ExternalFinding`
   （check→ruleId、impact→severity、`source_mapping` 文件/行、cwe 空），每条附 `context-unavailable`
   标记步——RepoGraph 不索引 Solidity，报警沿用 Slither 自带定位但不关联 CodeUnit/调用图，研判据此不
@@ -360,20 +366,24 @@ Java 方法调用优先使用接收者类型、方法名和可静态推断的实
 ## 索引管道（顺序不可打乱）
 
 ```
+0. 同项目索引/删除串行执行；若有未完成的项目删除，先幂等重试清理
 1. 扫描文件
    .java→java / .c .h→c / .py→python / .md .markdown→doc / .class→class（显式开启）
 2. 增量过滤（SQLite MD5 缓存，~/.repograph/index.db）
+   解析前持久化待处理文件的 dirty 标记，并捕获源码指纹
 3. 并行解析（ForkJoinPool，strategy=AUTO）→ CodeUnit + RelationEdge
    doc 文件由 MarkdownDocParser 生成 DOCUMENT 类型 CodeUnit
 4. 元数据增强（framework / is_entry_point / is_test）
-5. 图构建（addUnits + addEdges 批量 UNWIND 写入 Neo4j）
+5. 图替换（replaceFiles 单事务：删除失效节点/旧出边，替换属性，再重建本轮关系）
+   稳定 ID 节点保留外部入边；成功解析的空文件也参与替换；增量解析失败的文件保留旧图
 6. 批量 Embedding（批大小 8，并行度 4）
    semantic_vec = embed(signature + annotations)
    code_vec     = embed(rawSource)
    DOCUMENT CodeUnit：semantic_vec = embed(章节文本)，code_vec = embed(章节文本)（同源）
    单次 Embedding 瞬时失败最多重试 3 次并短退避；耗尽后记录批次错误，整体索引标记为 partial
 7. 批量写入 Qdrant（批大小 256）
-8. 只为本轮成功完成的文件更新 SQLite MD5 缓存，失败文件失效旧指纹以便下次重试
+   仅对新向量已全部写入的文件，按 projectId/filePath 清理不在本轮 ID 集合内的旧向量
+8. 仅为图、向量和清理均成功且源码未变化的文件提交解析前 MD5，其余保留 dirty 标记
 ```
 
 > 索引为**异步**：`POST /api/v1/index/project` 返回 202，用 `GET /api/v1/index/project/status` 轮询；
@@ -382,7 +392,24 @@ Java 方法调用优先使用接收者类型、方法名和可静态推断的实
 ### 索引完成与后台任务恢复
 
 - Embedding/向量写入结果带失败文件集合；跨文件批次失败时保守重试该批次涉及的文件。
-  图批量写入异常不能可靠归属单文件时，本轮文件都保持可重试。成功文件单独更新指纹。
+  图批量替换异常时事务回滚，并停止本轮向量写入/清理；本轮文件保持可重试。
+  向量清理通过 SDK 的 wait=true 请求等待服务端完成，异常向上传播，不将清理失败标为成功。
+  成功文件单独更新指纹；增量解析失败文件不先删除图或向量。
+- `file_cache.md5` 的空字符串是持久 dirty 标记：即使源码随后消失或进程重启，路径仍可枚举并清理。
+  文件删除先登记 dirty，再依次清理图、向量，全部成功后移除条目。项目删除使用独立
+  `pending_project_deletions` 表，即使图和文件缓存都为空也保留未完成工作；下次该项目的索引或
+  删除先幂等重试。SQLite 状态写入/枚举失败显式报错，不继续依赖丢失的重试信息。
+  这是顺序恢复机制，不是跨数据库原子事务；失败期间图与向量仍可能暂时不一致。
+- `IndexStore.withProjectMutation` 统一同一 JVM 内的可重入项目变更边界，覆盖项目/单文件索引、
+  文件清理、HTTP 项目删除和资产删除。文件监听的删除事件统一防抖后扫描磁盘；排队任务在取得
+  项目锁后复查监听注册身份和关闭状态，停止/重新注册/关闭后旧任务不能重建项目。
+  用户删除项目在验证通过后先停止监听，再清理索引；清理失败保留受控源码和注册信息供显式重试，
+  避免文件事件把尚未完成的删除自动变成重建。
+  等待项目锁可被中断，中断后不执行变更并保留线程标记；仍遵循单 app 进程拥有数据库的约束。
+- 增量清理只有在磁盘确认路径已不存在或源码已被替换为目录时才删除旧索引；语言过滤、排除规则或
+  扫描不可达不等于文件删除。
+  项目与单文件索引在解析前捕获内容指纹，写入完成后核对内容仍相同才提交该快照；中途变化或无法读取
+  的文件保留 dirty 并记录 partial，防止把未处理的新版本错误标成已索引。
 - 解析器没有成功结果时记录错误且不提交指纹；合法空文件及主动忽略的匿名字节码保留 parserUsed，
   不与解析失败混淆。图批量写入异常进入 IndexResult.errors，使 HTTP 终态准确显示 partial。
 - `VectorStore` 的精确符号查询和位置查询支持 projectId，报警研判始终转发其项目范围；HTTP

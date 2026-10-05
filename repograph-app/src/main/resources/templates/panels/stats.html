@@ -8,18 +8,24 @@
     <div class="panel-subtitle" data-i18n="stats.subtitle">所选项目的节点 / 文件 / 边类型聚合统计</div>
   </div>
   <div class="panel-body">
-    <div class="input-row" style="margin-bottom:18px">
+    <div class="stats-toolbar">
+      <label for="stats-project-input" data-i18n="stats.projectLabel">项目</label>
+      <div class="input-row">
       <input type="text" id="stats-project-input" placeholder="project-name"
         autocomplete="off" list="projects-datalist" data-i18n-ph="ph.projectName"
-        onkeydown="if(event.key==='Enter')loadProjectStats()"
+        oninput="invalidateStatsInput()" aria-describedby="stats-project-help"
+        onkeydown="if(event.key==='Enter'&&!event.isComposing)loadProjectStats(true)"
         onchange="loadProjectStats()">
-      <button class="btn btn-primary" onclick="loadProjectStats()">
+      <button id="stats-load-btn" class="btn btn-primary" type="button" onclick="loadProjectStats(true)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-        <span data-i18n="btn.loadStats">加载</span>
+        <span id="stats-load-label" data-i18n="btn.loadStats">加载</span>
       </button>
+      </div>
+      <p id="stats-project-help" data-i18n="stats.emptyHint">从下拉选择，或直接输入项目名称</p>
     </div>
+    <div id="stats-status" class="stats-status" role="status" aria-live="polite"></div>
 
-    <div id="stats-content">
+    <div id="stats-content" aria-busy="false">
       <div class="empty-state">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
         <p data-i18n="stats.empty">选择一个项目查看概览</p>
@@ -28,10 +34,12 @@
     </div>
 
     <div id="stats-watch-bar" class="stats-watch-bar" style="display:none">
-      <span class="watch-dot"></span>
+      <strong data-i18n="stats.projectActions">项目操作</strong>
+      <span class="watch-dot" aria-hidden="true"></span>
       <span id="stats-watch-label" class="watch-label" data-i18n="watch.idle">未监听</span>
-      <button id="stats-watch-btn" class="btn btn-sm" onclick="toggleWatch()" data-i18n="watch.start">开启监听</button>
-      <button class="btn btn-sm" style="margin-left:auto;color:var(--red);border-color:rgba(248,113,113,.3)"
+      <button id="stats-watch-retry" class="btn btn-ghost" type="button" onclick="retryStatsWatch()" data-i18n="stats.retry" hidden>重试</button>
+      <button id="stats-watch-btn" class="btn btn-ghost" type="button" onclick="toggleWatch()" data-i18n="watch.start">开启监听</button>
+      <button class="btn btn-ghost stats-delete-btn" type="button"
               onclick="deleteProjectFromStats()" data-i18n="btn.delete">删除</button>
     </div>
   </div>

@@ -48,6 +48,7 @@ public class DefaultScanTaskService implements ScanTaskService {
 
     /** 正在执行的任务 → 执行线程，供取消 {@code RUNNING} 任务时中断以终止子进程。 */
     private final Map<String, Thread> running = new ConcurrentHashMap<>();
+    private final Object runningLock = new Object();
 
     /**
      * 创建异步扫描任务服务。
@@ -127,6 +128,10 @@ public class DefaultScanTaskService implements ScanTaskService {
         }
         running.put(taskId, Thread.currentThread());
         try {
+            // 取消可能发生在 RUNNING 已持久化、执行线程尚未注册之间；注册后补查避免遗漏取消。
+            if (store.find(taskId).filter(current -> current.status() == ScanTaskStatus.RUNNING).isEmpty()) {
+                return;
+            }
             Optional<ImportedAsset> asset = assetImportService.find(task.assetId());
             if (asset.isEmpty()) {
                 store.fail(taskId, "asset not found: " + task.assetId(), Instant.now().toString());
@@ -146,7 +151,10 @@ public class DefaultScanTaskService implements ScanTaskService {
             // 取消导致的中断同样进入此分支，fail 为条件 no-op，不覆盖 CANCELLED。
             store.fail(taskId, structuredError(e), Instant.now().toString());
         } finally {
-            running.remove(taskId);
+            synchronized (runningLock) {
+                // 不移除同一任务后续重试已经注册的新线程，也不允许取消中断已归还线程池的线程。
+                running.remove(taskId, Thread.currentThread());
+            }
             // 清除可能因取消/超时残留的中断标志，避免污染线程池中的下一个任务。
             Thread.interrupted();
         }
@@ -195,9 +203,11 @@ public class DefaultScanTaskService implements ScanTaskService {
             return store.find(taskId).orElse(task);
         }
         if (store.cancelIfRunning(taskId, now)) {
-            Thread worker = running.get(taskId);
-            if (worker != null) {
-                worker.interrupt();
+            synchronized (runningLock) {
+                Thread worker = running.get(taskId);
+                if (worker != null) {
+                    worker.interrupt();
+                }
             }
             return store.find(taskId).orElse(task);
         }
@@ -232,18 +242,18 @@ public class DefaultScanTaskService implements ScanTaskService {
     }
 
     /**
-     * 从合并后的扫描器运行结果重算批次状态：全部成功为 {@code SUCCEEDED}，全部未成功为 {@code FAILED}，
-     * 否则 {@code PARTIAL}。与 {@code DefaultExternalScannerService} 的聚合逻辑一致。
+     * 从合并后的扫描器运行结果重算批次状态：全部完整成功为 {@code SUCCEEDED}，仅部分扫描器或语言
+     * 成功为 {@code PARTIAL}，完全没有成功结果为 {@code FAILED}。与同步扫描编排的聚合逻辑一致。
      */
     private static ScanBatchStatus combinedStatus(List<ScannerRunResult> runs) {
         long succeeded = runs.stream()
-                .filter(run -> run.status() == ScannerRunStatus.SUCCEEDED
-                        || run.status() == ScannerRunStatus.PARTIAL)
+                .filter(run -> run.status() == ScannerRunStatus.SUCCEEDED)
                 .count();
         if (succeeded == runs.size()) {
             return ScanBatchStatus.SUCCEEDED;
         }
-        return succeeded == 0 ? ScanBatchStatus.FAILED : ScanBatchStatus.PARTIAL;
+        boolean hasPartial = runs.stream().anyMatch(run -> run.status() == ScannerRunStatus.PARTIAL);
+        return succeeded > 0 || hasPartial ? ScanBatchStatus.PARTIAL : ScanBatchStatus.FAILED;
     }
 
     private static String structuredError(RuntimeException e) {

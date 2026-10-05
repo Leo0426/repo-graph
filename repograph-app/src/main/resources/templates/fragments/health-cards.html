@@ -4,7 +4,7 @@
 <th:block th:fragment="health-cards">
 
   <!-- Health cards (main swap target content) -->
-  <div th:class="'health-card ' + ${qdrantCls}">
+  <div th:class="'health-card ' + ${qdrantCls}" data-service="qdrant">
     <div class="health-icon-wrap">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
         <rect x="2" y="3" width="20" height="14" rx="2"/>
@@ -13,12 +13,12 @@
     </div>
     <div class="health-info">
       <div class="health-name">Qdrant</div>
-      <div class="health-desc" data-i18n="health.qdrant.desc">localhost:16334 · gRPC · vector store</div>
+      <div class="health-desc" data-i18n="health.qdrant.desc">向量存储 · 基础连接检查</div>
     </div>
     <div class="health-status" th:text="${qdrant}">unknown</div>
   </div>
 
-  <div th:class="'health-card ' + ${ollamaCls}">
+  <div th:class="'health-card ' + ${ollamaCls}" data-service="ollama">
     <div class="health-icon-wrap">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
         <circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>
@@ -26,12 +26,12 @@
     </div>
     <div class="health-info">
       <div class="health-name">Ollama</div>
-      <div class="health-desc" data-i18n="health.ollama.desc">192.168.4.113:11434 · nomic-embed-code</div>
+      <div class="health-desc" data-i18n="health.ollama.desc">模型服务 · 基础连接检查</div>
     </div>
     <div class="health-status" th:text="${ollama}">unknown</div>
   </div>
 
-  <div th:class="'health-card ' + ${neo4jCls}">
+  <div th:class="'health-card ' + ${neo4jCls}" data-service="neo4j">
     <div class="health-icon-wrap">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
         <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="18" r="3"/>
@@ -40,23 +40,26 @@
     </div>
     <div class="health-info">
       <div class="health-name">Neo4j</div>
-      <div class="health-desc" data-i18n="health.neo4j.desc">localhost:7687 · Bolt · code knowledge graph</div>
+      <div class="health-desc" data-i18n="health.neo4j.desc">代码知识图谱 · 基础连接检查</div>
     </div>
     <div class="health-status" th:text="${neo4j}">unknown</div>
   </div>
 
   <!-- OOB badge updates for the header -->
-  <div class="badge" id="hb-qdrant" hx-swap-oob="outerHTML">
-    <div id="hd-qdrant" th:class="'badge-dot ' + ${qdrantDot}"></div>
+  <div class="badge" id="hb-qdrant" hx-swap-oob="outerHTML" th:attr="data-health=${qdrantDot}">
+    <div id="hd-qdrant" th:class="'badge-dot ' + ${qdrantDot}" aria-hidden="true"></div>
     <span>Qdrant</span>
+    <span class="badge-state" th:text="${qdrant}">检查中</span>
   </div>
-  <div class="badge" id="hb-ollama" hx-swap-oob="outerHTML">
-    <div id="hd-ollama" th:class="'badge-dot ' + ${ollamaDot}"></div>
+  <div class="badge" id="hb-ollama" hx-swap-oob="outerHTML" th:attr="data-health=${ollamaDot}">
+    <div id="hd-ollama" th:class="'badge-dot ' + ${ollamaDot}" aria-hidden="true"></div>
     <span>Ollama</span>
+    <span class="badge-state" th:text="${ollama}">检查中</span>
   </div>
-  <div class="badge" id="hb-neo4j" hx-swap-oob="outerHTML">
-    <div id="hd-neo4j" th:class="'badge-dot ' + ${neo4jDot}"></div>
+  <div class="badge" id="hb-neo4j" hx-swap-oob="outerHTML" th:attr="data-health=${neo4jDot}">
+    <div id="hd-neo4j" th:class="'badge-dot ' + ${neo4jDot}" aria-hidden="true"></div>
     <span>Neo4j</span>
+    <span class="badge-state" th:text="${neo4j}">检查中</span>
   </div>
 
 </th:block>

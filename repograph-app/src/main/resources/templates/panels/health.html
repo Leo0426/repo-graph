@@ -5,15 +5,42 @@
      :class="{ active: $store.repograph.panel === 'health' }">
   <div class="panel-header">
     <div class="panel-title" data-i18n="health.title">系统健康</div>
-    <div class="panel-subtitle" data-i18n="health.subtitle">外部服务实时状态 · 每 5 秒轮询</div>
+    <div class="panel-subtitle" data-i18n="health.subtitle">基础连接检查 · 每 5 秒尝试更新</div>
   </div>
-  <div class="panel-body">
+  <div class="panel-body health-workbench">
+    <section id="health-summary" class="health-summary" data-state="checking" aria-labelledby="health-summary-title">
+      <div class="health-summary-copy">
+        <span class="health-eyebrow" data-i18n="health.overview">服务连接概览</span>
+        <h2 id="health-summary-title" role="status" aria-live="polite"></h2>
+        <p id="health-summary-note"></p>
+      </div>
+      <div class="health-check-actions">
+        <button type="button" id="health-refresh" class="btn btn-primary" onclick="refreshHealthStatus()"
+                data-i18n="health.refresh">立即检查</button>
+        <span id="health-check-progress" role="status" aria-live="polite"></span>
+      </div>
+      <div class="health-freshness"><span data-i18n="health.receivedAt">最近收到检查结果</span>
+        <time id="health-last-checked" data-i18n="health.never">尚无结果</time>
+        <span class="health-poll-note" data-i18n="health.pollHint">每 5 秒尝试检查，进行中的请求不会重复发送。</span></div>
+      <p id="health-check-error" class="health-check-error" role="alert" hidden></p>
+    </section>
     <div id="health-grid" class="health-grid"
          hx-get="/api/fragments/health"
-         hx-trigger="load, every 5s"
-         hx-swap="innerHTML">
+         hx-trigger="load, every 5s, health-refresh queue:none"
+         hx-sync="this:drop" hx-swap="innerHTML" aria-busy="false">
       <div class="loading-row"><div class="spinner"></div></div>
     </div>
+    <section class="health-interpretation" aria-labelledby="health-interpretation-title">
+      <h2 id="health-interpretation-title" data-i18n="health.meaning">如何理解这些状态</h2>
+      <div class="health-guidance-grid">
+        <article><h3 data-i18n="health.connected.title">服务可达</h3>
+          <p data-i18n="health.connected.note">表示基础连接检查通过；不代表模型已安装、推理成功或索引数据完整。</p></article>
+        <article><h3 data-i18n="health.serviceError.title">单项服务异常</h3>
+          <p data-i18n="health.serviceError.note">应用已返回检查结果，部分服务未通过。检查对应服务与连接配置后可重新检查。</p></article>
+        <article><h3 data-i18n="health.connectionError.title">检查连接中断</h3>
+          <p data-i18n="health.connectionError.note">无法取得新的有效结果，服务当前状态未知。恢复应用连接后重试。</p></article>
+      </div>
+    </section>
   </div>
 </div>
 </body>

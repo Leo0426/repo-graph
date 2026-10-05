@@ -18,6 +18,8 @@ import com.repograph.core.finding.ExternalFindingSeverity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import java.nio.file.Path;
@@ -31,7 +33,11 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -177,6 +183,51 @@ class DefaultScanTaskServiceTest {
     }
 
     @Test
+    void cancelDuringRunningTransitionPreventsScannerStartup() throws Exception {
+        ImportedAsset asset = asset("asset-1", "p1");
+        when(assetImportService.find("asset-1")).thenReturn(Optional.of(asset));
+        when(externalScanService.scan(any(), any())).thenReturn(
+                new ExternalScanBatchResult("b1", "p1", ScanBatchStatus.SUCCEEDED, List.of()));
+        store.create(new ScanTask("t1", "p1", "asset-1",
+                List.of("SEMGREP"), List.of("java"), 300,
+                ScanTaskStatus.QUEUED, 1, "", "", now(), now()));
+        ScanTaskStore delayedStore = spy(store);
+        CountDownLatch runningPersisted = new CountDownLatch(1);
+        CountDownLatch resumeWorker = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            boolean claimed = (boolean) invocation.callRealMethod();
+            runningPersisted.countDown();
+            try {
+                if (!resumeWorker.await(5, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("worker was not released");
+                }
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+            return claimed;
+        }).when(delayedStore).markRunning(eq("t1"), any());
+        DefaultScanTaskService subject = new DefaultScanTaskService(delayedStore, externalScanService,
+                assetImportService, new ScanTaskScheduler(DIRECT, 1, 1, 1));
+        Thread worker = new Thread(() -> subject.runTask("t1"), "test-scan-transition");
+        worker.start();
+        try {
+            assertThat(runningPersisted.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(subject.cancel("t1").status()).isEqualTo(ScanTaskStatus.CANCELLED);
+        } finally {
+            resumeWorker.countDown();
+            worker.join(5_000);
+            if (worker.isAlive()) {
+                worker.interrupt();
+                worker.join(5_000);
+            }
+        }
+
+        assertThat(worker.isAlive()).isFalse();
+        assertThat(store.find("t1").orElseThrow().status()).isEqualTo(ScanTaskStatus.CANCELLED);
+        verifyNoInteractions(externalScanService);
+    }
+
+    @Test
     void retryRerunsOnlyFailedScannersAndDeduplicatesFindings() {
         // 造一个 PARTIAL 完成态：SEMGREP 成功（1 报警），CODEQL 失败。
         store.create(new ScanTask("t1", "p1", "asset-1",
@@ -208,6 +259,41 @@ class DefaultScanTaskServiceTest {
         ArgumentCaptor<ExternalScanOptions> options = ArgumentCaptor.forClass(ExternalScanOptions.class);
         verify(externalScanService).scan(any(), options.capture());
         assertThat(options.getValue().scanners()).containsExactly("CODEQL");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void partialLanguageScanRemainsRetryable(boolean includeSuccessfulScanner) {
+        ImportedAsset asset = asset("asset-1", "p1");
+        when(assetImportService.find("asset-1")).thenReturn(Optional.of(asset));
+        ExternalFinding codeqlFinding = finding("CODEQL", "rule-b", "B.java", 20);
+        ExternalFinding semgrepFinding = finding("SEMGREP", "rule-a", "A.java", 10);
+        ScannerRunResult partial = scannerRun("CODEQL", ScannerRunStatus.PARTIAL, List.of(codeqlFinding));
+        List<ScannerRunResult> initialRuns = includeSuccessfulScanner
+                ? List.of(scannerRun("SEMGREP", ScannerRunStatus.SUCCEEDED, List.of(semgrepFinding)), partial)
+                : List.of(partial);
+        when(externalScanService.scan(any(), any())).thenReturn(
+                new ExternalScanBatchResult("b1", "p1", ScanBatchStatus.PARTIAL, initialRuns),
+                new ExternalScanBatchResult("b2", "p1", ScanBatchStatus.SUCCEEDED,
+                        List.of(scannerRun("CODEQL", ScannerRunStatus.SUCCEEDED, List.of(codeqlFinding)))));
+        Set<String> scanners = includeSuccessfulScanner ? Set.of("SEMGREP", "CODEQL") : Set.of("CODEQL");
+
+        ScanTask submitted = service.submit(asset,
+                new ExternalScanOptions(scanners, List.of("java", "python"), 300));
+
+        assertThat(service.find(submitted.id()).orElseThrow().status()).isEqualTo(ScanTaskStatus.PARTIAL);
+        assertThat(service.result(submitted.id()).orElseThrow().status()).isEqualTo(ScanBatchStatus.PARTIAL);
+
+        ScanTask retried = service.retry(submitted.id());
+
+        assertThat(retried.status()).isEqualTo(ScanTaskStatus.SUCCEEDED);
+        assertThat(retried.attempt()).isEqualTo(2);
+        assertThat(service.findings(submitted.id(), 0, 50).findings())
+                .containsExactlyInAnyOrderElementsOf(includeSuccessfulScanner
+                        ? List.of(semgrepFinding, codeqlFinding) : List.of(codeqlFinding));
+        ArgumentCaptor<ExternalScanOptions> requests = ArgumentCaptor.forClass(ExternalScanOptions.class);
+        verify(externalScanService, times(2)).scan(any(), requests.capture());
+        assertThat(requests.getAllValues().get(1).scanners()).containsExactly("CODEQL");
     }
 
     @Test

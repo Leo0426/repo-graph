@@ -1,0 +1,61 @@
+/* Graph interaction states, navigation and narrow-screen canvas. */
+#panel-graph [hidden] { display: none !important; }
+#panel-graph .graph-container { min-height: 0; grid-template-columns: 260px minmax(0, 1fr); }
+#panel-graph .graph-sidebar { gap: 16px; background: var(--bg-2); }
+#panel-graph .graph-related-hint { font-size: 12px; line-height: 1.6; color: var(--text-3); }
+#panel-graph .field-label { display: block; margin-bottom: 8px; }
+#panel-graph .graph-canvas { min-width: 0; background: var(--bg); }
+#panel-graph .graph-controls {
+  bottom: 16px; right: 16px; z-index: 5; flex-direction: row; align-items: center; gap: 4px;
+  padding: 4px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-2);
+}
+#panel-graph .graph-ctrl-btn {
+  width: 40px; height: 40px; color: var(--text); background: var(--bg-2); border-color: transparent;
+}
+#panel-graph .graph-ctrl-btn:hover { color: var(--mint); background: var(--bg-3); }
+#panel-graph .graph-fit-btn { width: auto; padding: 0 12px; font: 600 12px var(--ui); }
+#panel-graph .graph-zoom-level { min-width: 46px; text-align: center; color: var(--text-2); font: 12px var(--fm); }
+#panel-graph .graph-hint {
+  left: 16px; right: 16px; bottom: 78px; transform: none; max-height: 56px; overflow: auto;
+  font: 12px/1.5 var(--ui); white-space: normal; overflow-wrap: anywhere; letter-spacing: 0;
+}
+#panel-graph .graph-state {
+  position: absolute; inset: 20px 20px 114px; display: flex; align-items: center; justify-content: center;
+  flex-direction: column; gap: 12px; text-align: center; pointer-events: none;
+}
+#panel-graph .graph-state-mark { color: var(--mint); font-size: 36px; line-height: 1; }
+#panel-graph .graph-state strong { font: 600 18px var(--ui); color: var(--text); }
+#panel-graph .graph-state p {
+  max-width: 440px; max-height: 140px; overflow: auto; color: var(--text-2); font-size: 13px;
+  line-height: 1.6; overflow-wrap: anywhere; pointer-events: auto;
+}
+#panel-graph .graph-state .btn { pointer-events: auto; flex-shrink: 0; }
+#panel-graph .graph-state[data-status="error"] .graph-state-mark { color: var(--red); }
+#panel-graph .graph-state[data-status="loading"] .graph-state-mark { animation: graph-loading 1.4s ease-in-out infinite; }
+#panel-graph .graph-node { outline: none; }
+#panel-graph .graph-node:focus-visible > circle,
+#panel-graph .graph-node[aria-pressed="true"] > circle { stroke: var(--mint); stroke-width: 3px; }
+#panel-graph .graph-node:focus-visible > text { fill: var(--text); font-weight: 700; }
+#panel-graph :is(button, input, select):focus-visible { outline: 2px solid var(--mint); outline-offset: 3px; }
+#panel-graph .flow-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+#panel-graph .flow-metric, #panel-graph .flow-view-switch { background: var(--bg-2); }
+#panel-graph .flow-metric-label { font-size: 11px; letter-spacing: .02em; overflow-wrap: anywhere; }
+#panel-graph .flow-metric-value { font-size: 12px; }
+@keyframes graph-loading { 50% { opacity: .4; } }
+@media (max-width: 1050px) {
+  #panel-graph .graph-container { grid-template-columns: 220px minmax(0, 1fr); }
+}
+@media (max-width: 780px) {
+  #panel-graph .graph-container { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(440px, 1fr); overflow-y: auto; }
+  #panel-graph .graph-sidebar { overflow-y: visible; padding: 16px; }
+  #panel-graph .graph-canvas { min-height: 440px; }
+  #panel-graph #graph-tab-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #panel-graph #graph-tab-row .tab { white-space: normal; height: auto; min-height: 44px; font-size: 12px; }
+  #panel-graph .graph-controls { right: 12px; bottom: 12px; }
+  #panel-graph .graph-state { inset: 24px 16px 114px; }
+  #panel-graph .flow-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #panel-graph .flow-view-switch { top: 158px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #panel-graph *, #panel-graph *::before, #panel-graph *::after { animation: none !important; transition: none !important; }
+}

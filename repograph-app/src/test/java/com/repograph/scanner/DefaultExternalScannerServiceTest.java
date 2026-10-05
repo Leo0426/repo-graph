@@ -17,6 +17,8 @@ import com.repograph.core.scanner.ScannerRunResult;
 import com.repograph.core.scanner.ScannerRunStatus;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -35,6 +37,31 @@ class DefaultExternalScannerServiceTest {
 
     @TempDir
     Path tempDir;
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void scan_preservesPartialLanguageFailureInBatchStatus(boolean includeSuccessfulScanner) throws Exception {
+        Path projectRoot = Files.createDirectory(tempDir.resolve("project"));
+        ScannerRunStore store = new ScannerRunStore(tempDir.resolve("index.db").toString(), new ObjectMapper());
+        ScannerProperties properties = new ScannerProperties(
+                tempDir.resolve("scan-work"), 5, 10, 10,
+                "semgrep", "auto", "codeql", "security-extended");
+        List<ScannerAdapter> adapters = includeSuccessfulScanner
+                ? List.of(successAdapter(), partialAdapter()) : List.of(partialAdapter());
+        ExternalScanService service = new DefaultExternalScannerService(adapters, store, properties);
+        Set<String> scanners = includeSuccessfulScanner ? Set.of("SEMGREP", "CODEQL") : Set.of("CODEQL");
+
+        ExternalScanBatchResult batch = service.scan(asset(projectRoot),
+                new ExternalScanOptions(scanners, List.of("java", "python"), 5));
+
+        assertThat(batch.status()).isEqualTo(ScanBatchStatus.PARTIAL);
+        assertThat(batch.runs()).filteredOn(run -> run.scanner().equals("CODEQL")).singleElement()
+                .satisfies(run -> {
+                    assertThat(run.status()).isEqualTo(ScannerRunStatus.PARTIAL);
+                    assertThat(run.findings()).hasSize(1);
+                    assertThat(store.findRun(run.scanId())).contains(run);
+                });
+    }
 
     @Test
     void scan_isolatesAdapterFailureAndPersistsIdempotentFindingsAcrossRestart() throws Exception {
@@ -113,6 +140,28 @@ class DefaultExternalScannerServiceTest {
             @Override
             public ScannerRunResult scan(ScannerRequest request) {
                 throw new IllegalStateException("simulated adapter crash");
+            }
+        };
+    }
+
+    private ScannerAdapter partialAdapter() {
+        return new ScannerAdapter() {
+            @Override
+            public ScannerCapability capability() {
+                return DefaultExternalScannerServiceTest.capability("CODEQL");
+            }
+
+            @Override
+            public ScannerAvailability probe() {
+                return new ScannerAvailability(capability(), true, "2.0", "");
+            }
+
+            @Override
+            public ScannerRunResult scan(ScannerRequest request) {
+                String now = Instant.now().toString();
+                return new ScannerRunResult(
+                        request.scanId(), request.projectId(), "CODEQL", ScannerRunStatus.PARTIAL,
+                        "2.0", -1, 1, now, now, List.of(finding()), "python: scan timed out");
             }
         };
     }

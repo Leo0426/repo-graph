@@ -160,8 +160,14 @@ public class DefaultAssetImportService implements AssetImportService {
         if (found.isEmpty()) {
             return false;
         }
-        deleteRegisteredAsset(found.get());
-        return true;
+        return indexStore.withProjectMutation(found.get().projectId(), () -> {
+            Optional<ImportedAsset> current = assetStore.findById(assetId);
+            if (current.isEmpty()) {
+                return false;
+            }
+            deleteRegisteredAsset(current.get());
+            return true;
+        });
     }
 
     @Override
@@ -175,7 +181,12 @@ public class DefaultAssetImportService implements AssetImportService {
 
     @Override
     public void cleanupManagedProject(String projectId) {
-        assetStore.findByProjectId(projectId).ifPresent(this::cleanupRegistration);
+        indexStore.withProjectMutation(projectId, () -> {
+            validateProjectDeletion(projectId);
+            fileWatcherService.stop(projectId);
+            assetStore.findByProjectId(projectId).ifPresent(this::cleanupRegistration);
+            return null;
+        });
     }
 
     private long copyUpload(InputStream input, Path target) throws IOException {
@@ -251,7 +262,6 @@ public class DefaultAssetImportService implements AssetImportService {
         if (!projectRoot.startsWith(assetRoot)) {
             throw new IllegalStateException("Refusing to delete untrusted asset path: " + projectRoot);
         }
-        fileWatcherService.stop(asset.projectId());
         externalScanService.removeProject(asset.projectId());
         indexHistoryStore.remove(projectRoot.toString());
         ManagedFileTree.deleteIfExists(assetRoot);

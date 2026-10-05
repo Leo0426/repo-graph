@@ -22,6 +22,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -43,10 +44,10 @@ import java.util.stream.Collectors;
  *   <li>增量过滤（SQLite MD5 缓存，跳过未变更文件；{@code noIncremental=true} 时跳过此步）</li>
  *   <li>并行解析（ForkJoinPool，产出 CodeUnit + RelationEdge）</li>
  *   <li>元数据增强（框架识别、入口点、测试标记）</li>
- *   <li>图构建（CodeUnit + RelationEdge → Neo4j）</li>
+ *   <li>图内事务替换（保留稳定节点的外部入边）</li>
  *   <li>批量 Embedding（semantic + code 双向量）</li>
- *   <li>批量写入 Qdrant（批大小 256）</li>
- *   <li>更新 SQLite 缓存（本轮索引文件的最新 MD5）</li>
+ *   <li>批量写入 Qdrant（批大小 256），成功后清除文件旧向量</li>
+ *   <li>确认源码未变化后提交解析前 MD5；失败文件保留未完成标记</li>
  * </ol>
  *
  * @author leolu
@@ -100,193 +101,150 @@ public class DefaultIndexPipeline implements IndexPipeline {
         this.eventPublisher = eventPublisher;
     }
 
+    /** {@inheritDoc} */
     @Override
     public IndexResult index(Path projectRoot, IndexOptions options) {
+        String projectId = ProjectIdUtil.generateProjectId(projectRoot);
+        return indexStore.withProjectMutation(projectId, () -> indexProject(projectRoot, options, projectId));
+    }
+
+    private IndexResult indexProject(Path projectRoot, IndexOptions options, String projectId) {
         IndexOptions opts = options != null ? options : IndexOptions.defaults();
         long startMs = System.currentTimeMillis();
         List<String> errors = Collections.synchronizedList(new ArrayList<>());
-        Set<String> failedFiles = java.util.concurrent.ConcurrentHashMap.newKeySet();
-
-        String projectId = ProjectIdUtil.generateProjectId(projectRoot);
         log.info("Starting index for project '{}' at {}", projectId, projectRoot);
-
-        if (!opts.incremental()) {
+        if (!opts.incremental() || incrementalCache.hasPendingProjectDeletion(projectId)) {
             indexStore.removeProject(projectId);
         }
 
-        // 注册 :Project 元数据节点，供 /api/v1/projects 接口列出当前项目
-        try {
-            codeGraph.recordProject(projectId, projectRoot.toAbsolutePath().toString());
-        } catch (Exception e) {
-            log.warn("Failed to record project metadata for '{}': {}", projectId, e.getMessage());
-        }
-
-        // 第一步：扫描文件
         List<Path> allFiles = sourceFileScanner.scan(projectRoot, opts);
-        int totalFiles = allFiles.size();
-        log.info("Found {} source files to scan", totalFiles);
+        if (opts.incremental()) cleanupDeletedFiles(allFiles, projectRoot, projectId, errors);
+        List<Path> files = opts.incremental()
+                ? incrementalCache.filterChanged(allFiles, projectId, projectRoot) : allFiles;
+        BatchCounts counts = indexFiles(files, projectRoot, opts, projectId, errors);
 
-        // 第二步：增量过滤（跳过未变更的文件）
-        List<Path> files;
-        if (!opts.incremental()) {
-            files = allFiles;
-            log.info("Incremental indexing disabled — reindexing all {} files", totalFiles);
-        } else {
-            Set<String> currentPaths = allFiles.stream()
-                    .map(file -> PathUtil.toRelativePath(projectRoot, file))
-                    .collect(Collectors.toSet());
-            Set<String> deletedPaths = new LinkedHashSet<>(
-                    incrementalCache.findDeletedPaths(allFiles, projectId, projectRoot));
-            for (String graphPath : codeGraph.findFilePaths(projectId)) {
-                if (!currentPaths.contains(graphPath)) deletedPaths.add(graphPath);
-            }
-            for (String deletedPath : deletedPaths) {
-                indexStore.removeFile(deletedPath, projectId);
-            }
-            if (!deletedPaths.isEmpty()) {
-                log.info("Incremental cleanup: removed {} deleted or migrated file(s)", deletedPaths.size());
-            }
-            files = incrementalCache.filterChanged(allFiles, projectId, projectRoot);
-            int skipped = totalFiles - files.size();
-            log.info("Incremental filter: {} changed, {} skipped", files.size(), skipped);
-        }
-
-        // 第三步：并行解析
-        ParseOptions parseOptions = new ParseOptions(
-                opts.strategy() != null ? opts.strategy() : ParseStrategy.AUTO,
-                opts.languages(),
-                projectRoot,
-                projectId
-        );
-
-        AtomicInteger parsedCount = new AtomicInteger(0);
-        List<ParseResult> parseResults = Collections.synchronizedList(new ArrayList<>());
-
-        ForkJoinPool pool = ForkJoinPool.commonPool();
-        pool.submit(() ->
-                files.parallelStream().forEach(file -> {
-                    try {
-                        ParseResult result = parserDispatcher.dispatch(file, parseOptions);
-                        if (result.parserUsed() == null) {
-                            failedFiles.add(PathUtil.toRelativePath(projectRoot, file));
-                            errors.add("No parser succeeded [" + file + "]");
-                        }
-                        parseResults.add(result);
-                        int done = parsedCount.incrementAndGet();
-                        publishProgress(projectRoot.toString(), "parsing", done, files.size());
-                    } catch (Exception e) {
-                        log.warn("Parse error for {}: {}", file, e.getMessage());
-                        errors.add("Parse error [" + file + "]: " + e.getMessage());
-                        failedFiles.add(PathUtil.toRelativePath(projectRoot, file));
-                    }
-                })
-        ).join();
-
-        // 合并所有解析结果，统计降级文件数量以供审计
-        List<CodeUnit> allUnits = new ArrayList<>();
-        List<RelationEdge> allEdges = new ArrayList<>();
-        int degradedFiles = 0;
-        for (ParseResult r : parseResults) {
-            allUnits.addAll(r.units());
-            allEdges.addAll(r.edges());
-            if (r.degraded()) degradedFiles++;
-        }
-        if (degradedFiles > 0) {
-            log.warn("Degraded to heuristic parser for {} / {} files (edges not extracted for these files)",
-                    degradedFiles, parseResults.size());
-        }
-
-        // 第三步：元数据增强（框架检测）
-        List<CodeUnit> enhancedUnits = enhanceMetadata(allUnits);
-
-        // 第四步：构建图
-        int graphErrorsBefore = errors.size();
-        int graphEdges = buildGraph(enhancedUnits, allEdges, projectId, errors);
-        if (errors.size() > graphErrorsBefore) {
-            files.forEach(file -> failedFiles.add(PathUtil.toRelativePath(projectRoot, file)));
-        }
-        log.info("Graph built: {} units, {} edges", enhancedUnits.size(), graphEdges);
-
-        // 第五至六步：批量向量化并写入
-        var embedding = embeddingUpsertRunner.embedAndUpsert(enhancedUnits, projectId, projectRoot, errors,
-                (root, done, total) -> publishProgress(root, "embedding", done, total));
-
-        failedFiles.addAll(embedding.failedFiles());
-        // Only fully indexed files may be skipped on the next incremental run.
-        List<Path> completedFiles = files.stream()
-                .filter(file -> !failedFiles.contains(PathUtil.toRelativePath(projectRoot, file))).toList();
-        failedFiles.forEach(file -> incrementalCache.removeEntry(file, projectId));
-        incrementalCache.updateEntries(completedFiles, projectId, projectRoot);
-        int embeddedCount = embedding.unitCount();
-
+        FileWatcherService watcher = fileWatcherServiceProvider.getIfAvailable();
+        if (watcher != null) watcher.start(projectId, projectRoot);
         long durationMs = System.currentTimeMillis() - startMs;
-        log.info("Index complete: {} files, {} units, {} edges in {}ms",
-                parsedCount.get(), embeddedCount, graphEdges, durationMs);
-
-        // 自动注册文件监听，确保索引完成后的变更能被自动感知
-        FileWatcherService fileWatcherService = fileWatcherServiceProvider.getIfAvailable();
-        if (fileWatcherService != null) {
-            fileWatcherService.start(projectId, projectRoot);
-        }
-
-        int skippedFiles = totalFiles - files.size();
-        return new IndexResult(
-                totalFiles, parsedCount.get(), skippedFiles, degradedFiles,
-                embeddedCount, graphEdges, durationMs, List.copyOf(errors)
-        );
+        log.info("Index complete: {} files, {} units, {} edges in {}ms ({} errors)",
+                counts.parsed(), counts.units(), counts.edges(), durationMs, errors.size());
+        return new IndexResult(allFiles.size(), counts.parsed(), allFiles.size() - files.size(),
+                counts.degraded(), counts.units(), counts.edges(), durationMs, List.copyOf(errors));
     }
 
+    private void cleanupDeletedFiles(List<Path> allFiles, Path projectRoot, String projectId, List<String> errors) {
+        Set<String> currentPaths = allFiles.stream()
+                .map(file -> PathUtil.toRelativePath(projectRoot, file)).collect(Collectors.toSet());
+        Set<String> deletedPaths = new LinkedHashSet<>(
+                incrementalCache.findDeletedPaths(allFiles, projectId, projectRoot));
+        for (String graphPath : codeGraph.findFilePaths(projectId)) {
+            if (!currentPaths.contains(graphPath)) deletedPaths.add(graphPath);
+        }
+        for (String path : deletedPaths) {
+            Path source = projectRoot.resolve(path);
+            // 过滤和访问失败不代表删除；只有确认不存在或已被目录替换才清理。
+            if (!Files.notExists(source) && !Files.isDirectory(source)) continue;
+            try {
+                indexStore.removeFile(path, projectId);
+            } catch (RuntimeException error) {
+                log.warn("Deleted file cleanup failed for '{}': {}", path, error.getMessage());
+                errors.add("Deleted file cleanup failed [" + path + "]: " + error.getMessage());
+            }
+        }
+    }
+
+    /** {@inheritDoc} */
     @Override
     public IndexResult indexFile(Path file, Path projectRoot, IndexOptions options) {
-        IndexOptions opts = options != null ? options : IndexOptions.defaults();
-        long startMs = System.currentTimeMillis();
-        List<String> errors = new ArrayList<>();
-
         String projectId = ProjectIdUtil.generateProjectId(projectRoot);
-        String relPath = PathUtil.toRelativePath(projectRoot, file);
-        log.info("Incremental indexing file '{}' in project '{}'", relPath, projectId);
+        return indexStore.withProjectMutation(projectId, () -> {
+            long startMs = System.currentTimeMillis();
+            if (incrementalCache.hasPendingProjectDeletion(projectId)) indexStore.removeProject(projectId);
+            List<String> errors = Collections.synchronizedList(new ArrayList<>());
+            IndexOptions opts = options != null ? options : IndexOptions.defaults();
+            BatchCounts counts = indexFiles(List.of(file), projectRoot, opts, projectId, errors);
+            return new IndexResult(1, counts.parsed(), 0, counts.degraded(), counts.units(), counts.edges(),
+                    System.currentTimeMillis() - startMs, List.copyOf(errors));
+        });
+    }
 
-        // 清除该文件的过期图数据与向量数据（通过 IndexStore 协调）
-        indexStore.removeFile(relPath, projectId);
+    private BatchCounts indexFiles(List<Path> files, Path projectRoot, IndexOptions opts,
+                                   String projectId, List<String> errors) {
+        // 必须先登记重试状态；解析失败或进程退出后，路径仍可用于清理残留图和向量。
+        incrementalCache.markDirty(files.stream().map(file -> PathUtil.toRelativePath(projectRoot, file)).toList(),
+                projectId);
+        Map<Path, String> fingerprints = incrementalCache.captureFingerprints(files);
+        try {
+            codeGraph.recordProject(projectId, projectRoot.toAbsolutePath().toString());
+        } catch (RuntimeException error) {
+            log.warn("Failed to record project metadata for '{}': {}", projectId, error.getMessage());
+            errors.add("Graph project metadata write failed: " + error.getMessage());
+        }
 
-        // 解析单个文件
         ParseOptions parseOptions = new ParseOptions(
                 opts.strategy() != null ? opts.strategy() : ParseStrategy.AUTO,
-                opts.languages(),
-                projectRoot,
-                projectId
-        );
+                opts.languages(), projectRoot, projectId);
+        AtomicInteger parsedCount = new AtomicInteger();
+        List<ParsedFile> parsedFiles = Collections.synchronizedList(new ArrayList<>());
+        ForkJoinPool.commonPool().submit(() -> files.parallelStream().forEach(file -> {
+            try {
+                ParseResult parsed = parserDispatcher.dispatch(file, parseOptions);
+                if (parsed.parserUsed() == null) {
+                    errors.add("No parser succeeded [" + file + "]");
+                } else {
+                    parsedFiles.add(new ParsedFile(file, parsed));
+                }
+            } catch (Exception error) {
+                log.warn("Parse error for {}: {}", file, error.getMessage());
+                errors.add("Parse error [" + file + "]: " + error.getMessage());
+            } finally {
+                publishProgress(projectRoot.toString(), "parsing", parsedCount.incrementAndGet(), files.size());
+            }
+        })).join();
 
-        ParseResult parseResult = ParseResult.empty();
+        Map<String, List<CodeUnit>> replacements = new LinkedHashMap<>();
+        List<CodeUnit> units = new ArrayList<>();
+        List<RelationEdge> edges = new ArrayList<>();
+        int degraded = 0;
+        for (ParsedFile file : parsedFiles) {
+            List<CodeUnit> enhanced = enhanceMetadata(file.result().units());
+            replacements.put(PathUtil.toRelativePath(projectRoot, file.path()), enhanced);
+            units.addAll(enhanced);
+            edges.addAll(file.result().edges());
+            if (file.result().degraded()) degraded++;
+        }
+        if (replacements.isEmpty()) return new BatchCounts(parsedCount.get(), degraded, 0, 0);
         try {
-            parseResult = parserDispatcher.dispatch(file, parseOptions);
-        } catch (Exception e) {
-            log.warn("Parse error for {}: {}", file, e.getMessage());
-            errors.add("Parse error [" + file + "]: " + e.getMessage());
+            // 图内原子替换，稳定 ID 节点保留未变更文件的入边；空文件参与清理。
+            codeGraph.replaceFiles(replacements, edges, projectId);
+        } catch (RuntimeException error) {
+            log.warn("Graph replacement failed for '{}': {}", projectId, error.getMessage());
+            errors.add("Graph replacement failed: " + error.getMessage());
+            return new BatchCounts(parsedCount.get(), degraded, 0, 0);
         }
 
-        List<CodeUnit> enhancedUnits = enhanceMetadata(new ArrayList<>(parseResult.units()));
-        if (parseResult.parserUsed() == null && errors.isEmpty()) {
-            errors.add("No parser succeeded [" + file + "]");
-        }
-        int graphEdges = buildGraph(enhancedUnits, new ArrayList<>(parseResult.edges()), projectId, errors);
-        var embedding = embeddingUpsertRunner.embedAndUpsert(enhancedUnits, projectId, projectRoot, errors,
+        var embedding = embeddingUpsertRunner.embedAndUpsert(units, projectId, projectRoot, errors,
                 (root, done, total) -> publishProgress(root, "embedding", done, total));
-
-        int embeddedCount = embedding.unitCount();
-        if (errors.isEmpty()) {
-            incrementalCache.updateEntries(List.of(file), projectId, projectRoot);
-        } else {
-            incrementalCache.removeEntry(relPath, projectId);
-        }
-
-        long durationMs = System.currentTimeMillis() - startMs;
-        log.info("File index complete: 1 file, {} units, {} edges in {}ms",
-                embeddedCount, graphEdges, durationMs);
-
-        return new IndexResult(1, 1, 0, parseResult.degraded() ? 1 : 0,
-                embeddedCount, graphEdges, durationMs, List.copyOf(errors));
+        Set<String> failedFiles = new LinkedHashSet<>(embedding.failedFiles());
+        failedFiles.addAll(embeddingUpsertRunner.removeStaleVectors(replacements, projectId, failedFiles, errors));
+        List<Path> completedFiles = parsedFiles.stream().map(ParsedFile::path)
+                .filter(file -> !failedFiles.contains(PathUtil.toRelativePath(projectRoot, file))).toList();
+        commitFingerprints(completedFiles, fingerprints, projectId, projectRoot, errors);
+        return new BatchCounts(parsedCount.get(), degraded, embedding.unitCount(), edges.size());
     }
+
+    private void commitFingerprints(List<Path> files, Map<Path, String> fingerprints,
+                                    String projectId, Path projectRoot, List<String> errors) {
+        for (Path changed : incrementalCache.updateUnchangedEntries(files, fingerprints, projectId, projectRoot)) {
+            String message = "Source changed during indexing or could not be read [" + changed + "]; retry required";
+            log.warn(message);
+            errors.add(message);
+        }
+    }
+
+    private record ParsedFile(Path path, ParseResult result) {}
+
+    private record BatchCounts(int parsed, int degraded, int units, int edges) {}
 
     // ── 第三步：元数据增强 ─────────────────────────────────────────
 
@@ -301,26 +259,6 @@ public class DefaultIndexPipeline implements IndexPipeline {
                     unit.startLine(), unit.endLine(), unit.rawSource(), unit.signature(),
                     unit.annotations(), unit.parentQualifiedName(), merged);
         }).collect(Collectors.toList());
-    }
-
-    // ── 第四步：图构建 ────────────────────────────────────────────
-
-    private int buildGraph(List<CodeUnit> units, List<RelationEdge> edges, String projectId, List<String> errors) {
-        try {
-            codeGraph.addUnits(units, projectId);
-        } catch (Exception e) {
-            log.warn("Failed to write {} units to Neo4j: {}", units.size(), e.getMessage());
-            errors.add("Graph unit write failed: " + e.getMessage());
-        }
-        int edgeCount = edges.size();
-        try {
-            codeGraph.addEdges(edges);
-        } catch (Exception e) {
-            log.warn("Failed to write {} edges to Neo4j: {}", edges.size(), e.getMessage());
-            errors.add("Graph edge write failed: " + e.getMessage());
-            edgeCount = 0;
-        }
-        return edgeCount;
     }
 
     /** 发布进度事件；无 publisher 时静默跳过（测试环境无 Spring 上下文）。 */

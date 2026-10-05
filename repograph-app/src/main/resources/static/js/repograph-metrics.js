@@ -1,148 +1,307 @@
-/* ── Metrics panel ── */
-
+/* ── Metrics: static facts and optional model advice retain separate state. ── */
 let _metricsPid = '';
 let _metricsTab = 'complexity';
+let _metricsHealthRequest = 0;
+let _metricsTabRequest = 0;
 let _architectureReviewStream = null;
 let _architectureReviewRaw = '';
 let _architectureReviewFrame = 0;
+let _architectureReviewRequest = 0;
+let _architectureReviewBusy = false;
+let _architectureReviewStatus = '';
+let _metricsReport = null;
+let _metricsRows = null;
+let _metricsRowsSort = 'fanout';
+let _metricsLanguage = '';
+const metricLabel = key => `<span data-i18n="${key}">${esc(t(key))}</span>`;
+const metricNumber = value => Number.isFinite(value) ? value : '—';
 
 function populateMetricsProjectSelect() {
-  const sel = document.getElementById('metrics-project-select');
-  if (!sel) return;
-  const prev = _metricsPid;
-  sel.innerHTML = `<option value="">${t('ph.selectProject')}</option>` +
-    (state.projects || []).map(p =>
-      `<option value="${esc(p.projectId)}">${esc(projectName(p))}</option>`
-    ).join('');
-  if (prev) sel.value = prev;
+  const select = document.getElementById('metrics-project-select');
+  if (!select) return;
+  const projects = state.projects || [];
+  const previous = _metricsPid || (projects.some(project => project.projectId === state.activeProjectId) ? state.activeProjectId : '');
+  select.innerHTML = `<option value="" data-i18n="ph.selectProject">${esc(t('ph.selectProject'))}</option>`
+    + projects.map(project => `<option value="${esc(project.projectId)}">${esc(projectName(project))}</option>`).join('');
+  select.value = previous;
+  if (select.value !== _metricsPid) onMetricsProjectChange();
 }
 
 function onMetricsProjectChange() {
+  ++_metricsHealthRequest;
+  ++_metricsTabRequest;
   stopArchitectureReviewStream();
-  const sel = document.getElementById('metrics-project-select');
-  _metricsPid = sel ? sel.value : '';
-  const reviewButton = document.getElementById('architecture-review-btn');
-  if (reviewButton) reviewButton.disabled = !_metricsPid;
+  _metricsPid = document.getElementById('metrics-project-select')?.value || '';
+  _metricsReport = null;
+  _metricsRows = null;
   resetArchitectureReview();
+  document.getElementById('metrics-refresh-btn').disabled = !_metricsPid;
   if (_metricsPid) loadMetrics();
   else clearMetricsPanel();
 }
 
+function clearMetricsPanel() {
+  document.getElementById('metrics-health').innerHTML = `<div class="metrics-empty"><strong>${metricLabel('metrics.empty')}</strong><p>${metricLabel('metrics.noSelectionHint')}</p></div>`;
+  document.getElementById('metrics-health').setAttribute('aria-busy', 'false');
+  setMetricsTabContent('');
+  document.getElementById('metrics-tab-content').setAttribute('aria-busy', 'false');
+  document.getElementById('metrics-detail-count').textContent = '';
+}
+
+function switchMetricsTab(tab) {
+  if (!['complexity', 'coupling', 'cycles', 'hotspots'].includes(tab)) return;
+  _metricsTab = tab;
+  ++_metricsTabRequest;
+  _metricsRows = null;
+  document.querySelectorAll('.metrics-tab').forEach(button => {
+    button.classList.toggle('active', button.dataset.tab === tab);
+    button.setAttribute('aria-pressed', String(button.dataset.tab === tab));
+  });
+  ['complexity', 'coupling', 'hotspots'].forEach(name => { document.getElementById(`ctrl-${name}`).hidden = name !== tab; });
+  const hint = document.getElementById('metrics-list-hint');
+  hint.dataset.i18n = tab === 'cycles' ? 'metrics.cycleHint' : tab === 'hotspots' ? 'metrics.hotspotHint' : 'metrics.listHint';
+  hint.textContent = t(hint.dataset.i18n);
+  if (_metricsPid) loadMetricsTab(tab);
+}
+
+function loadMetrics() {
+  if (!_metricsPid) return;
+  return Promise.all([loadMetricsHealth(_metricsPid), loadMetricsTab(_metricsTab)]);
+}
+function loadMetricsTab(tab) { return _metricsPid ? loadMetricsRows(_metricsPid, tab) : undefined; }
+function loadMetricsComplexity(projectId) { return loadMetricsRows(projectId, 'complexity'); }
+function loadMetricsCoupling(projectId) { return loadMetricsRows(projectId, 'coupling'); }
+function loadMetricsCycles(projectId) { return loadMetricsRows(projectId, 'cycles'); }
+function loadMetricsHotspots(projectId) { return loadMetricsRows(projectId, 'hotspots'); }
+function setMetricsTabContent(html) { document.getElementById('metrics-tab-content').innerHTML = html; }
+function metricsError(error, action) {
+  return `<div class="metrics-empty metrics-error" role="alert"><strong>${metricLabel('metrics.loadFailed')}</strong><p>${esc(error.message)}</p><button type="button" class="btn btn-ghost" onclick="${action}">${metricLabel('metrics.retry')}</button></div>`;
+}
+
+async function loadMetricsHealth(projectId) {
+  const version = ++_metricsHealthRequest;
+  const current = () => version === _metricsHealthRequest && projectId === _metricsPid;
+  const element = document.getElementById('metrics-health');
+  _metricsReport = null;
+  element.setAttribute('aria-busy', 'true');
+  element.innerHTML = `<div class="metrics-loading" role="status"><div class="spinner"></div>${metricLabel('metrics.health.loading')}</div>`;
+  try {
+    const report = await api.healthReport(projectId);
+    if (!current()) return;
+    if (!report || !Number.isFinite(report.healthScore)) throw new Error(t('metrics.invalidResponse'));
+    _metricsReport = report;
+    renderMetricsHealth(report);
+  } catch (error) {
+    if (current()) element.innerHTML = metricsError(error, 'loadMetricsHealth(_metricsPid)');
+  } finally { if (current()) element.setAttribute('aria-busy', 'false'); }
+}
+
+function renderMetricsHealth(report) {
+  const score = report.healthScore;
+  const production = report.totalProductionMethods;
+  const ratio = value => Number.isFinite(value) && Number.isFinite(production) && production > 0
+    ? `${Math.round(value / production * 100)}%` : '—';
+  const count = value => String(metricNumber(value));
+  const vulnerabilities = ['vulnCritical', 'vulnHigh', 'vulnMedium', 'vulnLow'].map(field => count(report[field]));
+  const dimensions = [
+    ['vulns', `${vulnerabilities[0]} C · ${vulnerabilities[1]} H · ${vulnerabilities[2]} M · ${vulnerabilities[3]} L`, ''],
+    ['complexity', count(report.highComplexityMethods), 'CC > 10'],
+    ['coupling', count(report.highInstabilityClasses), 'I > 0.8'],
+    ['cycles', count(report.packageCycles), ''],
+    ['deadcode', count(report.deadCodeCount), ratio(report.deadCodeCount)],
+    ['testgap', count(report.testGapCount), ratio(report.testGapCount)],
+  ];
+  const scoreTone = report.totalUnits === 0 || production === 0 ? 'unknown' : score >= 90 ? 'good' : score >= 60 ? 'warn' : 'bad';
+  document.getElementById('metrics-health').innerHTML = `<div class="metrics-health-card">
+    <div class="metrics-score" data-tone="${scoreTone}"><span>${metricLabel('metrics.score')}</span><strong>${esc(score)}<small>/100</small></strong>
+      ${report.totalUnits === 0 ? `<p>${metricLabel('metrics.noUnits')}</p>` : ''}</div>
+    <div class="metrics-health-facts"><h2>${metricLabel('metrics.facts')}</h2><div class="metrics-dimensions">${dimensions.map(([key, value, detail]) => `<div class="metrics-dimension" data-dimension="${key}"><span>${metricLabel('metrics.dim.' + key)}</span><strong>${esc(value)}</strong>${detail ? `<small>${esc(detail)}</small>` : ''}</div>`).join('')}</div></div>
+    <div class="metrics-snapshot"><span>${metricLabel('stat.units')} <b>${count(report.totalUnits)}</b></span><span>${metricLabel('stat.files')} <b>${count(report.totalFiles)}</b></span><span>${metricLabel('stat.edges')} <b>${count(report.totalEdges)}</b></span><span>${metricLabel('metrics.productionMethods')} <b>${count(production)}</b></span>${report.generatedAt ? `<time datetime="${esc(report.generatedAt)}" title="${esc(report.generatedAt)}">${metricLabel('metrics.snapshot')} ${esc(relativeTime(report.generatedAt))}</time>` : ''}</div>
+    <div class="metrics-health-notes"><p>${metricLabel('metrics.factHint')}</p>${production === 0 ? `<p class="metrics-no-methods">${metricLabel('metrics.noMethods')}</p>` : ''}<p>${metricLabel('metrics.ratioHint')}</p></div>
+  </div>`;
+}
+
+async function loadMetricsRows(projectId, tab) {
+  const version = ++_metricsTabRequest;
+  const current = () => version === _metricsTabRequest && projectId === _metricsPid && tab === _metricsTab;
+  const content = document.getElementById('metrics-tab-content');
+  const sort = document.getElementById('coupling-sort').value;
+  const limit = Number(document.getElementById(`${tab}-limit`)?.value || 20);
+  _metricsRows = null;
+  document.getElementById('metrics-detail-count').textContent = '';
+  content.setAttribute('aria-busy', 'true');
+  setMetricsTabContent(`<div class="metrics-loading" role="status"><div class="spinner"></div>${metricLabel('metrics.tab.' + tab)}</div>`);
+  try {
+    const rows = await (tab === 'complexity' ? api.complexity(projectId, limit) : tab === 'coupling' ? api.coupling(projectId, sort, limit) : tab === 'cycles' ? api.packageCycles(projectId) : api.hotspots(projectId, limit));
+    if (!current()) return;
+    if (!Array.isArray(rows)) throw new Error(t('metrics.invalidResponse'));
+    _metricsRows = rows;
+    _metricsRowsSort = sort;
+    renderMetricsRows();
+  } catch (error) {
+    if (current()) setMetricsTabContent(metricsError(error, 'loadMetricsTab(_metricsTab)'));
+  } finally { if (current()) content.setAttribute('aria-busy', 'false'); }
+}
+
+function renderMetricsRows() {
+  if (!_metricsRows) return;
+  const rows = _metricsRows;
+  document.getElementById('metrics-detail-count').textContent = `${t('metrics.resultCount')} ${rows.length}`;
+  if (!rows.length) {
+    const key = _metricsTab === 'hotspots' ? 'stats.hotspots.empty' : _metricsTab === 'cycles' ? 'stats.cycles.none' : 'metrics.noData';
+    setMetricsTabContent(`<div class="metrics-empty">${metricLabel(key)}</div>`);
+    return;
+  }
+  if (_metricsTab === 'cycles') {
+    setMetricsTabContent(`<div class="metrics-cycles">${rows.map((cycle, index) => `<article class="metrics-cycle"><h3>${index + 1} · ${esc(t('stats.cycles.involves', (cycle.packages || []).length))}</h3><ul>${(cycle.packages || []).map(pkg => `<li>${esc(pkg)}</li>`).join('')}</ul></article>`).join('')}</div>`);
+    return;
+  }
+  const key = _metricsTab === 'complexity' ? 'complexity' : _metricsTab === 'hotspots' ? 'hotspotScore' : _metricsRowsSort === 'fanin' ? 'fanIn' : 'fanOut';
+  const max = Math.max(0, ...rows.map(row => Number.isFinite(row[key]) ? row[key] : 0));
+  setMetricsTabContent(`<div class="metrics-records">${rows.map(row => {
+    const value = row[key];
+    const width = Number.isFinite(value) && max > 0 ? Math.max(0, Math.min(100, value / max * 100)) : 0;
+    const title = _metricsTab === 'coupling' ? row.classQualifiedName : _metricsTab === 'hotspots' ? row.filePath : row.qualifiedName;
+    const detail = _metricsTab === 'complexity' ? `${row.filePath || '—'}${row.startLine ? ':' + row.startLine : ''}`
+      : _metricsTab === 'coupling' ? `Ca ${metricNumber(row.fanIn)} · Ce ${metricNumber(row.fanOut)} · I ${metricNumber(row.instability)}`
+      : `${t('stats.hotspots.churn', metricNumber(row.churnCount))} · ${t('stats.hotspots.avgcc', metricNumber(row.avgComplexity))}`;
+    const primary = _metricsTab === 'complexity' ? `CC ${metricNumber(value)}` : _metricsTab === 'coupling' ? `${key === 'fanIn' ? 'Ca' : 'Ce'} ${metricNumber(value)}` : t('stats.hotspots.score', Number.isFinite(value) ? value.toFixed(1) : '—');
+    return `<article class="metrics-record"><div class="metrics-record-heading"><strong>${esc(title || '—')}</strong><b>${esc(primary)}</b></div><div class="metrics-record-detail">${esc(detail)}</div><div class="dist-bar-wrap" aria-hidden="true"><div class="dist-bar" style="width:${width}%"></div></div></article>`;
+  }).join('')}</div>`);
+}
+
+function refreshMetricsLanguage() {
+  if (!document.getElementById('metrics-project-select')) return;
+  if (_metricsLanguage !== currentLang) {
+    _metricsLanguage = currentLang;
+    if (_metricsReport) renderMetricsHealth(_metricsReport);
+    if (_metricsRows) renderMetricsRows();
+  }
+  updateArchitectureButton();
+}
+
+function updateArchitectureButton() {
+  const button = document.getElementById('architecture-review-btn');
+  if (!button) return;
+  button.disabled = !_metricsPid || _architectureReviewBusy;
+  button.dataset.i18n = _architectureReviewBusy ? 'arch.generating' : 'arch.generate';
+  button.textContent = t(button.dataset.i18n);
+  const status = document.getElementById('architecture-review-status');
+  status.textContent = _architectureReviewBusy ? t('arch.generating') : _architectureReviewStatus ? t('arch.' + _architectureReviewStatus.toLowerCase()) : '';
+}
+
 function resetArchitectureReview() {
+  _architectureReviewStatus = '';
   const result = document.getElementById('architecture-review-result');
-  if (result) result.innerHTML = `<div class="architecture-review-empty">${esc(t('arch.empty'))}</div>`;
+  result.setAttribute('aria-busy', 'false');
+  result.innerHTML = `<div class="architecture-review-empty">${metricLabel('arch.empty')}</div>`;
+  updateArchitectureButton();
+}
+
+function stopArchitectureReviewStream() {
+  ++_architectureReviewRequest;
+  if (_architectureReviewStream) { _architectureReviewStream.close(); _architectureReviewStream = null; }
+  if (_architectureReviewFrame) { cancelAnimationFrame(_architectureReviewFrame); _architectureReviewFrame = 0; }
+  _architectureReviewBusy = false;
+}
+
+function architectureError(message) {
+  document.getElementById('architecture-review-result').innerHTML = `<div class="architecture-review-error" role="alert">${esc(message)}</div>`;
+  _architectureReviewStatus = 'FAILED';
+}
+
+function finishArchitectureReview() {
+  stopArchitectureReviewStream();
+  document.getElementById('architecture-review-result').setAttribute('aria-busy', 'false');
+  updateArchitectureButton();
+}
+
+function validateArchitectureReview(review, projectId) {
+  if (!review || review.projectId !== projectId || !['COMPLETED', 'DISABLED', 'FAILED'].includes(review.status)) throw new Error(t('arch.invalidResponse'));
 }
 
 async function generateArchitectureReview() {
-  if (!_metricsPid) return;
-  const button = document.getElementById('architecture-review-btn');
-  const result = document.getElementById('architecture-review-result');
+  if (!_metricsPid || _architectureReviewBusy) return;
   stopArchitectureReviewStream();
-  button.disabled = true;
-  button.textContent = t('arch.generating');
-  result.innerHTML = `<div class="architecture-review-loading"><div class="spinner"></div><span>${esc(t('arch.generatingHint'))}</span></div>`;
+  const projectId = _metricsPid;
+  const version = ++_architectureReviewRequest;
+  const current = () => version === _architectureReviewRequest && projectId === _metricsPid;
+  const result = document.getElementById('architecture-review-result');
+  _architectureReviewBusy = true;
+  _architectureReviewStatus = '';
+  _architectureReviewRaw = '';
+  updateArchitectureButton();
+  result.setAttribute('aria-busy', 'true');
+  result.innerHTML = `<div class="architecture-review-loading"><div class="spinner"></div>${metricLabel('arch.generatingHint')}</div>`;
   if (!window.EventSource) {
-    await generateArchitectureReviewFallback(button, result);
+    try {
+      const review = await api.architectureReview(projectId);
+      if (!current()) return;
+      validateArchitectureReview(review, projectId);
+      renderArchitectureReview(review);
+    } catch (error) { if (current()) architectureError(error.message); }
+    finally { if (current()) finishArchitectureReview(); }
     return;
   }
-  _architectureReviewRaw = '';
   let receivedResult = false;
-  let terminalErrorReceived = false;
-  const params = new URLSearchParams({ projectId: _metricsPid });
-  const stream = new EventSource(`/api/v1/architecture/reviews/stream?${params}`);
+  let stream;
+  try { stream = new EventSource(`/api/v1/architecture/reviews/stream?${new URLSearchParams({ projectId })}`); }
+  catch (error) { architectureError(error.message); finishArchitectureReview(); return; }
   _architectureReviewStream = stream;
-  stream.addEventListener('phase', () => renderArchitectureStream());
+  const active = () => current() && stream === _architectureReviewStream;
+  const fail = message => { if (active()) { architectureError(message); finishArchitectureReview(); } };
+  stream.addEventListener('phase', () => { if (active() && !receivedResult) renderArchitectureStream(); });
   stream.addEventListener('delta', event => {
+    if (!active() || receivedResult) return;
     _architectureReviewRaw += event.data;
-    scheduleArchitectureStreamRender();
+    if (!_architectureReviewFrame) _architectureReviewFrame = requestAnimationFrame(() => {
+      _architectureReviewFrame = 0;
+      if (active() && !receivedResult) renderArchitectureStream();
+    });
   });
   stream.addEventListener('result', event => {
-    receivedResult = true;
-    renderArchitectureReview(JSON.parse(event.data));
+    if (!active()) return;
+    try {
+      const review = JSON.parse(event.data);
+      validateArchitectureReview(review, projectId);
+      if (_architectureReviewFrame) { cancelAnimationFrame(_architectureReviewFrame); _architectureReviewFrame = 0; }
+      renderArchitectureReview(review);
+      receivedResult = true;
+    } catch (error) { fail(error.message); }
   });
   stream.addEventListener('stream-error', event => {
-    terminalErrorReceived = true;
-    const error = JSON.parse(event.data);
-    result.innerHTML = `<div class="architecture-review-error">${esc(error.message)}</div>`;
-    stopArchitectureReviewStream();
-    button.disabled = false;
-    button.textContent = t('arch.generate');
+    if (!active()) return;
+    try { fail(JSON.parse(event.data).message || t('arch.streamFailed')); }
+    catch (_) { fail(t('arch.invalidResponse')); }
   });
   stream.addEventListener('complete', () => {
-    stopArchitectureReviewStream();
-    button.disabled = false;
-    button.textContent = t('arch.generate');
+    if (!active()) return;
+    if (!receivedResult) architectureError(t('arch.noResult'));
+    finishArchitectureReview();
   });
   stream.onerror = () => {
-    stopArchitectureReviewStream();
-    button.disabled = false;
-    button.textContent = t('arch.generate');
-    if (!receivedResult && !terminalErrorReceived) {
-      result.innerHTML = `<div class="architecture-review-error">${esc(t('arch.streamFailed'))}</div>`;
-    }
+    if (!active()) return;
+    if (!receivedResult) architectureError(t('arch.streamFailed'));
+    finishArchitectureReview();
   };
-}
-
-async function generateArchitectureReviewFallback(button, result) {
-  try {
-    renderArchitectureReview(await api.architectureReview(_metricsPid));
-  } catch (error) {
-    result.innerHTML = `<div class="architecture-review-error">${esc(error.message)}</div>`;
-  } finally {
-    button.disabled = false;
-    button.textContent = t('arch.generate');
-  }
-}
-
-function scheduleArchitectureStreamRender() {
-  if (_architectureReviewFrame) return;
-  _architectureReviewFrame = requestAnimationFrame(() => {
-    _architectureReviewFrame = 0;
-    renderArchitectureStream();
-  });
 }
 
 function renderArchitectureStream() {
   const result = document.getElementById('architecture-review-result');
-  if (!result) return;
-  const chars = _architectureReviewRaw.length;
   let console = result.querySelector('.architecture-stream-console');
   if (!console) {
-    result.innerHTML = `<div class="architecture-stream-console">
-      <details>
-        <summary>
-          <span class="architecture-thinking-state"><i></i><b>${esc(t('arch.thinking'))}</b><small>${esc(t('arch.thinkingHint'))}</small></span>
-          <code class="architecture-stream-count">0 CHARS</code><em>⌄</em>
-        </summary>
-        <div class="architecture-stream-body">
-          <header><span>${esc(t('arch.liveOutput'))}</span><small>${esc(t('arch.publicOutput'))}</small></header>
-          <pre class="streaming"></pre>
-        </div>
-      </details>
-    </div>`;
+    result.innerHTML = `<div class="architecture-stream-console"><details><summary><span class="architecture-thinking-state"><i></i><b>${metricLabel('arch.thinking')}</b><small>${metricLabel('arch.thinkingHint')}</small></span><code class="architecture-stream-count">0 CHARS</code><em>⌄</em></summary><div class="architecture-stream-body"><header><span>${metricLabel('arch.liveOutput')}</span><small>${metricLabel('arch.publicOutput')}</small></header><pre class="streaming" tabindex="0"></pre></div></details></div>`;
     console = result.querySelector('.architecture-stream-console');
   }
-  const count = console.querySelector('.architecture-stream-count');
   const output = console.querySelector('pre');
-  if (count) count.textContent = `${chars} CHARS`;
-  if (output) {
-    output.textContent = _architectureReviewRaw || t('arch.awaitingTokens');
-    if (console.querySelector('details')?.open) output.scrollTop = output.scrollHeight;
-  }
+  const follow = output.scrollHeight - output.scrollTop - output.clientHeight < 40;
+  console.querySelector('.architecture-stream-count').textContent = `${_architectureReviewRaw.length} CHARS`;
+  output.textContent = _architectureReviewRaw || t('arch.awaitingTokens');
+  if (follow && console.querySelector('details').open) output.scrollTop = output.scrollHeight;
 }
-
-function stopArchitectureReviewStream() {
-  if (_architectureReviewStream) {
-    _architectureReviewStream.close();
-    _architectureReviewStream = null;
-  }
-  if (_architectureReviewFrame) {
-    cancelAnimationFrame(_architectureReviewFrame);
-    _architectureReviewFrame = 0;
-  }
-}
-
 function renderArchitectureReview(review) {
+  _architectureReviewStatus = review.status;
+  updateArchitectureButton();
   const result = document.getElementById('architecture-review-result');
   const evidence = new Map((review.evidence || []).map(item => [item.citationId, item]));
   const statusClass = String(review.status || '').toLowerCase();
@@ -159,10 +318,10 @@ function renderArchitectureReview(review) {
       <div class="architecture-candidate-body">
         <header><strong>${esc(candidate.title)}</strong><code>${esc(candidate.location)}</code></header>
         <dl>
-          <div><dt>${esc(t('arch.problem'))}</dt><dd>${esc(candidate.problem)}</dd></div>
-          <div><dt>${esc(t('arch.suggestion'))}</dt><dd>${esc(candidate.suggestion)}</dd></div>
-          <div><dt>${esc(t('arch.benefit'))}</dt><dd>${esc(candidate.benefit)}</dd></div>
-          <div><dt>${esc(t('arch.costRisk'))}</dt><dd>${esc(candidate.cost)} · ${esc(candidate.risk)}</dd></div>
+          <div><dt>${metricLabel('arch.problem')}</dt><dd>${esc(candidate.problem)}</dd></div>
+          <div><dt>${metricLabel('arch.suggestion')}</dt><dd>${esc(candidate.suggestion)}</dd></div>
+          <div><dt>${metricLabel('arch.benefit')}</dt><dd>${esc(candidate.benefit)}</dd></div>
+          <div><dt>${metricLabel('arch.costRisk')}</dt><dd>${esc(candidate.cost)} · ${esc(candidate.risk)}</dd></div>
         </dl>
         <footer><span>${esc(candidate.methodology)}</span><div>${citations}</div></footer>
       </div>
@@ -170,269 +329,11 @@ function renderArchitectureReview(review) {
   }).join('');
   const missing = (review.missingInfo || []).map(item => `<li>${esc(item)}</li>`).join('');
   result.innerHTML = `<div class="architecture-review-meta">
-      <span class="${statusClass}">${esc(review.status)}</span>
+      <span class="${statusClass}">${metricLabel('arch.' + statusClass)}</span>
       <code>${esc(review.methodology)}</code><small>${esc(review.model || '—')}</small>
     </div>
     ${observations ? `<ul class="architecture-observations">${observations}</ul>` : ''}
-    <div class="architecture-candidates">${candidates || `<div class="architecture-review-empty">${esc(t('arch.noCandidates'))}</div>`}</div>
-    ${missing ? `<details class="architecture-missing"><summary>${esc(t('arch.missing'))}</summary><ul>${missing}</ul></details>` : ''}`;
-}
-
-function clearMetricsPanel() {
-  const health = document.getElementById('metrics-health');
-  if (health) health.innerHTML = `<div class="empty-state">${t('metrics.empty')}</div>`;
-  setMetricsTabContent('');
-}
-
-function switchMetricsTab(tab) {
-  _metricsTab = tab;
-  document.querySelectorAll('.metrics-tab').forEach(b => {
-    b.classList.toggle('active', b.dataset.tab === tab);
-  });
-  ['complexity', 'coupling', 'hotspots'].forEach(name => {
-    const ctrl = document.getElementById(`ctrl-${name}`);
-    if (ctrl) ctrl.style.display = name === tab ? 'flex' : 'none';
-  });
-  if (_metricsPid) loadMetricsTab(tab);
-}
-
-async function loadMetrics() {
-  if (!_metricsPid) return;
-  await Promise.all([
-    loadMetricsHealth(_metricsPid),
-    loadMetricsTab(_metricsTab),
-  ]);
-}
-
-function loadMetricsTab(tab) {
-  if (!_metricsPid) return;
-  if (tab === 'complexity') loadMetricsComplexity(_metricsPid);
-  else if (tab === 'coupling') loadMetricsCoupling(_metricsPid);
-  else if (tab === 'cycles') loadMetricsCycles(_metricsPid);
-  else if (tab === 'hotspots') loadMetricsHotspots(_metricsPid);
-}
-
-function setMetricsTabContent(html) {
-  const el = document.getElementById('metrics-tab-content');
-  if (el) el.innerHTML = html;
-}
-
-/* ── Health dashboard ── */
-async function loadMetricsHealth(projectId) {
-  const el = document.getElementById('metrics-health');
-  if (!el) return;
-  el.innerHTML = `<div class="loading-row"><div class="spinner"></div><span>${t('metrics.health.loading')}</span></div>`;
-  try {
-    const r = await api.healthReport(projectId);
-    const score = r.healthScore ?? 0;
-    const [grade, emoji] = score >= 90 ? ['A', '✅']
-                         : score >= 75 ? ['B', '🟡']
-                         : score >= 60 ? ['C', '🟠']
-                         :               ['D', '🔴'];
-    const scoreColor = score >= 75 ? 'var(--amber)' : score >= 60 ? 'var(--amber)' : 'var(--red)';
-    const scoreColorFinal = score >= 90 ? 'var(--mint)' : scoreColor;
-
-    const totalVulns = (r.vulnCritical || 0) + (r.vulnHigh || 0) + (r.vulnMedium || 0) + (r.vulnLow || 0);
-    const totalProd = r.totalProductionMethods || 1;
-    const deadPct = Math.round(100 * r.deadCodeCount / totalProd);
-    const gapPct  = Math.round(100 * r.testGapCount  / totalProd);
-
-    const dims = [
-      {
-        label: t('metrics.dim.vulns'),
-        value: totalVulns === 0
-          ? t('metrics.dim.ok')
-          : `${r.vulnCritical || 0}C / ${r.vulnHigh || 0}H / ${r.vulnMedium || 0}M / ${r.vulnLow || 0}L`,
-        color: totalVulns === 0 ? 'var(--mint)'
-             : (r.vulnCritical > 0 || r.vulnHigh > 0) ? 'var(--red)' : 'var(--amber)',
-      },
-      {
-        label: t('metrics.dim.complexity'),
-        value: r.highComplexityMethods === 0
-          ? t('metrics.dim.ok')
-          : `${r.highComplexityMethods} ${t('metrics.dim.methods')}`,
-        color: r.highComplexityMethods === 0 ? 'var(--mint)'
-             : r.highComplexityMethods > 10  ? 'var(--red)' : 'var(--amber)',
-      },
-      {
-        label: t('metrics.dim.coupling'),
-        value: r.highInstabilityClasses === 0
-          ? t('metrics.dim.ok')
-          : `${r.highInstabilityClasses} ${t('metrics.dim.classes')}`,
-        color: r.highInstabilityClasses === 0 ? 'var(--mint)'
-             : r.highInstabilityClasses > 20  ? 'var(--red)' : 'var(--amber)',
-      },
-      {
-        label: t('metrics.dim.cycles'),
-        value: r.packageCycles === 0
-          ? t('metrics.dim.ok')
-          : `${r.packageCycles} ${t('metrics.dim.cycles.unit')}`,
-        color: r.packageCycles === 0 ? 'var(--mint)' : 'var(--red)',
-      },
-      {
-        label: t('metrics.dim.deadcode'),
-        value: `${r.deadCodeCount} (${deadPct}%)`,
-        color: deadPct > 30 ? 'var(--amber)' : 'var(--text-2)',
-      },
-      {
-        label: t('metrics.dim.testgap'),
-        value: `${r.testGapCount} (${gapPct}%)`,
-        color: gapPct > 50 ? 'var(--red)' : gapPct > 30 ? 'var(--amber)' : 'var(--mint)',
-      },
-    ];
-
-    el.innerHTML = `
-      <div class="card" style="display:flex;align-items:flex-start;gap:20px;flex-wrap:wrap">
-        <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;min-width:72px;padding-top:4px">
-          <span style="font-size:46px;font-weight:800;line-height:1;color:${scoreColorFinal}">${score}</span>
-          <span style="font-size:11px;color:var(--text-3);margin-top:1px">/100</span>
-          <span style="font-size:16px;font-weight:700;color:${scoreColorFinal};margin-top:4px">${grade} ${emoji}</span>
-        </div>
-        <div style="flex:1;min-width:200px">
-          <div style="font-weight:600;font-size:13px;color:var(--text-1);margin-bottom:8px">${t('metrics.health.title')}</div>
-          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:5px">
-            ${dims.map(d => `
-              <div style="display:flex;justify-content:space-between;align-items:center;
-                          padding:5px 10px;background:var(--surface-2);border-radius:6px;font-size:12px">
-                <span style="color:var(--text-2)">${esc(d.label)}</span>
-                <span style="font-weight:600;color:${d.color}">${esc(d.value)}</span>
-              </div>`).join('')}
-          </div>
-        </div>
-      </div>`;
-  } catch (e) {
-    el.innerHTML = `<div class="empty-state" style="color:var(--red)">⚠ ${esc(e.message)}</div>`;
-  }
-}
-
-/* ── Complexity tab ── */
-async function loadMetricsComplexity(projectId) {
-  const limit = parseInt(document.getElementById('complexity-limit')?.value || 20);
-  setMetricsTabContent(`<div class="loading-row"><div class="spinner"></div><span>${t('stats.complexity')}</span></div>`);
-  try {
-    const metrics = await api.complexity(projectId, limit);
-    if (!metrics?.length) {
-      setMetricsTabContent(`<div class="empty-state">${t('stats.complexity.empty')}</div>`);
-      return;
-    }
-    const maxCC = Math.max(1, ...metrics.map(m => m.complexity));
-    const rows = metrics.map(m => {
-      const pct   = Math.max(4, Math.round((m.complexity / maxCC) * 100));
-      const color = m.complexity >= 10 ? 'var(--red)' : m.complexity >= 6 ? 'var(--amber)' : 'var(--mint)';
-      const short = (m.qualifiedName || '').split('#').pop() || m.qualifiedName || '?';
-      const file  = (m.filePath || '').split('/').pop();
-      return `<div class="dist-row" title="${esc(m.qualifiedName)} · ${esc(m.filePath)}:${m.startLine}">
-        <span class="dist-label" style="color:${color};max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
-              title="${esc(m.qualifiedName)}">${esc(short)}</span>
-        <div class="dist-bar-wrap"><div class="dist-bar" style="width:${pct}%;background:${color}"></div></div>
-        <span class="dist-count" style="color:${color};font-weight:600">${t('stats.complexity.cc', m.complexity)}</span>
-        <span style="color:var(--text-3);font-size:10px;margin-left:6px;flex-shrink:0">${esc(file)}:${m.startLine}</span>
-      </div>`;
-    }).join('');
-    setMetricsTabContent(`<div class="dist-card"><div class="dist-rows">${rows}</div></div>`);
-  } catch (e) {
-    setMetricsTabContent(`<div class="empty-state" style="color:var(--red)">${esc(e.message)}</div>`);
-  }
-}
-
-/* ── Coupling tab ── */
-async function loadMetricsCoupling(projectId) {
-  const sort  = document.getElementById('coupling-sort')?.value || 'fanout';
-  const limit = parseInt(document.getElementById('coupling-limit')?.value || 20);
-  setMetricsTabContent(`<div class="loading-row"><div class="spinner"></div><span>${t('stats.coupling')}</span></div>`);
-  try {
-    const metrics = await api.coupling(projectId, sort, limit);
-    if (!metrics?.length) {
-      setMetricsTabContent(`<div class="empty-state">${t('stats.coupling.empty')}</div>`);
-      return;
-    }
-    const key    = sort === 'fanin' ? 'fanIn' : 'fanOut';
-    const maxVal = Math.max(1, ...metrics.map(m => m[key]));
-    const rows = metrics.map(m => {
-      const pct   = Math.max(4, Math.round((m[key] / maxVal) * 100));
-      const color = m.instability >= 0.8 ? 'var(--red)' : m.instability >= 0.5 ? 'var(--amber)' : 'var(--mint)';
-      const short = (m.classQualifiedName || '').split('.').pop() || m.classQualifiedName || '?';
-      const primary   = sort === 'fanin'
-        ? t('stats.coupling.fanin',  m.fanIn)
-        : t('stats.coupling.fanout', m.fanOut);
-      const secondary = sort === 'fanin'
-        ? t('stats.coupling.fanout', m.fanOut)
-        : t('stats.coupling.fanin',  m.fanIn);
-      return `<div class="dist-row" title="${esc(m.classQualifiedName)} · Ce=${m.fanOut} Ca=${m.fanIn} I=${m.instability}">
-        <span class="dist-label" style="color:${color};max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
-              title="${esc(m.classQualifiedName)}">${esc(short)}</span>
-        <div class="dist-bar-wrap"><div class="dist-bar" style="width:${pct}%;background:${color}"></div></div>
-        <span class="dist-count" style="color:${color};font-weight:600">${primary}</span>
-        <span style="color:var(--text-3);font-size:10px;margin-left:6px;flex-shrink:0">${secondary} ${t('stats.coupling.instability', m.instability)}</span>
-      </div>`;
-    }).join('');
-    setMetricsTabContent(`<div class="dist-card"><div class="dist-rows">${rows}</div></div>`);
-  } catch (e) {
-    setMetricsTabContent(`<div class="empty-state" style="color:var(--red)">${esc(e.message)}</div>`);
-  }
-}
-
-/* ── Cycles tab ── */
-async function loadMetricsCycles(projectId) {
-  setMetricsTabContent(`<div class="loading-row"><div class="spinner"></div><span>${t('stats.cycles')}</span></div>`);
-  try {
-    const cycles = await api.packageCycles(projectId);
-    if (!cycles?.length) {
-      setMetricsTabContent(`<div class="empty-state" style="color:var(--mint)">${t('stats.cycles.none')}</div>`);
-      return;
-    }
-    const rows = cycles.map((cycle, idx) => {
-      const pkgs = (cycle.packages || []).slice().sort();
-      const pkgList = pkgs.map(p =>
-        `<span title="${esc(p)}" style="color:var(--amber);font-size:11px;margin-right:4px">${esc(p.split('.').pop())}</span>`
-      ).join('→');
-      return `<div class="dist-row" title="${esc(pkgs.join(' → '))}">
-        <span style="color:var(--red);font-weight:600;flex-shrink:0;margin-right:8px">⊗ ${idx + 1}</span>
-        <span style="flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">
-          <span style="background:var(--red)22;color:var(--red);border:1px solid var(--red)44;border-radius:4px;
-                       padding:1px 6px;font-size:10px;margin-right:6px">${t('stats.cycles.involves', pkgs.length)}</span>
-          ${pkgList}
-        </span>
-      </div>`;
-    }).join('');
-    setMetricsTabContent(`<div class="dist-card">
-      <div style="color:var(--red);font-size:12px;margin-bottom:8px;font-weight:600">${t('stats.cycles.count', cycles.length)}</div>
-      <div class="dist-rows">${rows}</div>
-    </div>`);
-  } catch (e) {
-    setMetricsTabContent(`<div class="empty-state" style="color:var(--red)">${esc(e.message)}</div>`);
-  }
-}
-
-/* ── Hotspots tab ── */
-async function loadMetricsHotspots(projectId) {
-  const limit = parseInt(document.getElementById('hotspots-limit')?.value || 10);
-  setMetricsTabContent(`<div class="loading-row"><div class="spinner"></div><span>${t('stats.hotspots')}</span></div>`);
-  try {
-    const hotspots = await api.hotspots(projectId, limit);
-    if (!hotspots?.length) {
-      setMetricsTabContent(`<div class="empty-state">${t('stats.hotspots.empty')}</div>`);
-      return;
-    }
-    const maxScore = Math.max(1, ...hotspots.map(h => h.hotspotScore));
-    const rows = hotspots.map(h => {
-      const pct   = Math.max(4, Math.round((h.hotspotScore / maxScore) * 100));
-      const color = h.hotspotScore >= 20 ? 'var(--red)' : h.hotspotScore >= 10 ? 'var(--amber)' : 'var(--mint)';
-      const parts     = (h.filePath || '').replace(/\\/g, '/').split('/');
-      const shortFile = parts.pop() || h.filePath || '?';
-      const dir       = parts.length ? parts.join('/') + '/' : '';
-      return `<div class="dist-row" title="${esc(h.filePath)} · churn=${h.churnCount} avgCC=${h.avgComplexity}">
-        <span class="dist-label" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
-              title="${esc(h.filePath)}">
-          <span style="color:var(--text-3);font-size:10px">${esc(dir)}</span><span style="color:${color}">${esc(shortFile)}</span>
-        </span>
-        <div class="dist-bar-wrap"><div class="dist-bar" style="width:${pct}%;background:${color}"></div></div>
-        <span class="dist-count" style="color:${color};font-weight:600">${t('stats.hotspots.score', h.hotspotScore.toFixed(1))}</span>
-        <span style="color:var(--text-3);font-size:10px;margin-left:6px;flex-shrink:0">${t('stats.hotspots.churn', h.churnCount)} ${t('stats.hotspots.avgcc', h.avgComplexity.toFixed(1))}</span>
-      </div>`;
-    }).join('');
-    setMetricsTabContent(`<div class="dist-card"><div class="dist-rows">${rows}</div></div>`);
-  } catch (e) {
-    setMetricsTabContent(`<div class="empty-state">${t('stats.hotspots.noGit')}</div>`);
-  }
+    <div class="architecture-candidates">${candidates || `<div class="architecture-review-empty">${metricLabel('arch.noCandidates')}</div>`}</div>
+    ${missing ? `<details class="architecture-missing"><summary>${metricLabel('arch.missing')}</summary><ul>${missing}</ul></details>` : ''}
+    ${evidence.size ? `<details class="architecture-evidence"><summary>${metricLabel('arch.evidence')} · ${evidence.size}</summary><ul>${[...evidence.values()].map(fact => `<li><strong>${esc(fact.citationId)}</strong><code>${esc(fact.location)}</code><p>${esc(fact.summary)}</p></li>`).join('')}</ul></details>` : ''}`;
 }

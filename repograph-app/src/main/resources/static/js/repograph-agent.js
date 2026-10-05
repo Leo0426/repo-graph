@@ -40,7 +40,42 @@ function openAgentCapability(capability) {
     switchPanel('vulns');
     return;
   }
-  document.querySelector('.agent-command-deck')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  showAgentPreparation();
+}
+
+function focusAgentWorkflow(element) {
+  if (!element) return;
+  element.focus({ preventScroll: true });
+  element.scrollIntoView({
+    behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+    block: 'start',
+  });
+}
+
+function showAgentPreparation() {
+  if (Alpine.store('repograph').panel !== 'agent') return;
+  const preparation = document.getElementById('agent-preparation');
+  if (preparation) preparation.open = true;
+  focusAgentWorkflow(document.getElementById('agent-preparation-toggle'));
+}
+
+function showAgentRuns() {
+  if (Alpine.store('repograph').panel !== 'agent') return;
+  const preparation = document.getElementById('agent-preparation');
+  if (preparation) preparation.open = false;
+  focusAgentWorkflow(document.getElementById(agentUi.selectedId ? 'agent-timeline-heading' : 'agent-run-workspace'));
+}
+
+function renderAgentPreparationSummary() {
+  const summary = document.getElementById('agent-preparation-context');
+  if (!summary) return;
+  const projectId = document.getElementById('agent-project-select')?.value;
+  const project = (state.projects || []).find(item => item.projectId === projectId);
+  const vulnerability = agentUi.vulnerabilities.find(item => item.id === agentUi.selectedVulnerabilityId);
+  const input = agentUi.inputMode === 'external' ? t('agent.modeExternal')
+    : vulnerability?.title || t('agent.readyVulnerability');
+  summary.textContent = project ? `${projectName(project)} · ${input}` : t('agent.completeRequired');
+  summary.title = summary.textContent;
 }
 
 /* ── Input mode: vulnerability center picker vs external SAST findings ── */
@@ -176,6 +211,7 @@ async function loadLlmSettings() {
 function toggleLlmSettings() {
   const module = document.getElementById('agent-llm-module');
   const open = module.classList.toggle('open');
+  module.querySelector('.agent-llm-header').setAttribute('aria-expanded', String(open));
   document.getElementById('agent-llm-chevron').textContent = open ? '−' : '＋';
 }
 
@@ -493,6 +529,7 @@ function renderAgentProjectHint() {
 }
 
 function updateAgentLaunchState() {
+  renderAgentPreparationSummary();
   const projectReady = Boolean(document.getElementById('agent-project-select')?.value);
   const external = agentUi.inputMode === 'external';
   const inputReady = external
@@ -549,6 +586,7 @@ async function startSastTriageAgent() {
     agentUi.selectedId = run.id;
     showToast(t('agent.accepted'));
     await loadAgentRuns();
+    showAgentRuns();
   } catch (error) {
     showAgentError(error.message);
   } finally {
@@ -659,7 +697,7 @@ function renderAgentRunItem(run) {
   const status = agentStatus(run.status);
   return `<button class="agent-run-item ${run.id === agentUi.selectedId ? 'selected' : ''}"
       data-run-id="${esc(run.id)}" data-signature="${esc(agentRunItemSignature(run))}"
-      onclick="selectAgentRun('${esc(run.id)}')">
+      onclick="openAgentRun('${esc(run.id)}')">
     <span class="agent-run-status ${status.tone}">${status.label}</span>
     <strong>${esc(run.playbook.replaceAll('_', ' '))}</strong>
     <small>${esc(relativeTime(run.createdAt))}</small>
@@ -673,9 +711,16 @@ function agentRunItemSignature(run) {
 }
 
 function focusAgentInput() {
+  showAgentPreparation();
   const list = document.getElementById('agent-vulnerability-list');
-  list?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  focusAgentWorkflow(list);
   list?.querySelector('button')?.focus({ preventScroll: true });
+}
+
+function openAgentRun(runId) {
+  const request = selectAgentRun(runId);
+  showAgentRuns();
+  return request;
 }
 
 async function selectAgentRun(runId, rerenderList = true, showLoading = true) {

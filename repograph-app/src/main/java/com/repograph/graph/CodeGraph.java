@@ -5,6 +5,7 @@ import com.repograph.core.model.EdgeKind;
 import com.repograph.core.model.RelationEdge;
 import org.neo4j.driver.Driver;
 import org.neo4j.driver.Session;
+import org.neo4j.driver.TransactionContext;
 import org.neo4j.driver.Values;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,6 +57,17 @@ public class CodeGraph {
      */
     public void addUnits(List<CodeUnit> units, String projectId) {
         if (units == null || units.isEmpty()) return;
+        try (Session session = driver.session()) {
+            session.executeWrite(tx -> {
+                writeUnits(tx, units, projectId, false);
+                return null;
+            });
+        }
+    }
+
+    private static void writeUnits(TransactionContext tx, List<CodeUnit> units, String projectId,
+                                   boolean replaceProperties) {
+        if (units.isEmpty()) return;
         List<Map<String, Object>> rows = new ArrayList<>(units.size());
         for (CodeUnit u : units) {
             rows.add(toRow(u));
@@ -63,6 +75,7 @@ public class CodeGraph {
         String cypher = """
                 UNWIND $rows AS row
                 MERGE (n:CodeUnit {id: row.id})
+                """ + (replaceProperties ? "SET n = {id: row.id}\n" : "") + """
                 SET n.kind = row.kind,
                     n.language = row.language,
                     n.qualifiedName = row.qualifiedName,
@@ -78,9 +91,56 @@ public class CodeGraph {
                 WITH n, row
                 SET n += row.metadata
                 """;
+        tx.run(cypher, Values.parameters("rows", rows, "projectId", projectId)).consume();
+    }
+
+    /**
+     * 在一个事务内替换指定项目的文件快照，保留仍存在节点来自其他文件的入边。
+     *
+     * @param files 本轮成功解析的文件及其完整代码单元；空列表表示文件已无代码单元
+     * @param edges 这些文件当前的关系边，所有代码单元写入后再解析目标
+     * @param projectId 所属项目 ID
+     * @throws IllegalArgumentException 文件快照包含不属于对应路径的代码单元
+     */
+    public void replaceFiles(Map<String, List<CodeUnit>> files, List<RelationEdge> edges, String projectId) {
+        if (files == null || files.isEmpty()) return;
+        List<CodeUnit> units = new ArrayList<>();
+        List<Map<String, Object>> fileRows = new ArrayList<>(files.size());
+        Set<String> sourceIds = new LinkedHashSet<>();
+        for (Map.Entry<String, List<CodeUnit>> file : files.entrySet()) {
+            List<String> ids = new ArrayList<>();
+            for (CodeUnit unit : file.getValue()) {
+                if (!file.getKey().equals(unit.filePath())) {
+                    throw new IllegalArgumentException("Code unit does not belong to file " + file.getKey());
+                }
+                units.add(unit);
+                ids.add(unit.id());
+                sourceIds.add(unit.id());
+            }
+            fileRows.add(Map.of("path", file.getKey(), "ids", ids));
+        }
+        List<RelationEdge> scopedEdges = edges == null ? List.of() : edges.stream()
+                .filter(edge -> sourceIds.contains(edge.sourceId())).toList();
+        Map<EdgeKind, List<Map<String, Object>>> byKind = groupEdges(scopedEdges);
         try (Session session = driver.session()) {
-            session.executeWrite(tx -> tx.run(cypher,
-                    Values.parameters("rows", rows, "projectId", projectId)).consume());
+            session.executeWrite(tx -> {
+                tx.run("""
+                        UNWIND $files AS file
+                        MATCH (n:CodeUnit {projectId: $projectId, filePath: file.path})
+                        WHERE NOT n.id IN file.ids
+                        DETACH DELETE n
+                        """, Values.parameters("files", fileRows, "projectId", projectId)).consume();
+                tx.run("""
+                        UNWIND $files AS file
+                        MATCH (source:CodeUnit {projectId: $projectId, filePath: file.path})-[r]->()
+                        DELETE r
+                        """, Values.parameters("files", fileRows, "projectId", projectId)).consume();
+                writeUnits(tx, units, projectId, true);
+                for (Map.Entry<EdgeKind, List<Map<String, Object>>> entry : byKind.entrySet()) {
+                    writeEdges(tx, entry.getKey(), entry.getValue(), projectId);
+                }
+                return null;
+            });
         }
     }
 
@@ -94,6 +154,18 @@ public class CodeGraph {
      */
     public void addEdges(List<RelationEdge> edges) {
         if (edges == null || edges.isEmpty()) return;
+        Map<EdgeKind, List<Map<String, Object>>> byKind = groupEdges(edges);
+        try (Session session = driver.session()) {
+            for (Map.Entry<EdgeKind, List<Map<String, Object>>> entry : byKind.entrySet()) {
+                session.executeWrite(tx -> {
+                    writeEdges(tx, entry.getKey(), entry.getValue(), null);
+                    return null;
+                });
+            }
+        }
+    }
+
+    private static Map<EdgeKind, List<Map<String, Object>>> groupEdges(List<RelationEdge> edges) {
         Map<EdgeKind, List<Map<String, Object>>> byKind = new EnumMap<>(EdgeKind.class);
         for (RelationEdge e : edges) {
             TargetReference target = TargetReference.parse(e.targetId());
@@ -107,12 +179,16 @@ public class CodeGraph {
             row.put("sl", e.sourceLine());
             byKind.computeIfAbsent(e.kind(), k -> new ArrayList<>()).add(row);
         }
-        try (Session session = driver.session()) {
-            for (Map.Entry<EdgeKind, List<Map<String, Object>>> entry : byKind.entrySet()) {
-                String relType = entry.getKey().name(); // 枚举名，无注入风险
-                String cypher = String.format(Locale.ROOT, """
+        return byKind;
+    }
+
+    private static void writeEdges(TransactionContext tx, EdgeKind kind, List<Map<String, Object>> rows,
+                                   String projectId) {
+        String relType = kind.name(); // 枚举名，无注入风险
+        String cypher = String.format(Locale.ROOT, """
                         UNWIND $rows AS row
                         MATCH (s:CodeUnit {id: row.sid})
+                        WHERE $projectId IS NULL OR s.projectId = $projectId
                         OPTIONAL MATCH (candidate:CodeUnit)
                         WHERE candidate.projectId = s.projectId
                           AND (candidate.id = row.tid
@@ -144,10 +220,7 @@ public class CodeGraph {
                             r.sourceLine = row.sl,
                             r.resolved = true
                         """, relType);
-                session.executeWrite(tx -> tx.run(cypher,
-                        Values.parameters("rows", entry.getValue())).consume());
-            }
-        }
+        tx.run(cypher, Values.parameters("rows", rows, "projectId", projectId)).consume();
     }
 
     /**

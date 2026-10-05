@@ -5,48 +5,58 @@
      :class="{ active: $store.repograph.panel === 'tools' }">
   <div class="panel-header">
     <div class="panel-title" data-i18n="tools.title">项目工具</div>
-    <div class="panel-subtitle" data-i18n="tools.subtitle">框架入口点检测与软件物料清单（SBOM）生成</div>
+    <div class="panel-subtitle" data-i18n="tools.subtitle">管理已索引项目，检查框架入口并导出依赖清单。</div>
   </div>
   <div class="panel-body">
-    <!-- Frameworks -->
-    <div class="card" style="margin-bottom:20px">
-      <div style="font-size:14px;font-weight:600;margin-bottom:10px" data-i18n="tools.frameworks.title">框架入口点</div>
-      <div class="input-row" style="margin-bottom:12px">
-        <input type="text" id="frameworks-project-input" placeholder="project-name"
-          autocomplete="off" list="projects-datalist" data-i18n-ph="ph.projectName"
-          onkeydown="if(event.key==='Enter')doFrameworks()">
-        <button class="btn btn-primary" onclick="doFrameworks()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-          <span data-i18n="btn.detect">检测</span>
-        </button>
+    <section class="tools-projects card" aria-labelledby="tools-projects-heading">
+      <div class="tools-section-heading">
+        <div><h2 id="tools-projects-heading" data-i18n="tools.manage.title">已索引项目</h2>
+          <p data-i18n="tools.manage.hint">查看项目索引与最近更新时间，进入概览继续分析。</p></div>
+        <div class="tools-heading-actions">
+          <button type="button" id="tools-refresh-projects" class="btn btn-ghost" onclick="renderProjectsManage()" data-i18n="btn.refresh">刷新</button>
+          <a href="#index" class="btn btn-primary tools-index-link" data-i18n="tools.project.index">索引项目</a>
+        </div>
       </div>
-      <div id="frameworks-result"></div>
-    </div>
+      <div class="tools-project-filter">
+        <label for="tools-project-search" data-i18n="tools.project.filter">筛选项目</label>
+        <input type="search" id="tools-project-search" autocomplete="off" placeholder="按名称、项目 ID 或根路径筛选"
+               data-i18n-ph="tools.project.filterPh" oninput="filterManagedProjects()" aria-controls="projects-manage-list">
+        <span id="tools-project-count" role="status" aria-live="polite"></span>
+      </div>
+      <div id="tools-project-status" aria-live="polite"></div>
+      <div id="projects-manage-list" aria-busy="false"></div>
+    </section>
 
-    <!-- SBOM -->
-    <div class="card">
-      <div style="font-size:14px;font-weight:600;margin-bottom:10px" data-i18n="tools.sbom.title">软件物料清单 (SBOM)</div>
-      <div class="input-row" style="margin-bottom:12px">
-        <input type="text" id="sbom-project-input" placeholder="project-name"
-          autocomplete="off" list="projects-datalist" data-i18n-ph="ph.projectName"
-          onkeydown="if(event.key==='Enter')doSbom()">
-        <button class="btn btn-primary" onclick="doSbom()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          <span data-i18n="btn.download">生成下载</span>
-        </button>
-      </div>
-      <div id="sbom-result"></div>
-    </div>
+    <div class="tools-utilities">
+      <section class="card tools-utility" aria-labelledby="tools-frameworks-heading">
+        <div class="tools-utility-heading"><span class="tools-utility-icon" aria-hidden="true">↳</span>
+          <div><h2 id="tools-frameworks-heading" data-i18n="tools.frameworks.title">框架入口点</h2>
+            <p data-i18n="tools.frameworks.hint">查看索引中识别的框架入口点及其源码位置。</p></div></div>
+        <form onsubmit="event.preventDefault();doFrameworks()">
+          <label for="frameworks-project-input" data-i18n="tools.project.label">项目名称或 ID</label>
+          <div class="tools-tool-input">
+            <input type="text" id="frameworks-project-input" autocomplete="off" list="projects-datalist"
+                   placeholder="project-name" data-i18n-ph="ph.projectName" oninput="invalidateToolInput('frameworks')">
+            <button type="submit" id="frameworks-submit" class="btn btn-ghost" data-i18n="btn.detect">检测</button>
+          </div>
+        </form>
+        <div id="frameworks-result" aria-live="polite" aria-busy="false"></div>
+      </section>
 
-    <!-- Manage projects -->
-    <div class="card" style="margin-top:20px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <div style="font-size:14px;font-weight:600" data-i18n="tools.manage.title">已索引项目</div>
-        <button class="btn btn-ghost" style="font-size:12px;padding:4px 10px" onclick="renderProjectsManage()">
-          <span data-i18n="btn.refresh">刷新</span>
-        </button>
-      </div>
-      <div id="projects-manage-list"><div class="empty-state" data-i18n="tools.manage.loading">加载中…</div></div>
+      <section class="card tools-utility" aria-labelledby="tools-sbom-heading">
+        <div class="tools-utility-heading"><span class="tools-utility-icon" aria-hidden="true">↓</span>
+          <div><h2 id="tools-sbom-heading" data-i18n="tools.sbom.title">软件物料清单 (SBOM)</h2>
+            <p data-i18n="tools.sbom.hint">从项目根目录生成 CycloneDX JSON，准备完成后下载。</p></div></div>
+        <form onsubmit="event.preventDefault();doSbom()">
+          <label for="sbom-project-input" data-i18n="tools.project.label">项目名称或 ID</label>
+          <div class="tools-tool-input">
+            <input type="text" id="sbom-project-input" autocomplete="off" list="projects-datalist"
+                   placeholder="project-name" data-i18n-ph="ph.projectName" oninput="invalidateToolInput('sbom')">
+            <button type="submit" id="sbom-submit" class="btn btn-ghost" data-i18n="tools.sbom.generate">准备清单</button>
+          </div>
+        </form>
+        <div id="sbom-result" aria-live="polite" aria-busy="false"></div>
+      </section>
     </div>
   </div>
 </div>

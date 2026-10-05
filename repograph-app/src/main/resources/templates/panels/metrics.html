@@ -1,88 +1,40 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
 <body>
-<div th:fragment="panel" id="panel-metrics" class="panel"
-     :class="{ active: $store.repograph.panel === 'metrics' }">
-  <div class="panel-header">
-    <div class="panel-title" data-i18n="metrics.title">代码质量</div>
-    <div class="panel-subtitle" data-i18n="metrics.subtitle">复杂度 · 耦合度 · 循环依赖 · 热点</div>
-  </div>
-  <div class="panel-body">
-
-    <!-- Project bar -->
-    <div class="card" style="display:flex;align-items:center;gap:12px">
-      <select id="metrics-project-select" style="flex:1;min-width:160px" onchange="onMetricsProjectChange()">
-        <option value="" data-i18n="ph.selectProject">— 选择项目 —</option>
-      </select>
+<div th:fragment="panel" id="panel-metrics" class="panel" :class="{ active: $store.repograph.panel === 'metrics' }">
+  <div class="panel-header"><div class="panel-title" data-i18n="metrics.title">代码质量</div>
+    <div class="panel-subtitle" data-i18n="metrics.subtitle">复杂度 · 耦合度 · 循环依赖 · 热点</div></div>
+  <div class="panel-body metrics-workbench">
+    <div class="metrics-project-bar">
+      <label><span data-i18n="metrics.project">分析项目</span><select id="metrics-project-select" onchange="onMetricsProjectChange()"><option value="" data-i18n="ph.selectProject">— 选择项目 —</option></select></label>
+      <button type="button" id="metrics-refresh-btn" class="btn btn-ghost" onclick="loadMetrics()" disabled data-i18n="metrics.refresh">刷新指标</button>
     </div>
-
-    <section class="architecture-review-module">
-      <div class="architecture-review-head">
-        <div class="architecture-review-mark">A/02</div>
-        <div>
-          <strong data-i18n="arch.title">架构漂移与变更风险评估</strong>
-          <small data-i18n="arch.subtitle">ForgeFlow U1–U8 · 静态指标事实 · Ollama 模型建议</small>
+    <section id="metrics-health" aria-busy="false"><div class="metrics-empty" data-i18n="metrics.empty">选择项目以查看指标</div></section>
+    <section class="metrics-details-section" aria-labelledby="metrics-details-title">
+      <div class="metrics-section-heading"><h2 id="metrics-details-title" data-i18n="metrics.details">指标明细</h2>
+        <span id="metrics-detail-count" role="status" aria-live="polite"></span></div>
+      <div class="metrics-tab-controls">
+        <div class="tab-row metrics-tab-row" role="group" data-i18n-aria-label="metrics.details" aria-label="指标明细">
+          <button type="button" class="tab metrics-tab active" data-tab="complexity" aria-pressed="true" onclick="switchMetricsTab('complexity')" data-i18n="metrics.tab.complexity">复杂度</button>
+          <button type="button" class="tab metrics-tab" data-tab="coupling" aria-pressed="false" onclick="switchMetricsTab('coupling')" data-i18n="metrics.tab.coupling">耦合度</button>
+          <button type="button" class="tab metrics-tab" data-tab="cycles" aria-pressed="false" onclick="switchMetricsTab('cycles')" data-i18n="metrics.tab.cycles">循环依赖</button>
+          <button type="button" class="tab metrics-tab" data-tab="hotspots" aria-pressed="false" onclick="switchMetricsTab('hotspots')" data-i18n="metrics.tab.hotspots">热点</button>
         </div>
-        <span>FORGEFLOW / ARCHITECTURE</span>
-        <button id="architecture-review-btn" class="btn btn-primary" type="button"
-                onclick="generateArchitectureReview()" disabled data-i18n="arch.generate">生成模型建议</button>
+        <div id="ctrl-complexity" class="metrics-tab-options"><label><span data-i18n="metrics.limit">显示数量</span><select id="complexity-limit" onchange="if(_metricsPid)loadMetricsComplexity(_metricsPid)"><option value="10">Top 10</option><option value="20" selected>Top 20</option><option value="50">Top 50</option></select></label></div>
+        <div id="ctrl-coupling" class="metrics-tab-options" hidden><label><span data-i18n="metrics.sort">排序依据</span><select id="coupling-sort" onchange="if(_metricsPid)loadMetricsCoupling(_metricsPid)"><option value="fanout" data-i18n="metrics.sort.fanout">传出耦合 (Ce)</option><option value="fanin" data-i18n="metrics.sort.fanin">传入耦合 (Ca)</option></select></label><label><span data-i18n="metrics.limit">显示数量</span><select id="coupling-limit" onchange="if(_metricsPid)loadMetricsCoupling(_metricsPid)"><option value="10">Top 10</option><option value="20" selected>Top 20</option><option value="50">Top 50</option></select></label></div>
+        <div id="ctrl-hotspots" class="metrics-tab-options" hidden><label><span data-i18n="metrics.limit">显示数量</span><select id="hotspots-limit" onchange="if(_metricsPid)loadMetricsHotspots(_metricsPid)"><option value="5">Top 5</option><option value="10" selected>Top 10</option><option value="20">Top 20</option></select></label></div>
       </div>
-      <div id="architecture-review-result" class="architecture-review-result">
-        <div class="architecture-review-empty" data-i18n="arch.empty">选择项目后生成 3–5 个可追溯的架构深化候选</div>
-      </div>
+      <p id="metrics-list-hint" class="metrics-helper" data-i18n="metrics.listHint">条形长度相对当前列表最大值；完整位置保留在每条记录中。</p>
+      <div id="metrics-tab-content" aria-busy="false"></div>
     </section>
-
-    <!-- Health dashboard -->
-    <div id="metrics-health" style="margin-top:12px">
-      <div class="empty-state" data-i18n="metrics.empty">选择项目以查看指标</div>
-    </div>
-
-    <!-- Tabs + per-tab controls -->
-    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:16px">
-      <div class="tab-row" style="margin:0;flex:none">
-        <button class="tab metrics-tab active" data-tab="complexity"
-                onclick="switchMetricsTab('complexity')" data-i18n="metrics.tab.complexity">复杂度</button>
-        <button class="tab metrics-tab" data-tab="coupling"
-                onclick="switchMetricsTab('coupling')" data-i18n="metrics.tab.coupling">耦合度</button>
-        <button class="tab metrics-tab" data-tab="cycles"
-                onclick="switchMetricsTab('cycles')" data-i18n="metrics.tab.cycles">循环依赖</button>
-        <button class="tab metrics-tab" data-tab="hotspots"
-                onclick="switchMetricsTab('hotspots')" data-i18n="metrics.tab.hotspots">热点</button>
-      </div>
-      <div id="ctrl-complexity" style="display:flex;gap:6px;align-items:center">
-        <select id="complexity-limit" style="width:88px"
-                onchange="if(_metricsPid)loadMetricsComplexity(_metricsPid)">
-          <option value="10">Top 10</option>
-          <option value="20" selected>Top 20</option>
-          <option value="50">Top 50</option>
-        </select>
-      </div>
-      <div id="ctrl-coupling" style="display:none;gap:6px;align-items:center">
-        <select id="coupling-sort" style="width:130px"
-                onchange="if(_metricsPid)loadMetricsCoupling(_metricsPid)">
-          <option value="fanout" data-i18n="metrics.sort.fanout">传出耦合 (Ce)</option>
-          <option value="fanin"  data-i18n="metrics.sort.fanin">传入耦合 (Ca)</option>
-        </select>
-        <select id="coupling-limit" style="width:88px"
-                onchange="if(_metricsPid)loadMetricsCoupling(_metricsPid)">
-          <option value="10">Top 10</option>
-          <option value="20" selected>Top 20</option>
-          <option value="50">Top 50</option>
-        </select>
-      </div>
-      <div id="ctrl-hotspots" style="display:none;gap:6px;align-items:center">
-        <select id="hotspots-limit" style="width:88px"
-                onchange="if(_metricsPid)loadMetricsHotspots(_metricsPid)">
-          <option value="5">Top 5</option>
-          <option value="10" selected>Top 10</option>
-          <option value="20">Top 20</option>
-        </select>
-      </div>
-    </div>
-
-    <!-- Tab content -->
-    <div id="metrics-tab-content" style="margin-top:8px"></div>
-
+    <section class="architecture-review-module" aria-labelledby="architecture-review-title">
+      <div class="architecture-review-head"><div class="architecture-review-mark">A/02</div>
+        <div><strong id="architecture-review-title" data-i18n="arch.title">架构漂移与变更风险评估</strong><small data-i18n="arch.subtitle">ForgeFlow U1–U8 · 静态指标事实 · Ollama 模型建议</small></div>
+        <button id="architecture-review-btn" class="btn btn-primary" type="button" onclick="generateArchitectureReview()" disabled data-i18n="arch.generate">生成模型建议</button></div>
+      <p class="metrics-architecture-hint" data-i18n="metrics.archHint">模型建议是辅助判断，不会修改项目代码或替代静态事实。</p>
+      <div id="architecture-review-status" role="status" aria-live="polite"></div>
+      <div id="architecture-review-result" class="architecture-review-result" aria-busy="false"><div class="architecture-review-empty" data-i18n="arch.empty">选择项目后生成 3–5 个可追溯的架构深化候选</div></div>
+    </section>
   </div>
 </div>
 </body>

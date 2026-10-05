@@ -11,13 +11,13 @@
     <!-- Sidebar -->
     <div class="graph-sidebar">
       <div id="graph-target-wrap">
-        <div class="field-label" data-i18n="graph.target">目标符号</div>
+        <label class="field-label" for="graph-target" data-i18n="graph.target">目标符号</label>
         <input type="text" id="graph-target" placeholder="com.example.Foo#bar(String)" autocomplete="off"
           list="graph-symbols-datalist"
           oninput="updateGraphClassHint(this.value);debouncedGraphSymbols()">
         <div id="graph-class-hint" class="graph-class-hint" style="display:none"
           data-i18n="graph.classHint">↳ 类级别查询 — 自动展开到所有成员方法</div>
-        <div class="field-label" style="margin-top:8px">项目（可选）</div>
+        <label class="field-label" for="graph-project" style="margin-top:8px" data-i18n="graph.entrypointsProject">项目（可选）</label>
         <input type="text" id="graph-project" placeholder="project-name" autocomplete="off"
           list="projects-datalist" data-i18n-ph="ph.projectName">
       </div>
@@ -53,17 +53,17 @@
       </div>
 
       <div id="depth-wrap">
-        <div class="field-label"><span data-i18n="graph.depth">深度</span> <span id="depth-val" style="color:var(--mint)">2</span></div>
+        <label class="field-label" for="graph-depth"><span data-i18n="graph.depth">深度</span> <span id="depth-val" style="color:var(--mint)">2</span></label>
         <input type="range" id="graph-depth" min="1" max="5" value="2" style="width:100%;accent-color:var(--mint)"
           oninput="document.getElementById('depth-val').textContent=this.value">
       </div>
 
       <div id="entrypoints-wrap" style="display:none">
-        <div class="field-label" data-i18n="graph.entrypointsProject">项目 ID（可选）</div>
+        <label class="field-label" for="entrypoints-project" data-i18n="graph.entrypointsProject">项目 ID（可选）</label>
         <input type="text" id="entrypoints-project" placeholder="project-name" autocomplete="off"
           list="projects-datalist"
           data-i18n-ph="ph.projectName" onkeydown="if(event.key==='Enter')doGraphQuery()">
-        <div class="field-label" style="margin-top:8px" data-i18n="graph.entrypointsLang">语言过滤</div>
+        <label class="field-label" for="entrypoints-lang" style="margin-top:8px" data-i18n="graph.entrypointsLang">语言过滤</label>
         <select id="entrypoints-lang" onchange="doGraphQuery()">
           <option value="" data-i18n="chip.all">全部</option>
           <option value="java">Java</option>
@@ -72,9 +72,9 @@
         </select>
       </div>
 
-      <button class="btn btn-primary" style="width:100%" onclick="doGraphQuery()">
+      <button id="graph-query-btn" class="btn btn-primary" type="button" style="width:100%" onclick="doGraphQuery()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51 15.42 17.49M15.41 6.51 8.59 10.49"/></svg>
-        <span data-i18n="btn.queryGraph">查询图谱</span>
+        <span id="graph-query-label" data-i18n="graph.queryAction">查询图谱</span>
       </button>
 
       <div class="divider"></div>
@@ -87,8 +87,9 @@
         <div class="legend-item"><div class="legend-dot" style="background:#60A5FA"></div>INTERFACE</div>
         <div class="legend-item"><div class="legend-dot" style="background:#F87171"></div>ROOT</div>
       </div>
+      <p id="graph-related-hint" class="graph-related-hint" data-i18n="graph.relatedHint">查询关联视图 · 连线表示与目标的可达关系</p>
 
-      <div id="node-detail" style="display:none">
+      <div id="node-detail" style="display:none" aria-live="polite">
         <div class="divider"></div>
         <div class="field-label" data-i18n="graph.selectedNode">已选节点</div>
         <div class="node-detail" id="node-detail-content"></div>
@@ -99,13 +100,14 @@
     </div>
 
     <!-- Canvas -->
-    <div class="graph-canvas">
+    <div class="graph-canvas" aria-busy="false">
       <div class="flow-summary" id="flow-summary"></div>
       <div class="flow-view-switch" id="flow-view-switch">
         <button class="flow-view-btn active" data-flow-view="cfg" onclick="switchFlowView('cfg',this)">CFG</button>
         <button class="flow-view-btn" data-flow-view="pdg" onclick="switchFlowView('pdg',this)">PDG</button>
       </div>
-      <svg id="graph-svg">
+      <svg id="graph-svg" role="group" data-i18n-aria-label="graph.canvas"
+           aria-label="代码关系图，使用 Tab 选择节点，Enter 查看详情">
         <defs>
           <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
             <feGaussianBlur stdDeviation="3.5" result="blur"/>
@@ -121,11 +123,22 @@
           </linearGradient>
         </defs>
       </svg>
-      <div class="graph-hint" id="graph-hint" data-i18n="graph.hint">输入符号名称并查询以可视化图谱</div>
+      <div id="graph-state" class="graph-state" data-status="ready">
+        <span class="graph-state-mark" aria-hidden="true">◎</span>
+        <strong id="graph-state-title" data-i18n="graph.readyTitle">探索代码关系</strong>
+        <p id="graph-state-message" data-i18n="graph.hint">输入符号名称并查询以可视化图谱</p>
+        <button id="graph-retry" class="btn btn-ghost" type="button" onclick="doGraphQuery()"
+                data-i18n="graph.retry" hidden>重试查询</button>
+      </div>
+      <div class="graph-hint" id="graph-hint" role="status" aria-live="polite" data-i18n="graph.hint">输入符号名称并查询以可视化图谱</div>
       <div class="graph-controls">
-        <button class="graph-ctrl-btn" onclick="graphZoomIn()" title="Zoom in">+</button>
-        <button class="graph-ctrl-btn" onclick="graphZoomOut()" title="Zoom out">−</button>
-        <button class="graph-ctrl-btn" onclick="graphReset()" title="Reset" style="font-size:12px">⌂</button>
+        <button class="graph-ctrl-btn" type="button" onclick="graphZoomOut()" data-i18n-title="graph.zoomOut"
+                data-i18n-aria-label="graph.zoomOut" aria-label="缩小" title="缩小">−</button>
+        <output id="graph-zoom-level" class="graph-zoom-level">100%</output>
+        <button class="graph-ctrl-btn" type="button" onclick="graphZoomIn()" data-i18n-title="graph.zoomIn"
+                data-i18n-aria-label="graph.zoomIn" aria-label="放大" title="放大">+</button>
+        <button class="graph-ctrl-btn graph-fit-btn" type="button" onclick="graphReset()"
+                data-i18n="graph.fit">适应画布</button>
       </div>
     </div>
   </div>

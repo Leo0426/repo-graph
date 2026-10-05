@@ -1,0 +1,80 @@
+/* Project tools: project context first, auxiliary inspections second. */
+#panel-tools .panel-body { display: flex; flex-direction: column; gap: 24px; }
+#panel-tools .card { margin: 0; padding: 22px; border-radius: 8px; min-width: 0; }
+#panel-tools h2, #panel-tools h3, #panel-tools p { margin: 0; }
+#panel-tools h2 { font: 600 16px/1.4 var(--ui); color: var(--text-1); }
+#panel-tools h3 { font: 600 15px/1.5 var(--ui); color: var(--text-1); overflow-wrap: anywhere; }
+#panel-tools .tools-section-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+#panel-tools .tools-section-heading p, #panel-tools .tools-utility-heading p { margin-top: 6px; font-size: 13px; line-height: 1.6; color: var(--text-2); }
+#panel-tools .tools-heading-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+#panel-tools .btn { min-height: 40px; border-radius: 8px; font: 500 13px/1.35 var(--ui); text-decoration: none; white-space: normal; text-align: center; justify-content: center; }
+#panel-tools :is(button, a, input):focus-visible { outline: 2px solid var(--mint); outline-offset: 3px; }
+#panel-tools .btn:disabled { cursor: wait; opacity: .6; }
+#panel-tools .tools-project-filter { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; margin: 24px 0 18px; }
+#panel-tools label { display: block; color: var(--text-2); font: 500 12px/1.5 var(--ui); }
+#panel-tools .tools-project-filter label { grid-column: 1 / -1; }
+#panel-tools input { width: 100%; min-width: 0; min-height: 40px; font: 400 14px/1.5 var(--ui); border-radius: 8px; }
+#panel-tools #tools-project-count { color: var(--text-3); font-size: 12px; align-self: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#panel-tools #projects-manage-list { display: grid; gap: 12px; }
+#panel-tools .tools-project { display: grid; grid-template-columns: minmax(0, 1fr) minmax(190px, .45fr) auto; gap: 18px; align-items: center; padding: 18px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; }
+#panel-tools .tools-project-main { min-width: 0; }
+#panel-tools .tools-project-id { display: block; margin-top: 4px; color: var(--mint); opacity: .85; font: 400 12px/1.5 var(--fm); overflow-wrap: anywhere; }
+#panel-tools .tools-project-root { margin-top: 12px; display: grid; gap: 3px; color: var(--text-3); font-size: 11px; }
+#panel-tools .tools-project-root code { color: var(--text-2); font: 400 12px/1.65 var(--fm); overflow-wrap: anywhere; }
+#panel-tools .tools-project-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0; }
+#panel-tools .tools-project-meta dt { color: var(--text-3); font-size: 11px; margin-bottom: 5px; }
+#panel-tools .tools-project-meta dd { margin: 0; font-size: 13px; color: var(--text-2); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+#panel-tools .tools-project-meta .tools-project-units { color: var(--text-1); font-size: 20px; line-height: 1.2; font-weight: 600; }
+#panel-tools .tools-project-actions { display: flex; flex-direction: column; gap: 8px; min-width: 120px; }
+#panel-tools .tools-overview { color: var(--mint); gap: 8px; }
+#panel-tools .tools-delete { color: var(--text-3); border-color: transparent; background: transparent; }
+#panel-tools .tools-delete:hover { color: var(--red); background: rgba(248,113,113,.06); border-color: rgba(248,113,113,.2); }
+#panel-tools .tools-project-error { grid-column: 1 / -1; color: var(--red); font-size: 13px; overflow-wrap: anywhere; }
+#panel-tools .tools-feedback { padding: 16px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-2); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; background: var(--bg-2); }
+#panel-tools .tools-feedback p + p, #panel-tools .tools-feedback strong + p { margin-top: 6px; }
+#panel-tools .tools-feedback .btn { margin-top: 12px; }
+#panel-tools .tools-error { color: var(--red); border-color: rgba(248,113,113,.2); }
+#panel-tools .tools-cached-hint { color: var(--text-2); }
+#panel-tools #tools-project-status:not(:empty) { margin-bottom: 16px; }
+#panel-tools .tools-loading { display: flex; align-items: center; gap: 10px; }
+#panel-tools .tools-loading .spinner { flex: 0 0 auto; width: 16px; height: 16px; }
+#panel-tools .tools-empty { padding: 30px 20px; display: flex; flex-direction: column; align-items: flex-start; gap: 12px; background: var(--bg-2); border: 1px dashed var(--border); border-radius: 8px; color: var(--text-2); font-size: 13px; }
+#panel-tools .tools-empty strong { color: var(--text-1); font-size: 15px; }
+#panel-tools .tools-utilities { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
+#panel-tools .tools-utility-heading { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 20px; }
+#panel-tools .tools-utility-icon { display: grid; place-items: center; width: 36px; height: 36px; flex: 0 0 36px; background: var(--bg-3); border: 1px solid var(--border); border-radius: 8px; color: var(--mint); font-size: 21px; }
+#panel-tools .tools-tool-input { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-top: 8px; }
+#panel-tools :is(#frameworks-result, #sbom-result) { margin-top: 16px; }
+#panel-tools .tools-initial { color: var(--text-3); }
+#panel-tools .tools-result-count { color: var(--text-3); font-size: 12px; margin-bottom: 10px; }
+#panel-tools .tools-entry-list { display: grid; gap: 10px; max-height: 480px; overflow-y: auto; }
+#panel-tools .tools-entry { min-width: 0; padding: 14px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; }
+#panel-tools .tools-entry-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+#panel-tools .tools-framework-tag { color: var(--mint); font: 400 11px/1.5 var(--fm); }
+#panel-tools .tools-entry > code { color: var(--text-1); font: 400 12px/1.65 var(--fm); overflow-wrap: anywhere; }
+#panel-tools .tools-entry-path { margin-top: 7px; color: var(--text-3); font: 400 11px/1.6 var(--fm); overflow-wrap: anywhere; }
+#panel-tools .tools-download-ready p { color: var(--mint); }
+#panel-tools .tools-download-ready code { display: block; margin-top: 10px; font: 400 11px/1.6 var(--fm); color: var(--text-3); overflow-wrap: anywhere; }
+@media (max-width: 1200px) {
+  #panel-tools .tools-project { grid-template-columns: minmax(0, 1fr) auto; }
+  #panel-tools .tools-project-meta { grid-column: 1; max-width: 330px; }
+  #panel-tools .tools-project-actions { grid-column: 2; grid-row: 1 / 3; }
+  #panel-tools .tools-utilities { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  #panel-tools .panel-body { gap: 18px; }
+  #panel-tools .card { padding: 16px; }
+  #panel-tools .tools-section-heading { flex-direction: column; gap: 16px; }
+  #panel-tools .tools-heading-actions { width: 100%; }
+  #panel-tools .tools-heading-actions .tools-index-link { flex: 1; }
+  #panel-tools .tools-project-filter { grid-template-columns: minmax(0, 1fr); margin-top: 20px; }
+  #panel-tools .tools-project { grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 16px; }
+  #panel-tools .tools-project-actions { grid-column: 1; grid-row: auto; flex-direction: row; }
+  #panel-tools .tools-overview { flex: 1; }
+  #panel-tools .tools-project-meta { max-width: none; }
+  #panel-tools .tools-tool-input { grid-template-columns: minmax(0, 1fr); }
+  #panel-tools .tools-tool-input .btn { justify-self: start; padding-inline: 18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #panel-tools *, #panel-tools *::before, #panel-tools *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}

@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * IncrementalIndexCache 单元测试，使用临时 SQLite 数据库验证增量过滤和缓存持久化。
@@ -29,6 +30,62 @@ class IncrementalIndexCacheTest {
         Path file = tempDir.resolve(name);
         Files.writeString(file, content);
         return file;
+    }
+
+    @Test
+    void dirtyMarkerSurvivesRestartAndRemainsVisibleAfterFileDeletion() throws Exception {
+        IncrementalIndexCache cache = makeCache();
+        Path file = writeFile("Dirty.java", "class Dirty {}");
+        cache.updateEntries(List.of(file), "proj", tempDir);
+        cache.markDirty(List.of("Dirty.java", "AlreadyDeleted.java"), "proj");
+
+        IncrementalIndexCache reopened = makeCache();
+        assertThat(reopened.filterChanged(List.of(file), "proj", tempDir)).containsExactly(file);
+        Files.delete(file);
+        assertThat(reopened.findDeletedPaths(List.of(), "proj", tempDir))
+                .containsExactly("AlreadyDeleted.java", "Dirty.java");
+        assertThat(reopened.findDeletedPaths(List.of(), "other", tempDir)).isEmpty();
+    }
+
+    @Test
+    void projectDeletionMarkerSurvivesFileCacheCleanupUntilExplicitCompletion() {
+        IncrementalIndexCache cache = makeCache();
+        cache.markProjectDeletionPending("proj");
+        cache.removeProject("proj");
+
+        IncrementalIndexCache reopened = makeCache();
+        assertThat(reopened.hasPendingProjectDeletion("proj")).isTrue();
+        assertThat(reopened.hasPendingProjectDeletion("other")).isFalse();
+        reopened.completeProjectDeletion("proj");
+        assertThat(makeCache().hasPendingProjectDeletion("proj")).isFalse();
+    }
+
+    @Test
+    void unavailableCacheCannotSilentlyAcknowledgeMutation() throws Exception {
+        IncrementalIndexCache cache = makeCache();
+        Path file = writeFile("Foo.java", "class Foo {}");
+        Files.delete(tempDir.resolve("test-index.db"));
+        Files.createDirectory(tempDir.resolve("test-index.db"));
+
+        assertThatThrownBy(() -> cache.markDirty(List.of("Foo.java"), "proj"))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> cache.updateEntries(List.of(file), "proj", tempDir))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> cache.removeEntry("Foo.java", "proj"))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> cache.findDeletedPaths(List.of(), "proj", tempDir))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void sourceDisappearingBeforeCommitKeepsADeletionRetryMarker() throws Exception {
+        IncrementalIndexCache cache = makeCache();
+        Path file = writeFile("Foo.java", "class Foo {}");
+        var snapshot = cache.captureFingerprints(List.of(file));
+        Files.delete(file);
+
+        assertThat(cache.updateUnchangedEntries(List.of(file), snapshot, "proj", tempDir)).containsExactly(file);
+        assertThat(makeCache().findDeletedPaths(List.of(), "proj", tempDir)).containsExactly("Foo.java");
     }
 
     // ── filterChanged ─────────────────────────────────────────────────────────
@@ -77,6 +134,54 @@ class IncrementalIndexCacheTest {
         IncrementalIndexCache cache2 = makeCache();
         List<Path> changed = cache2.filterChanged(List.of(file), "projA", tempDir);
         assertThat(changed).isEmpty();
+    }
+
+    @Test
+    void updateUnchangedEntries_persistsOnlyFilesMatchingTheSnapshot() throws Exception {
+        IncrementalIndexCache cache = makeCache();
+        Path stable = writeFile("Stable.java", "class Stable {}");
+        Path changed = writeFile("Changed.java", "class Changed {}");
+        var fingerprints = cache.captureFingerprints(List.of(stable, changed));
+        Files.writeString(changed, "class Changed { void added() {} }");
+
+        assertThat(cache.updateUnchangedEntries(List.of(stable, changed), fingerprints, "projA", tempDir))
+                .containsExactly(changed);
+
+        IncrementalIndexCache reopened = makeCache();
+        assertThat(reopened.filterChanged(List.of(stable, changed), "projA", tempDir)).containsExactly(changed);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void updateUnchangedEntries_invalidatesOldFingerprintWhenSourceChangesOrDisappears(boolean deleted)
+            throws Exception {
+        IncrementalIndexCache cache = makeCache();
+        Path file = writeFile("Foo.java", "class Foo {}");
+        cache.updateEntries(List.of(file), "projA", tempDir);
+        var fingerprints = cache.captureFingerprints(List.of(file));
+        if (deleted) {
+            Files.delete(file);
+        } else {
+            Files.writeString(file, "class Foo { void changed() {} }");
+        }
+
+        assertThat(cache.updateUnchangedEntries(List.of(file), fingerprints, "projA", tempDir))
+                .containsExactly(file);
+
+        Files.writeString(file, "class Foo {}");
+        assertThat(cache.filterChanged(List.of(file), "projA", tempDir)).containsExactly(file);
+    }
+
+    @Test
+    void updateUnchangedEntries_doesNotCommitSourceThatWasMissingFromSnapshot() throws Exception {
+        IncrementalIndexCache cache = makeCache();
+        Path file = tempDir.resolve("Late.java");
+        var fingerprints = cache.captureFingerprints(List.of(file));
+        Files.writeString(file, "class Late {}");
+
+        assertThat(cache.updateUnchangedEntries(List.of(file), fingerprints, "projA", tempDir))
+                .containsExactly(file);
+        assertThat(cache.filterChanged(List.of(file), "projA", tempDir)).containsExactly(file);
     }
 
     // ── Multiple files ────────────────────────────────────────────────────────

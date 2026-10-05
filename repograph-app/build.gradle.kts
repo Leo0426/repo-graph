@@ -40,7 +40,7 @@ dependencies {
     testImplementation(libs.neo4j.harness)
 }
 
-// Forward benchmark.* system properties to the test JVM.
+// Forward benchmark.* and test.qdrant.* system properties to the test JVM.
 // Uses providers.systemProperty() so the configuration cache is correctly
 // invalidated when any of these values change between runs.
 tasks.named<Test>("test") {
@@ -48,7 +48,8 @@ tasks.named<Test>("test") {
         "benchmark.projectRoot",
         "benchmark.qdrant.host", "benchmark.qdrant.port",
         "benchmark.qdrant.collection", "benchmark.qdrant.vectorSize",
-        "benchmark.ollama.url", "benchmark.ollama.model", "benchmark.ollama.timeout"
+        "benchmark.ollama.url", "benchmark.ollama.model", "benchmark.ollama.timeout",
+        "test.qdrant.host", "test.qdrant.port"
     ).forEach { key ->
         val value = providers.systemProperty(key)
         if (value.isPresent) systemProperty(key, value.get())

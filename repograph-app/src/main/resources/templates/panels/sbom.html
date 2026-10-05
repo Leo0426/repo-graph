@@ -8,22 +8,17 @@
     <div class="panel-subtitle" data-i18n="sbom.subtitle">CycloneDX 格式 · 直接依赖可视化</div>
   </div>
   <div class="panel-body">
-    <div class="card" style="margin-bottom:16px">
-      <div class="input-row">
-        <input type="text" id="sbom-view-input" placeholder="project-name"
-          autocomplete="off" list="projects-datalist" data-i18n-ph="ph.projectName"
-          onkeydown="if(event.key==='Enter')loadSbomView()">
-        <button class="btn btn-primary" onclick="loadSbomView()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-          <span data-i18n="sbom.btn.view">生成并查看</span>
-        </button>
-        <button class="btn btn-ghost" id="sbom-download-btn" onclick="downloadSbomJson()" style="display:none">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          <span data-i18n="btn.download">下载 JSON</span>
-        </button>
-      </div>
-    </div>
-    <div id="sbom-view-content"></div>
+    <section class="card sbom-command-card">
+      <form onsubmit="event.preventDefault();loadSbomView()">
+        <div class="sbom-project-field"><label for="sbom-view-input" data-i18n="sbom.project.label">项目名称或 ID</label>
+          <input type="text" id="sbom-view-input" placeholder="project-name" autocomplete="off" list="projects-datalist"
+                 data-i18n-ph="ph.projectName" oninput="invalidateSbomView()" aria-describedby="sbom-project-help"></div>
+        <button type="submit" class="btn btn-primary" id="sbom-view-submit" data-i18n="sbom.btn.view">生成并查看</button>
+        <button type="button" class="btn btn-ghost" id="sbom-download-btn" onclick="downloadSbomJson()" hidden data-i18n="tools.sbom.download">下载 JSON</button>
+      </form>
+      <p id="sbom-project-help" data-i18n="sbom.initial">选择已索引项目，查看声明的直接依赖。</p>
+    </section>
+    <div id="sbom-view-content" aria-busy="false"></div>
   </div>
 </div>
 </body>
