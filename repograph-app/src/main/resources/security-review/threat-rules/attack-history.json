@@ -1,0 +1,30 @@
+[
+  {
+    "ruleId": "attack-brute-force-ssh",
+    "kind": "ATTACK_HISTORY",
+    "severity": "HIGH",
+    "pattern": "Failed password for (?:invalid user )?(\\S+) from (\\S+)",
+    "group": 1,
+    "timePattern": "^([A-Z][a-z]{2}\\s+\\d{1,2}\\s+\\d{2}:\\d{2}:\\d{2})",
+    "detailTemplate": "疑似 SSH 暴力破解：{count} 次登录失败，最近目标用户 {1}（来源 {2}）",
+    "minCount": 5
+  },
+  {
+    "ruleId": "attack-auth-failure",
+    "kind": "ATTACK_HISTORY",
+    "severity": "MEDIUM",
+    "pattern": "authentication failure.*user=(\\S+)",
+    "group": 1,
+    "timePattern": "^([A-Z][a-z]{2}\\s+\\d{1,2}\\s+\\d{2}:\\d{2}:\\d{2})",
+    "detailTemplate": "认证失败记录：用户 {1}"
+  },
+  {
+    "ruleId": "attack-invalid-user-probe",
+    "kind": "ATTACK_HISTORY",
+    "severity": "MEDIUM",
+    "pattern": "Invalid user (\\S+) from (\\S+)",
+    "group": 1,
+    "timePattern": "^([A-Z][a-z]{2}\\s+\\d{1,2}\\s+\\d{2}:\\d{2}:\\d{2})",
+    "detailTemplate": "无效用户名探测：{1}（来源 {2}）"
+  }
+]
