@@ -75,6 +75,63 @@ class CodeQlScannerAdapterTest {
     }
 
     private Path fakeCodeQl() throws Exception {
+        if (isWindows()) {
+            Path command = tempDir.resolve("fake-codeql.cmd");
+            Files.writeString(command, """
+                    @echo off
+                    setlocal enabledelayedexpansion
+                    if "%~1"=="--version" (
+                      echo 2.20.0
+                      exit /b 0
+                    )
+                    if "%~1"=="database" if "%~2"=="create" (
+                      md "%~3"
+                      exit /b 0
+                    )
+                    rem for 会把 = 当分隔符,参数解析必须用 goto+shift 循环
+                    set "RULE=java/command-line-injection"
+                    set "FILE=App.java"
+                    if "%~1"=="database" if "%~2"=="analyze" (
+                      echo %* | findstr /c:"python" >nul
+                      if not errorlevel 1 (
+                        set "RULE=py/command-line-injection"
+                        set "FILE=app.py"
+                      )
+                    )
+                    set "OUT="
+                    :parse
+                    if "%~1"=="" goto parsed
+                    if "%~1"=="--output" goto capture
+                    shift
+                    goto parse
+                    :capture
+                    shift
+                    set "OUT=%~1"
+                    goto parse
+                    :parsed
+                    (
+                    echo {
+                    echo   "version": "2.1.0",
+                    echo   "runs": [{
+                    echo     "tool": {"driver": {"name": "CodeQL"}},
+                    echo     "results": [{
+                    echo       "ruleId": "!RULE!",
+                    echo       "level": "error",
+                    echo       "message": {"text": "command injection"},
+                    echo       "locations": [{
+                    echo         "physicalLocation": {
+                    echo           "artifactLocation": {"uri": "!FILE!"},
+                    echo           "region": {"startLine": 3, "endLine": 3}
+                    echo         }
+                    echo       }]
+                    echo     }]
+                    echo   }]
+                    echo }
+                    ) > "!OUT!"
+                    exit /b 0
+                    """.replace("\n", "\r\n"));
+            return command;
+        }
         Path command = tempDir.resolve("fake-codeql");
         Files.writeString(command, """
                 #!/bin/sh
@@ -123,5 +180,9 @@ class CodeQlScannerAdapterTest {
                 """);
         Files.setPosixFilePermissions(command, PosixFilePermissions.fromString("rwxr-xr-x"));
         return command;
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
     }
 }

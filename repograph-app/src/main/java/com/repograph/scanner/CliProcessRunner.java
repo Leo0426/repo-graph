@@ -76,6 +76,16 @@ final class CliProcessRunner {
     }
 
     private static void terminate(Process process) {
+        // Windows 上 cmd 包装的脚本被强杀后,孙进程(ping/sleep 等)会残留并占住工作目录,
+        // 因此先用 taskkill /T 杀进程树,再走 destroyForcibly 兜底。
+        if (System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win")) {
+            try {
+                new ProcessBuilder("taskkill", "/F", "/T", "/PID",
+                        String.valueOf(process.pid())).start().waitFor(5, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                // 兜底逻辑在下方,taskkill 失败不阻断
+            }
+        }
         process.destroyForcibly();
         try {
             process.waitFor(5, TimeUnit.SECONDS);

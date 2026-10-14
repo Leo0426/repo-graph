@@ -74,6 +74,42 @@ class SlitherScannerAdapterTest {
     }
 
     private Path fakeSlither() throws Exception {
+        if (isWindows()) {
+            Path command = tempDir.resolve("fake-slither.cmd");
+            Files.writeString(command, """
+                    @echo off
+                    setlocal enabledelayedexpansion
+                    if "%~1"=="--version" (
+                      echo 0.10.0
+                      exit /b 0
+                    )
+                    set "OUT=%~3"
+                    (
+                    echo {
+                    echo   "results": {
+                    echo     "detectors": [
+                    echo       {
+                    echo         "check": "reentrancy-eth",
+                    echo         "impact": "High",
+                    echo         "description": "Reentrancy in Bank.withdraw^()",
+                    echo         "elements": [
+                    echo           {
+                    echo             "name": "withdraw",
+                    echo             "source_mapping": {
+                    echo               "filename_relative": "contracts/Bank.sol",
+                    echo               "lines": [23, 24, 25]
+                    echo             }
+                    echo           }
+                    echo         ]
+                    echo       }
+                    echo     ]
+                    echo   }
+                    echo }
+                    ) > "!OUT!"
+                    exit /b 0
+                    """.replace("\n", "\r\n"));
+            return command;
+        }
         Path command = tempDir.resolve("fake-slither");
         Files.writeString(command, """
                 #!/bin/sh
@@ -109,5 +145,9 @@ class SlitherScannerAdapterTest {
                 """);
         Files.setPosixFilePermissions(command, PosixFilePermissions.fromString("rwxr-xr-x"));
         return command;
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
     }
 }

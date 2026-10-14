@@ -78,16 +78,25 @@ class SemgrepScannerAdapterTest {
     @Test
     void scan_forciblyTerminatesProcessWhenTimeoutExpires() throws Exception {
         Path projectRoot = Files.createDirectory(tempDir.resolve("project"));
-        Path command = tempDir.resolve("slow-semgrep");
-        Files.writeString(command, """
+        Path command = tempDir.resolve(isWindows() ? "slow-semgrep.cmd" : "slow-semgrep");
+        Files.writeString(command, (isWindows() ? """
+                @echo off
+                if "%~1"=="--version" (
+                  echo 1.99.0
+                  exit /b 0
+                )
+                ping -n 11 127.0.0.1 >nul
+                """ : """
                 #!/bin/sh
                 if [ "$1" = "--version" ]; then
                   echo "1.99.0"
                   exit 0
                 fi
                 sleep 10
-                """);
-        Files.setPosixFilePermissions(command, PosixFilePermissions.fromString("rwxr-xr-x"));
+                """).replace("\n", isWindows() ? "\r\n" : "\n"));
+        if (!isWindows()) {
+            Files.setPosixFilePermissions(command, PosixFilePermissions.fromString("rwxr-xr-x"));
+        }
         ScannerProperties properties = new ScannerProperties(
                 tempDir.resolve("scan-work"), 1, 10, 10,
                 command.toString(), "auto", "codeql", "security-extended");
@@ -104,6 +113,35 @@ class SemgrepScannerAdapterTest {
     }
 
     private Path fakeSemgrep() throws Exception {
+        if (isWindows()) {
+            Path command = tempDir.resolve("fake-semgrep.cmd");
+            Files.writeString(command, """
+                    @echo off
+                    setlocal enabledelayedexpansion
+                    if "%~1"=="--version" (
+                      echo 1.99.0
+                      exit /b 0
+                    )
+                    set "OUT="
+                    set "PREV="
+                    for %%a in (%*) do (
+                      if "!PREV!"=="--output" set "OUT=%%~a"
+                      set "PREV=%%~a"
+                    )
+                    (
+                    echo {
+                    echo   "results": [{
+                    echo     "check_id": "java.lang.security.audit.command-injection",
+                    echo     "path": "App.java",
+                    echo     "start": {"line": 3},
+                    echo     "end": {"line": 3},
+                    echo     "extra": {"severity": "ERROR", "message": "command injection"}
+                    echo   }]
+                    echo }
+                    ) > "!OUT!"
+                    """.replace("\n", "\r\n"));
+            return command;
+        }
         Path command = tempDir.resolve("fake-semgrep");
         Files.writeString(command, """
                 #!/bin/sh
@@ -131,5 +169,9 @@ class SemgrepScannerAdapterTest {
                 """);
         Files.setPosixFilePermissions(command, PosixFilePermissions.fromString("rwxr-xr-x"));
         return command;
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
     }
 }
