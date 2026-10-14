@@ -45,16 +45,16 @@ class DefaultConfigAuditServiceTest {
     }
 
     @Test
-    void audit_dimensionWithoutRules_excludedFromReport() {
+    void audit_noViolationsOnCleanFile_reportsDimensionWithEmptyViolations() {
         DefaultConfigAuditService service = new DefaultConfigAuditService();
         ConfigAuditRequest request = new ConfigAuditRequest(
-                List.of(file("sshd_config", "PermitRootLogin no\n")),
+                List.of(file("sysctl.conf", "kernel.sysrq = 0\nkernel.kexec_load_disabled = 1\n")),
                 List.of(AuditDimension.SYSTEM_CONFIG));
 
         ConfigAuditReport report = service.audit(request);
 
-        assertThat(report.dimensionsAudited()).isEmpty();
-        assertThat(report.checkedRules()).isZero();
+        assertThat(report.dimensionsAudited()).containsExactly(AuditDimension.SYSTEM_CONFIG);
+        assertThat(report.checkedRules()).isGreaterThanOrEqualTo(1);
         assertThat(report.violations()).isEmpty();
     }
 
