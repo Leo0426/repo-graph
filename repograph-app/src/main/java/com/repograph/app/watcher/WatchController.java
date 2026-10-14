@@ -40,7 +40,8 @@ public class WatchController {
     @GetMapping
     public List<Map<String, String>> list() {
         return watcherService.list().stream()
-                .map(wp -> Map.of("projectId", wp.projectId(), "root", wp.root().toString()))
+                .map(wp -> Map.of("projectId", wp.projectId(),
+                        "root", wp.root().toString().replace('\\', '/')))
                 .toList();
     }
 
