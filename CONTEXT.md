@@ -210,11 +210,14 @@ HTTP 调用被中断时保留线程中断标志，让上层取消流程可以继
   `PENDING`；认领仅允许从 `PENDING` 发起（避免静默改派他人正在复核的条目），所有迁移在
   SQLite 事务内做条件 `UPDATE`，仅当真正发生迁移才追加 `ReviewQueueAuditEvent`（认领/
   退回/确认/驳回均记录操作者、时间、理由）。
-- 边界：只做静态状态机记录和导出，不做通知、权限体系或认领超时自动释放；PDF 导出、分页
-  和批量导出多个快照留给下一片（见 `docs/user-manual.md` "已知局限"）。
+- 边界：只做静态状态机记录和导出，不做通知、权限体系或认领超时自动释放；PDF 导出、列表分页
+  和多快照批量导出已完成（见 `docs/user-manual.md` "已知局限"）。
 - REST：`POST /api/v1/review-queue/snapshots`、`GET /api/v1/review-queue`（按项目/严重程度/
-  结论/状态/规则/更新时间筛选）、`POST /{entryId}/claim|return|confirm|reject`、
-  `GET /{entryId}/audit`、`GET /snapshots/{snapshotId}/export?format=markdown|json`。
+  结论/状态/规则/更新时间筛选；`page/size` 分页参数，响应为
+  `{entries, page, size, total}` 信封，size 上限 500）、`POST /{entryId}/claim|return|confirm|reject`、
+  `GET /{entryId}/audit`、`GET /snapshots/{snapshotId}/export?format=markdown|json|pdf`、
+  `POST /snapshots/export-batch`（`{snapshotIds, format}` → ZIP + `manifest.json` 状态清单；
+  部分缺失 200、全缺 404、id 上限 100）。
 
 **规则注册与发布回归闸门**（P1 T11-1，`com.repograph.finding`）：
 - `DetectionRule` 统一保存来源、语言/框架、CWE、严重程度、版本、状态、变更说明、matcher 和正负回归样本；
@@ -226,8 +229,16 @@ HTTP 调用被中断时保留线程中断标志，让上层取消流程可以继
 - 创建、提交评审、发布、驳回、替代、回滚和恢复均写不可变审计事件，记录操作者、时间和理由。
 - REST：`POST /api/v1/rules` 创建候选；`POST /{ruleId}/versions/{version}/review|publish|reject`；
   `POST /{ruleId}/rollback`；`GET /api/v1/rules`、版本/活动版本查询和 `GET /{ruleId}/audit`。
+- 效果评估（T11-2）：`RuleEffectEvaluator` 纯函数对已发布规则版本计算命中数、确认率、误报率、
+  抑制率、无上下文率与版本间回归增量；命中锚定审核队列条目，人工结论来自 `triage_feedback`，
+  抑制复用 `RuleSuppressionStore` 匹配语义，无上下文取自研判快照 `located=false`；每次评估持久化
+  快照（`rule_evaluations` 表），相邻快照构成版本回归视图。REST 为
+  `GET /api/v1/rules/{ruleId}/evaluation?projectId=`（即时评估+落快照）与
+  `GET /api/v1/rules/{ruleId}/evaluations?projectId=`（快照列表）；注册规则 version 尚未前置写入
+  研判产物，版本归属经快照序列近似。
 - 当前 matcher 仅支持 `REGEX / SUBSTRING` 和内联代码片段回归集；它是 T11 的版本化发布脊柱，尚未替换
-  `CodeVulnScanner` 的内置规则，也不自动接入外部情报。格式化、效果评估和情报评审分别留给 T11-3/2/4。
+  `CodeVulnScanner` 的内置规则，也不自动接入外部情报。格式化与情报评审分别留给 T11-3/T11-4，
+  效果评估已完成（见上）。
 
 ## 外部扫描器编排
 
