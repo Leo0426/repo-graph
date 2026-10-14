@@ -397,3 +397,9 @@ function populateVulnProjectSelect(projects) {
   select.value = projects.some(project => project.projectId === active) ? active : '';
   onVulnProjectChange();
 }
+
+/** 预选项目后跳转漏洞中心（Agent 跨面板跳转使用，避免落地后仍需手动重选项目）。 */
+function openVulnPanelFor(projectId) {
+  _vulnProjectId = projectId || '';
+  return switchPanel('vulns');
+}

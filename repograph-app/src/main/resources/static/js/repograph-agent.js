@@ -376,7 +376,7 @@ function renderAgentVulnerabilities() {
   if (!vulnerabilities.length) {
     list.innerHTML = `<div class="agent-empty agent-empty-action"><strong>${esc(t('agent.noVulnerabilities'))}</strong>
       <span>${esc(t('agent.noVulnerabilitiesHint'))}</span>
-      <button onclick="switchPanel('vulns')">${esc(t('agent.openVulnerabilities'))} →</button></div>`;
+      <button onclick="openVulnPanelFor(document.getElementById('agent-project-select')?.value)">${esc(t('agent.openVulnerabilities'))} →</button></div>`;
   } else {
     list.innerHTML = vulnerabilities.map(item => `<button class="agent-vulnerability-item
         ${item.id === agentUi.selectedVulnerabilityId ? 'selected' : ''}" role="option"
@@ -512,6 +512,13 @@ function syncAgentProjectSelection() {
   Promise.all([loadAgentVulnerabilities(), loadAgentRuns()]);
 }
 
+/** 跳转索引面板并聚焦项目路径输入（Agent 项目提示的“去索引”使用）。 */
+async function goIndexRoot() {
+  await switchPanel('index');
+  await Alpine.nextTick();
+  document.getElementById('index-root')?.focus();
+}
+
 function renderAgentProjectHint() {
   const hint = document.getElementById('agent-project-hint');
   const select = document.getElementById('agent-project-select');
@@ -522,7 +529,7 @@ function renderAgentProjectHint() {
     hint.textContent = t('agent.projectReady', project.nodeCount);
   } else if (!(state.projects || []).length) {
     hint.innerHTML = `${esc(t('agent.noProjectHint'))}
-      <button onclick="switchPanel('index')">${esc(t('agent.goIndex'))} →</button>`;
+      <button onclick="goIndexRoot()">${esc(t('agent.goIndex'))} →</button>`;
   } else {
     hint.textContent = t('agent.projectHint');
   }
