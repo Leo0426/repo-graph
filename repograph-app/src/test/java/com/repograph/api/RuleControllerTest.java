@@ -3,10 +3,14 @@ package com.repograph.api;
 import com.repograph.core.finding.DetectionRule;
 import com.repograph.core.finding.ExternalFindingSeverity;
 import com.repograph.core.finding.RuleAuditEvent;
+import com.repograph.core.finding.RuleEvaluationReport;
 import com.repograph.core.finding.RuleMatcherKind;
+import com.repograph.core.finding.RuleMetricSet;
+import com.repograph.core.finding.RuleNotFoundException;
 import com.repograph.core.finding.RuleRegistry;
 import com.repograph.core.finding.RuleStatus;
 import com.repograph.core.finding.RuleTransitionException;
+import com.repograph.finding.RuleEffectEvaluationService;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -36,6 +40,9 @@ class RuleControllerTest {
 
     @MockitoBean
     RuleRegistry registry;
+
+    @MockitoBean
+    RuleEffectEvaluationService evaluationService;
 
     @Test
     void createCandidate_returnsAssignedVersionAndCandidateStatus() throws Exception {
@@ -123,6 +130,55 @@ class RuleControllerTest {
                         .content("{\"actor\":\"carol\",\"reason\":\"approved\"}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("RULE_TRANSITION_REJECTED"));
+    }
+
+    @Test
+    void evaluation_persistsSnapshotAndReturnsReport() throws Exception {
+        RuleEvaluationReport report = new RuleEvaluationReport(
+                "java.command-injection", 1, "proj-1",
+                new RuleMetricSet(5, 2, 2, 1, 0.5, 0.5, 0.2, 0.4),
+                List.of(), List.of(), "2026-10-13T08:00:00Z");
+        when(evaluationService.evaluate("java.command-injection", "proj-1")).thenReturn(report);
+
+        mvc.perform(get("/api/v1/rules/java.command-injection/evaluation")
+                        .param("projectId", "proj-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ruleId").value("java.command-injection"))
+                .andExpect(jsonPath("$.version").value(1))
+                .andExpect(jsonPath("$.metrics.hits").value(5))
+                .andExpect(jsonPath("$.metrics.confirmationRate").value(0.5))
+                .andExpect(jsonPath("$.metrics.noContextRate").value(0.4));
+    }
+
+    @Test
+    void evaluation_unknownRule_returnsNotFound() throws Exception {
+        when(evaluationService.evaluate("missing.rule", "proj-1"))
+                .thenThrow(new RuleNotFoundException("rule not found: missing.rule"));
+
+        mvc.perform(get("/api/v1/rules/missing.rule/evaluation")
+                        .param("projectId", "proj-1"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void evaluationHistory_returnsSnapshotList() throws Exception {
+        RuleEvaluationReport first = new RuleEvaluationReport(
+                "java.command-injection", 1, "proj-1",
+                new RuleMetricSet(5, 2, 2, 1, 0.5, 0.5, 0.2, 0.4),
+                List.of(), List.of(), "2026-10-13T08:00:00Z");
+        RuleEvaluationReport second = new RuleEvaluationReport(
+                "java.command-injection", 1, "proj-1",
+                new RuleMetricSet(3, 2, 1, 0, 2.0 / 3.0, 1.0 / 3.0, 0.0, 0.0),
+                List.of(), List.of(), "2026-10-13T09:00:00Z");
+        when(evaluationService.history("java.command-injection", "proj-1"))
+                .thenReturn(List.of(second, first));
+
+        mvc.perform(get("/api/v1/rules/java.command-injection/evaluations")
+                        .param("projectId", "proj-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].generatedAt").value("2026-10-13T09:00:00Z"))
+                .andExpect(jsonPath("$[1].generatedAt").value("2026-10-13T08:00:00Z"))
+                .andExpect(jsonPath("$[0].metrics.hits").value(3));
     }
 
     private static DetectionRule rule(int version, RuleStatus status, boolean active) {

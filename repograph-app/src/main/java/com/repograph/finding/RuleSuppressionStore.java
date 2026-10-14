@@ -331,7 +331,8 @@ public class RuleSuppressionStore {
                 rs.getInt("active") == 1);
     }
 
-    private static boolean matchesScope(RuleSuppression suppression, String filePath) {
+    /** 判断抑制策略是否覆盖给定文件路径；PROJECT scope 全覆盖，FILE_GLOB 按统一 glob 语义匹配。 */
+    static boolean matchesScope(RuleSuppression suppression, String filePath) {
         if (suppression.scope() == RuleSuppressionScope.PROJECT) {
             return true;
         }

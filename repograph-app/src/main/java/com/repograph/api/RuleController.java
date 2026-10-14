@@ -4,9 +4,11 @@ import com.repograph.core.finding.DetectionRule;
 import com.repograph.core.finding.DetectionRuleDraft;
 import com.repograph.core.finding.ExternalFindingSeverity;
 import com.repograph.core.finding.RuleAuditEvent;
+import com.repograph.core.finding.RuleEvaluationReport;
 import com.repograph.core.finding.RuleMatcherKind;
 import com.repograph.core.finding.RuleNotFoundException;
 import com.repograph.core.finding.RuleRegistry;
+import com.repograph.finding.RuleEffectEvaluationService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -28,14 +30,17 @@ import java.util.List;
 public class RuleController {
 
     private final RuleRegistry registry;
+    private final RuleEffectEvaluationService evaluationService;
 
     /**
      * 创建规则控制器。
      *
-     * @param registry 规则注册表
+     * @param registry          规则注册表
+     * @param evaluationService 规则效果评估服务
      */
-    public RuleController(RuleRegistry registry) {
+    public RuleController(RuleRegistry registry, RuleEffectEvaluationService evaluationService) {
         this.registry = registry;
+        this.evaluationService = evaluationService;
     }
 
     /**
@@ -126,6 +131,32 @@ public class RuleController {
     @GetMapping("/{ruleId}/audit")
     public List<RuleAuditEvent> audit(@PathVariable String ruleId) {
         return registry.audit(ruleId);
+    }
+
+    /**
+     * 即时评估指定规则在项目内的效果（命中、确认率、误报率、抑制率、无上下文率与版本回归），
+     * 并持久化评估快照。
+     *
+     * @param ruleId    规则标识
+     * @param projectId 项目标识
+     * @return 评估报告
+     */
+    @GetMapping("/{ruleId}/evaluation")
+    public RuleEvaluationReport evaluate(@PathVariable String ruleId, @RequestParam String projectId) {
+        return evaluationService.evaluate(ruleId, projectId);
+    }
+
+    /**
+     * 列出指定规则的全部评估快照，相邻两条构成版本间回归视图。
+     *
+     * @param ruleId    规则标识
+     * @param projectId 项目标识
+     * @return 快照报告列表，生成时间倒序
+     */
+    @GetMapping("/{ruleId}/evaluations")
+    public List<RuleEvaluationReport> evaluationHistory(
+            @PathVariable String ruleId, @RequestParam String projectId) {
+        return evaluationService.history(ruleId, projectId);
     }
 
     private static String now() {
