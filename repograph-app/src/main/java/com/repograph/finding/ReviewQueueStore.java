@@ -122,10 +122,80 @@ public class ReviewQueueStore implements ReviewQueueService {
             ReviewStatus status,
             String ruleId,
             String updatedAfter,
-            String updatedBefore) {
+            String updatedBefore,
+            Integer offset,
+            Integer limit) {
         StringBuilder sql = new StringBuilder(
                 "SELECT * FROM review_queue_entries WHERE project_id = ?");
         List<Object> params = new ArrayList<>();
+        appendFilters(sql, params, projectId, severity, verdict, status, ruleId,
+                updatedAfter, updatedBefore);
+        sql.append(" ORDER BY updated_at DESC");
+        if (limit != null) {
+            sql.append(" LIMIT ?");
+            params.add(limit);
+            sql.append(" OFFSET ?");
+            params.add(offset == null ? 0 : offset);
+        }
+
+        String url = "jdbc:sqlite:" + dbPath;
+        List<ReviewQueueEntry> result = new ArrayList<>();
+        try (Connection conn = DriverManager.getConnection(url);
+             PreparedStatement statement = conn.prepareStatement(sql.toString())) {
+            for (int i = 0; i < params.size(); i++) {
+                statement.setObject(i + 1, params.get(i));
+            }
+            try (ResultSet rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    result.add(fromRow(rs));
+                }
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to list review queue entries", e);
+        }
+        return List.copyOf(result);
+    }
+
+    @Override
+    public int count(
+            String projectId,
+            ExternalFindingSeverity severity,
+            TriageVerdict verdict,
+            ReviewStatus status,
+            String ruleId,
+            String updatedAfter,
+            String updatedBefore) {
+        StringBuilder sql = new StringBuilder(
+                "SELECT COUNT(*) FROM review_queue_entries WHERE project_id = ?");
+        List<Object> params = new ArrayList<>();
+        appendFilters(sql, params, projectId, severity, verdict, status, ruleId,
+                updatedAfter, updatedBefore);
+
+        String url = "jdbc:sqlite:" + dbPath;
+        try (Connection conn = DriverManager.getConnection(url);
+             PreparedStatement statement = conn.prepareStatement(sql.toString())) {
+            for (int i = 0; i < params.size(); i++) {
+                statement.setObject(i + 1, params.get(i));
+            }
+            try (ResultSet rs = statement.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : 0;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to count review queue entries", e);
+        }
+    }
+
+    /** 拼装 list/count 共用的 WHERE 过滤段；调用方需已写入 project_id 参数。 */
+    private static void appendFilters(
+            StringBuilder sql,
+            List<Object> params,
+            String projectId,
+            ExternalFindingSeverity severity,
+            TriageVerdict verdict,
+            ReviewStatus status,
+            String ruleId,
+            String updatedAfter,
+            String updatedBefore) {
         params.add(projectId);
         if (severity != null) {
             sql.append(" AND severity = ?");
@@ -151,24 +221,6 @@ public class ReviewQueueStore implements ReviewQueueService {
             sql.append(" AND updated_at < ?");
             params.add(updatedBefore);
         }
-        sql.append(" ORDER BY updated_at DESC");
-
-        String url = "jdbc:sqlite:" + dbPath;
-        List<ReviewQueueEntry> result = new ArrayList<>();
-        try (Connection conn = DriverManager.getConnection(url);
-             PreparedStatement statement = conn.prepareStatement(sql.toString())) {
-            for (int i = 0; i < params.size(); i++) {
-                statement.setString(i + 1, (String) params.get(i));
-            }
-            try (ResultSet rs = statement.executeQuery()) {
-                while (rs.next()) {
-                    result.add(fromRow(rs));
-                }
-            }
-        } catch (SQLException e) {
-            throw new IllegalStateException("Failed to list review queue entries", e);
-        }
-        return List.copyOf(result);
     }
 
     @Override

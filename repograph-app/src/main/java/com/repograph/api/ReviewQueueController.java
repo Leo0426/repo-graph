@@ -27,13 +27,19 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RequestMapping;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 /**
  * 审核队列 REST API：把批量研判结果固化为报告快照并生成待审条目，
@@ -132,20 +138,33 @@ public class ReviewQueueController {
      * @return 按更新时间降序的条目列表
      */
     @GetMapping
-    public List<ReviewQueueEntry> list(
+    public ReviewQueueListResponse list(
             @RequestParam String projectId,
             @RequestParam(required = false) String severity,
             @RequestParam(required = false) String verdict,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String ruleId,
             @RequestParam(required = false) String updatedAfter,
-            @RequestParam(required = false) String updatedBefore) {
-        return reviewQueueStore.list(
+            @RequestParam(required = false) String updatedBefore,
+            @RequestParam(required = false, defaultValue = "0") Integer page,
+            @RequestParam(required = false, defaultValue = "100") Integer size) {
+        int safePage = Math.max(page, 0);
+        int safeSize = size == null || size <= 0 ? 100 : Math.min(size, 500);
+        ExternalFindingSeverity severityFilter =
+                parseEnum(severity, ExternalFindingSeverity::valueOf, "severity");
+        TriageVerdict verdictFilter = parseEnum(verdict, TriageVerdict::valueOf, "verdict");
+        ReviewStatus statusFilter = parseEnum(status, ReviewStatus::valueOf, "status");
+        List<ReviewQueueEntry> entries = reviewQueueStore.list(
                 projectId,
-                parseEnum(severity, ExternalFindingSeverity::valueOf, "severity"),
-                parseEnum(verdict, TriageVerdict::valueOf, "verdict"),
-                parseEnum(status, ReviewStatus::valueOf, "status"),
+                severityFilter,
+                verdictFilter,
+                statusFilter,
+                ruleId, updatedAfter, updatedBefore,
+                safePage * safeSize, safeSize);
+        long total = reviewQueueStore.count(
+                projectId, severityFilter, verdictFilter, statusFilter,
                 ruleId, updatedAfter, updatedBefore);
+        return new ReviewQueueListResponse(entries, safePage, safeSize, total);
     }
 
     /**
@@ -248,6 +267,104 @@ public class ReviewQueueController {
         };
     }
 
+    /**
+     * 批量导出多份报告快照为 ZIP 包：每份快照复用单快照导出的同源渲染路径，
+     * 附 manifest.json 记录每个请求 id 的导出状态；部分缺失正常返回并在 manifest
+     * 标记，全部缺失返回 404。单快照渲染失败不中断整包。
+     *
+     * @param request 批量导出请求：快照 ID 列表 + 目标格式
+     * @return ZIP 字节流（manifest.json + 各快照导出文件）
+     */
+    @PostMapping("/snapshots/export-batch")
+    public ResponseEntity<byte[]> exportBatch(@RequestBody BatchExportRequest request) {
+        List<String> snapshotIds = request.snapshotIds() == null
+                ? List.of()
+                : request.snapshotIds().stream()
+                        .filter(id -> id != null && !id.isBlank())
+                        .distinct()
+                        .toList();
+        if (snapshotIds.isEmpty()) {
+            throw new IllegalArgumentException("snapshotIds must not be empty");
+        }
+        if (snapshotIds.size() > 100) {
+            throw new IllegalArgumentException("snapshotIds must not exceed 100");
+        }
+        String format = request.format() == null ? "" : request.format().trim().toLowerCase();
+        if (!List.of("markdown", "json", "pdf").contains(format)) {
+            throw new IllegalArgumentException("Unsupported format: " + request.format());
+        }
+
+        List<BatchManifestEntry> manifest = new ArrayList<>();
+        Map<String, byte[]> files = new LinkedHashMap<>();
+        int exported = 0;
+        for (String snapshotId : snapshotIds) {
+            try {
+                ReportSnapshot snapshot = reviewQueueStore.getSnapshot(snapshotId)
+                        .orElseThrow(() -> new ReviewQueueEntryNotFoundException(
+                                "report snapshot not found: " + snapshotId));
+                String fileName = "snapshots/" + snapshotId + "/report." + extensionOf(format);
+                files.put(fileName, renderForFormat(snapshot, format));
+                manifest.add(new BatchManifestEntry(snapshotId, "exported", fileName, ""));
+                exported++;
+            } catch (ReviewQueueEntryNotFoundException e) {
+                manifest.add(new BatchManifestEntry(snapshotId, "missing", "", e.getMessage()));
+            } catch (Exception e) {
+                manifest.add(new BatchManifestEntry(snapshotId, "missing", "",
+                        "render failed: " + e.getMessage()));
+            }
+        }
+        if (exported == 0) {
+            throw new ReviewQueueEntryNotFoundException(
+                    "none of the requested snapshots could be exported");
+        }
+        byte[] zip = buildZip(files, manifest);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("application/zip"))
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"snapshots-export.zip\"")
+                .body(zip);
+    }
+
+    private static String extensionOf(String format) {
+        return switch (format) {
+            case "markdown" -> "md";
+            case "json" -> "json";
+            default -> "pdf";
+        };
+    }
+
+    private byte[] renderForFormat(ReportSnapshot snapshot, String format) {
+        return switch (format) {
+            case "markdown" -> renderMarkdown(snapshot).getBytes(StandardCharsets.UTF_8);
+            case "json" -> writeJson(snapshot).getBytes(StandardCharsets.UTF_8);
+            default -> reportPdfRenderer.render(renderMarkdown(snapshot));
+        };
+    }
+
+    private byte[] buildZip(Map<String, byte[]> files, List<BatchManifestEntry> manifest) {
+        try (ByteArrayOutputStream out = new ByteArrayOutputStream();
+             ZipOutputStream zip = new ZipOutputStream(out)) {
+            zip.putNextEntry(new ZipEntry("manifest.json"));
+            zip.write(writeJson(manifest).getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+            for (Map.Entry<String, byte[]> file : files.entrySet()) {
+                zip.putNextEntry(new ZipEntry(file.getKey()));
+                zip.write(file.getValue());
+                zip.closeEntry();
+            }
+            zip.finish();
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to build snapshot export zip", e);
+        }
+    }
+
+    /** 批量导出请求：快照 ID 列表与目标格式。 */
+    public record BatchExportRequest(List<String> snapshotIds, String format) {}
+
+    /** 批量导出 manifest 条目：单份快照的导出状态与文件位置。 */
+    public record BatchManifestEntry(String snapshotId, String status, String file, String reason) {}
+
     private String renderMarkdown(ReportSnapshot snapshot) {
         StringBuilder md = new StringBuilder();
         md.append("# 报告快照 `").append(snapshot.id()).append("`\n\n");
@@ -266,6 +383,14 @@ public class ReviewQueueController {
             return objectMapper.writeValueAsString(snapshot);
         } catch (Exception e) {
             throw new IllegalStateException("Failed to serialize report snapshot '" + snapshot.id() + "'", e);
+        }
+    }
+
+    private String writeJson(List<BatchManifestEntry> manifest) {
+        try {
+            return objectMapper.writeValueAsString(manifest);
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to serialize export manifest", e);
         }
     }
 
@@ -295,6 +420,10 @@ public class ReviewQueueController {
      * @param snapshotId 新生成的报告快照标识
      * @param entries    快照对应的待审条目
      */
+    /** 列表分页信封：当前页条目 + 分页参数 + 同过滤条件下的总数。 */
+    public record ReviewQueueListResponse(
+            List<ReviewQueueEntry> entries, int page, int size, long total) {}
+
     public record SubmitSnapshotResponse(String snapshotId, List<ReviewQueueEntry> entries) {}
 
     /**

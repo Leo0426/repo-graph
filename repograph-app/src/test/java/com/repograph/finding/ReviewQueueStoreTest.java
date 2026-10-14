@@ -60,7 +60,7 @@ class ReviewQueueStoreTest {
         assertThat(store.claim(entryId, "alice", "2026-07-28T01:00:00Z")).isTrue();
 
         ReviewQueueEntry claimed = store.list(
-                "project-1", null, null, null, null, null, null).get(0);
+                "project-1", null, null, null, null, null, null, null, null).get(0);
         assertThat(claimed.status()).isEqualTo(ReviewStatus.IN_REVIEW);
         assertThat(claimed.claimedBy()).isEqualTo("alice");
         assertThat(store.audit(entryId)).extracting(e -> e.action())
@@ -75,7 +75,7 @@ class ReviewQueueStoreTest {
         assertThat(store.claim(entryId, "bob", "2026-07-28T01:05:00Z")).isFalse();
 
         ReviewQueueEntry entry = store.list(
-                "project-1", null, null, null, null, null, null).get(0);
+                "project-1", null, null, null, null, null, null, null, null).get(0);
         assertThat(entry.claimedBy()).isEqualTo("alice");
     }
 
@@ -91,7 +91,7 @@ class ReviewQueueStoreTest {
                 "2026-07-28T01:10:00Z")).isTrue();
 
         ReviewQueueEntry entry = store.list(
-                "project-1", null, null, null, null, null, null).get(0);
+                "project-1", null, null, null, null, null, null, null, null).get(0);
         assertThat(entry.status()).isEqualTo(ReviewStatus.CONFIRMED);
         assertThat(store.audit(entryId)).extracting(e -> e.action())
                 .containsExactly("SUBMITTED", "CLAIMED", "CONFIRMED");
@@ -106,7 +106,7 @@ class ReviewQueueStoreTest {
                 "2026-07-28T01:20:00Z")).isTrue();
 
         ReviewQueueEntry entry = store.list(
-                "project-1", null, null, null, null, null, null).get(0);
+                "project-1", null, null, null, null, null, null, null, null).get(0);
         assertThat(entry.status()).isEqualTo(ReviewStatus.PENDING);
         assertThat(entry.claimedBy()).isEmpty();
     }
@@ -131,7 +131,7 @@ class ReviewQueueStoreTest {
 
         List<ReviewQueueEntry> highRisk = store.list(
                 "project-1", ExternalFindingSeverity.HIGH, TriageVerdict.TRUE_RISK,
-                ReviewStatus.PENDING, null, null, null);
+                ReviewStatus.PENDING, null, null, null, null, null);
 
         assertThat(highRisk).extracting(ReviewQueueEntry::id).containsExactly(highEntry);
     }
@@ -147,6 +147,38 @@ class ReviewQueueStoreTest {
             assertThat(loaded.reports()).hasSize(1);
             assertThat(loaded.reports().get(0).finding().ruleId()).isEqualTo("cwe-89");
         });
+    }
+
+    @Test
+    void listSupportsOffsetLimitAndCountMatchesFilters() {
+        for (int i = 0; i < 5; i++) {
+            submitOne("project-1", TriageVerdict.TRUE_RISK, ExternalFindingSeverity.HIGH);
+        }
+        submitOne("project-2", TriageVerdict.TRUE_RISK, ExternalFindingSeverity.HIGH);
+
+        List<ReviewQueueEntry> pageOne = store.list(
+                "project-1", null, null, null, null, null, null, 0, 2);
+        List<ReviewQueueEntry> pageTwo = store.list(
+                "project-1", null, null, null, null, null, null, 2, 2);
+        List<ReviewQueueEntry> pageThree = store.list(
+                "project-1", null, null, null, null, null, null, 4, 2);
+
+        assertThat(pageOne).hasSize(2);
+        assertThat(pageTwo).hasSize(2);
+        assertThat(pageThree).hasSize(1);
+        List<String> pageIds = List.of(pageOne, pageTwo, pageThree).stream()
+                .flatMap(List::stream)
+                .map(ReviewQueueEntry::id)
+                .toList();
+        assertThat(pageIds).doesNotHaveDuplicates();
+        long total = store.count("project-1", null, null, null, null, null, null);
+        assertThat(total).isEqualTo(5);
+        assertThat(store.count("project-2", null, null, null, null, null, null)).isEqualTo(1);
+        assertThat(store.count("project-1", ExternalFindingSeverity.LOW,
+                null, null, null, null, null)).isZero();
+        // limit 为 null 表示不分页,一次取全量
+        assertThat(store.list(
+                "project-1", null, null, null, null, null, null, null, null)).hasSize(5);
     }
 
     private String submitOne(String projectId, TriageVerdict verdict, ExternalFindingSeverity severity) {

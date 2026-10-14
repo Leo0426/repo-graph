@@ -20,7 +20,7 @@ public interface ReviewQueueService {
     List<ReviewQueueEntry> submit(ReportSnapshot snapshot);
 
     /**
-     * 按条件筛选审核队列条目。
+     * 按条件筛选审核队列条目，按更新时间降序。
      *
      * @param projectId      项目标识，必填
      * @param severity       可选严重程度过滤
@@ -29,9 +29,34 @@ public interface ReviewQueueService {
      * @param ruleId         可选规则标识过滤
      * @param updatedAfter   可选更新时间下界（ISO-8601，含）
      * @param updatedBefore  可选更新时间上界（ISO-8601，不含）
+     * @param offset         可选偏移量，{@code null} 表示不分页
+     * @param limit          可选条数上限，{@code null} 表示不限制
      * @return 按更新时间降序的条目列表
      */
     List<ReviewQueueEntry> list(
+            String projectId,
+            ExternalFindingSeverity severity,
+            TriageVerdict verdict,
+            ReviewStatus status,
+            String ruleId,
+            String updatedAfter,
+            String updatedBefore,
+            Integer offset,
+            Integer limit);
+
+    /**
+     * 按与 {@link #list} 完全相同的过滤条件返回条目总数，用于分页 total。
+     *
+     * @param projectId      项目标识，必填
+     * @param severity       可选严重程度过滤
+     * @param verdict        可选结论过滤
+     * @param status         可选状态过滤
+     * @param ruleId         可选规则标识过滤
+     * @param updatedAfter   可选更新时间下界（ISO-8601，含）
+     * @param updatedBefore  可选更新时间上界（ISO-8601，不含）
+     * @return 条目总数
+     */
+    int count(
             String projectId,
             ExternalFindingSeverity severity,
             TriageVerdict verdict,

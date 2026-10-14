@@ -25,7 +25,10 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -124,15 +127,38 @@ class ReviewQueueControllerTest {
                 ExternalFindingSeverity.HIGH, TriageVerdict.TRUE_RISK, 0.7f,
                 ReviewStatus.PENDING, "", "", "2026-07-28T00:00:00Z");
         when(reviewQueueStore.list(eq("p1"), eq(ExternalFindingSeverity.HIGH), isNull(),
-                eq(ReviewStatus.PENDING), isNull(), isNull(), isNull()))
+                eq(ReviewStatus.PENDING), isNull(), isNull(), isNull(), eq(0), eq(100)))
                 .thenReturn(List.of(entry));
+        when(reviewQueueStore.count(eq("p1"), eq(ExternalFindingSeverity.HIGH), isNull(),
+                eq(ReviewStatus.PENDING), isNull(), isNull(), isNull())).thenReturn(1);
 
         mvc.perform(get("/api/v1/review-queue")
                         .param("projectId", "p1")
                         .param("severity", "HIGH")
                         .param("status", "PENDING"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value("entry-1"));
+                .andExpect(jsonPath("$.entries[0].id").value("entry-1"))
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(100))
+                .andExpect(jsonPath("$.total").value(1));
+    }
+
+    @Test
+    void list_clampsPaginationBounds() throws Exception {
+        when(reviewQueueStore.list(eq("p1"), isNull(), isNull(), isNull(),
+                isNull(), isNull(), isNull(), eq(0), eq(500)))
+                .thenReturn(List.of());
+        when(reviewQueueStore.count(eq("p1"), isNull(), isNull(), isNull(),
+                isNull(), isNull(), isNull())).thenReturn(0);
+
+        mvc.perform(get("/api/v1/review-queue")
+                        .param("projectId", "p1")
+                        .param("page", "-3")
+                        .param("size", "5000"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(500))
+                .andExpect(jsonPath("$.total").value(0));
     }
 
     @Test
@@ -208,6 +234,129 @@ class ReviewQueueControllerTest {
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
                         .header().string("Content-Disposition",
                                 org.hamcrest.Matchers.containsString("report-snap-1.pdf")));
+    }
+
+    @Test
+    void exportBatch_returnsZipWithExportedSnapshotsAndManifest() throws Exception {
+        ReportSnapshot snapshotOne = new ReportSnapshot(
+                "snap-1", "p1", "1", "0.5.0", "abc", "rules-1",
+                "2026-07-28T00:00:00Z", List.of());
+        ReportSnapshot snapshotTwo = new ReportSnapshot(
+                "snap-2", "p1", "1", "0.5.0", "abc", "rules-1",
+                "2026-07-28T01:00:00Z", List.of());
+        when(reviewQueueStore.getSnapshot("snap-1")).thenReturn(Optional.of(snapshotOne));
+        when(reviewQueueStore.getSnapshot("snap-2")).thenReturn(Optional.of(snapshotTwo));
+        when(triageReportService.toMarkdownSummary(List.of())).thenReturn("## summary");
+
+        byte[] zipBytes = mvc.perform(post("/api/v1/review-queue/snapshots/export-batch")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"snapshotIds":["snap-1","snap-2"],"format":"markdown"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .header().string("Content-Type", "application/zip"))
+                .andReturn().getResponse().getContentAsByteArray();
+
+        Map<String, byte[]> entries = zipEntries(zipBytes);
+        assertThat(entries).containsKeys(
+                "manifest.json", "snapshots/snap-1/report.md", "snapshots/snap-2/report.md");
+        assertThat(new String(entries.get("snapshots/snap-1/report.md"),
+                java.nio.charset.StandardCharsets.UTF_8)).contains("## summary");
+        assertThat(new String(entries.get("manifest.json"),
+                java.nio.charset.StandardCharsets.UTF_8))
+                .contains("\"status\":\"exported\"")
+                .doesNotContain("\"status\":\"missing\"");
+    }
+
+    @Test
+    void exportBatch_partialMissing_recordsMissingInManifest() throws Exception {
+        ReportSnapshot snapshot = new ReportSnapshot(
+                "snap-1", "p1", "1", "0.5.0", "abc", "rules-1",
+                "2026-07-28T00:00:00Z", List.of());
+        when(reviewQueueStore.getSnapshot("snap-1")).thenReturn(Optional.of(snapshot));
+        when(reviewQueueStore.getSnapshot("missing")).thenReturn(Optional.empty());
+        when(triageReportService.toMarkdownSummary(List.of())).thenReturn("## summary");
+
+        byte[] zipBytes = mvc.perform(post("/api/v1/review-queue/snapshots/export-batch")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"snapshotIds":["snap-1","missing"],"format":"markdown"}
+                                """))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsByteArray();
+
+        Map<String, byte[]> entries = zipEntries(zipBytes);
+        assertThat(entries).containsKey("snapshots/snap-1/report.md");
+        assertThat(entries).doesNotContainKey("snapshots/missing/report.md");
+        String manifest = new String(entries.get("manifest.json"),
+                java.nio.charset.StandardCharsets.UTF_8);
+        assertThat(manifest).contains("\"status\":\"missing\"").contains("missing");
+        assertThat(manifest).contains("\"status\":\"exported\"");
+    }
+
+    @Test
+    void exportBatch_whenAllMissing_returns404() throws Exception {
+        when(reviewQueueStore.getSnapshot(org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(Optional.empty());
+
+        mvc.perform(post("/api/v1/review-queue/snapshots/export-batch")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"snapshotIds":["missing-1","missing-2"],"format":"markdown"}
+                                """))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void exportBatch_rejectsOversizedRequest() throws Exception {
+        List<String> ids = new java.util.ArrayList<>();
+        for (int i = 0; i < 101; i++) {
+            ids.add("snap-" + i);
+        }
+        String body = "{\"snapshotIds\":" + ids.stream()
+                .map(id -> "\"" + id + "\"").collect(java.util.stream.Collectors.joining(",", "[", "]"))
+                + ",\"format\":\"markdown\"}";
+
+        mvc.perform(post("/api/v1/review-queue/snapshots/export-batch")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void exportBatch_rendersPdfIntoZip() throws Exception {
+        ReportSnapshot snapshot = new ReportSnapshot(
+                "snap-1", "p1", "1", "0.5.0", "abc", "rules-1",
+                "2026-07-28T00:00:00Z", List.of());
+        when(reviewQueueStore.getSnapshot("snap-1")).thenReturn(Optional.of(snapshot));
+        when(triageReportService.toMarkdownSummary(List.of())).thenReturn("## summary");
+        when(reportPdfRenderer.render(org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn("%PDF-1.4\n stub".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+
+        byte[] zipBytes = mvc.perform(post("/api/v1/review-queue/snapshots/export-batch")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"snapshotIds":["snap-1"],"format":"pdf"}
+                                """))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsByteArray();
+
+        Map<String, byte[]> entries = zipEntries(zipBytes);
+        assertThat(entries.get("snapshots/snap-1/report.pdf"))
+                .asString(java.nio.charset.StandardCharsets.US_ASCII).startsWith("%PDF");
+    }
+
+    private static Map<String, byte[]> zipEntries(byte[] zipBytes) throws Exception {
+        Map<String, byte[]> entries = new java.util.LinkedHashMap<>();
+        try (var zip = new java.util.zip.ZipInputStream(
+                new java.io.ByteArrayInputStream(zipBytes))) {
+            java.util.zip.ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null) {
+                entries.put(entry.getName(), zip.readAllBytes());
+            }
+        }
+        return entries;
     }
 
     @Test
