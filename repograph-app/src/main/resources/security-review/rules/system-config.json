@@ -1,0 +1,38 @@
+[
+  {
+    "ruleId": "sys-accept-redirects",
+    "dimension": "SYSTEM_CONFIG",
+    "name": "禁止接受 ICMP 重定向",
+    "basis": "系统配置—网络参数安全",
+    "severity": "HIGH",
+    "remediation": "设置 net.ipv4.conf.all.accept_redirects 为 0",
+    "matcher": { "type": "FORBIDDEN", "key": "net.ipv4.conf.all.accept_redirects" }
+  },
+  {
+    "ruleId": "sys-ip-forward",
+    "dimension": "SYSTEM_CONFIG",
+    "name": "禁止 IP 转发（非路由设备）",
+    "basis": "系统配置—网络参数安全",
+    "severity": "MEDIUM",
+    "remediation": "设置 net.ipv4.ip_forward 为 0",
+    "matcher": { "type": "FORBIDDEN", "key": "net.ipv4.ip_forward" }
+  },
+  {
+    "ruleId": "sys-magic-sysrq",
+    "dimension": "SYSTEM_CONFIG",
+    "name": "关闭 Magic SysRq 组合键",
+    "basis": "系统配置—内核参数安全",
+    "severity": "MEDIUM",
+    "remediation": "设置 kernel.sysrq 为 0",
+    "matcher": { "type": "FORBIDDEN", "key": "kernel.sysrq" }
+  },
+  {
+    "ruleId": "sys-kexec-disabled",
+    "dimension": "SYSTEM_CONFIG",
+    "name": "禁用运行时 kexec 内核加载",
+    "basis": "系统配置—内核参数安全",
+    "severity": "LOW",
+    "remediation": "设置 kernel.kexec_load_disabled 为 1",
+    "matcher": { "type": "PRESENT", "key": "kernel.kexec_load_disabled", "valuePattern": "^1$" }
+  }
+]

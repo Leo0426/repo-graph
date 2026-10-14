@@ -1,0 +1,29 @@
+[
+  {
+    "ruleId": "log-auditd-max-file-action",
+    "dimension": "SYSTEM_LOG",
+    "name": "审计日志写满时保留历史",
+    "basis": "系统日志—日志留存",
+    "severity": "HIGH",
+    "remediation": "将 auditd.conf 中 max_log_file_action 设置为 KEEP_LOGS",
+    "matcher": { "type": "PRESENT", "key": "max_log_file_action", "valuePattern": "^KEEP_LOGS$" }
+  },
+  {
+    "ruleId": "log-journald-storage",
+    "dimension": "SYSTEM_LOG",
+    "name": "journald 日志持久化存储",
+    "basis": "系统日志—日志留存",
+    "severity": "MEDIUM",
+    "remediation": "将 journald.conf 中 Storage 设置为 persistent",
+    "matcher": { "type": "PRESENT", "key": "Storage", "valuePattern": "^persistent$" }
+  },
+  {
+    "ruleId": "log-auditd-flush",
+    "dimension": "SYSTEM_LOG",
+    "name": "审计日志异步刷盘策略已配置",
+    "basis": "系统日志—日志完整性",
+    "severity": "LOW",
+    "remediation": "将 auditd.conf 中 flush 设置为 incremental_async",
+    "matcher": { "type": "VALUE_PATTERN", "key": "flush", "valuePattern": "^(incremental_async|incremental)$" }
+  }
+]

@@ -1,0 +1,38 @@
+[
+  {
+    "ruleId": "host-ssh-protocol-2",
+    "dimension": "HOST_BASELINE",
+    "name": "SSH 仅使用协议版本 2",
+    "basis": "主机安全基线—远程服务加固",
+    "severity": "HIGH",
+    "remediation": "设置 Protocol 为 2，禁用不安全的协议版本 1",
+    "matcher": { "type": "PRESENT", "key": "Protocol", "valuePattern": "^2$" }
+  },
+  {
+    "ruleId": "host-ssh-x11-forwarding",
+    "dimension": "HOST_BASELINE",
+    "name": "禁止 SSH X11 转发",
+    "basis": "主机安全基线—远程服务加固",
+    "severity": "MEDIUM",
+    "remediation": "将 X11Forwarding 设置为 no",
+    "matcher": { "type": "FORBIDDEN", "key": "X11Forwarding" }
+  },
+  {
+    "ruleId": "host-password-reuse",
+    "dimension": "HOST_BASELINE",
+    "name": "口令历史记忆不少于 5 次",
+    "basis": "主机安全基线—口令策略",
+    "severity": "MEDIUM",
+    "remediation": "设置 PASSWORD_HISTORY 为不小于 5 的整数",
+    "matcher": { "type": "PRESENT", "key": "PASSWORD_HISTORY", "valuePattern": "^([5-9]|[1-9][0-9]+)$" }
+  },
+  {
+    "ruleId": "host-ssh-idle-interval",
+    "dimension": "HOST_BASELINE",
+    "name": "SSH 空闲心跳间隔已配置",
+    "basis": "主机安全基线—会话管理",
+    "severity": "LOW",
+    "remediation": "设置 ClientAliveInterval 为 1~9999 的整数（秒）",
+    "matcher": { "type": "VALUE_PATTERN", "key": "ClientAliveInterval", "valuePattern": "^[1-9][0-9]{0,3}$" }
+  }
+]
