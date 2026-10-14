@@ -26,3 +26,6 @@ local.properties
 
 # Local Docker Compose overrides (user-specific Ollama config, etc.)
 docker-compose.override.yml
+
+# InfCode IDE local workspace cache
+.infcode/
