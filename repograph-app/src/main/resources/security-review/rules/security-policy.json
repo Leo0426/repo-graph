@@ -1,0 +1,47 @@
+[
+  {
+    "ruleId": "policy-password-min-length",
+    "dimension": "SECURITY_POLICY",
+    "name": "口令最小长度不小于 8 位",
+    "basis": "安全策略—口令策略",
+    "severity": "HIGH",
+    "remediation": "设置 PASS_MIN_LEN 为不小于 8 的整数",
+    "matcher": { "type": "PRESENT", "key": "PASS_MIN_LEN", "valuePattern": "^([8-9]|[1-9][0-9]+)$" }
+  },
+  {
+    "ruleId": "policy-ssh-max-auth-tries",
+    "dimension": "SECURITY_POLICY",
+    "name": "SSH 登录尝试次数不大于 5",
+    "basis": "安全策略—登录失败处理",
+    "severity": "MEDIUM",
+    "remediation": "将 sshd_config 中 MaxAuthTries 设置为 1~5",
+    "matcher": { "type": "VALUE_PATTERN", "key": "MaxAuthTries", "valuePattern": "^([1-5])$" }
+  },
+  {
+    "ruleId": "policy-session-timeout",
+    "dimension": "SECURITY_POLICY",
+    "name": "会话空闲超时已启用",
+    "basis": "安全策略—会话超时",
+    "severity": "MEDIUM",
+    "remediation": "设置 TMOUT 为正整数（秒）",
+    "matcher": { "type": "PRESENT", "key": "TMOUT", "valuePattern": "^[1-9][0-9]*$" }
+  },
+  {
+    "ruleId": "policy-permit-root-login",
+    "dimension": "SECURITY_POLICY",
+    "name": "禁止 root 远程登录",
+    "basis": "安全策略—远程登录管理",
+    "severity": "HIGH",
+    "remediation": "将 PermitRootLogin 设置为 no 或 prohibit-password",
+    "matcher": { "type": "FORBIDDEN", "key": "PermitRootLogin" }
+  },
+  {
+    "ruleId": "policy-empty-password",
+    "dimension": "SECURITY_POLICY",
+    "name": "禁止空口令登录",
+    "basis": "安全策略—口令策略",
+    "severity": "HIGH",
+    "remediation": "将 PermitEmptyPasswords 设置为 no",
+    "matcher": { "type": "FORBIDDEN", "key": "PermitEmptyPasswords" }
+  }
+]
