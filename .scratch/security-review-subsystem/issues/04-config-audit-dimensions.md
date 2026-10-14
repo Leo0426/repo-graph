@@ -1,6 +1,6 @@
 # 04 配置核查扩展：主机配置、系统配置、系统日志维度
 
-Status: needs-triage
+Status: resolved
 
 - 类型：AFK
 - 被阻塞于：03、02（自研假设确认后锁定边界）
@@ -20,3 +20,9 @@ Status: needs-triage
 ## 验证方式
 
 Gradle 测试 + 对三个维度的样例数据各跑一次核查。
+
+## 评论
+
+- 2026-10-14（agent）：已实现。新增 `host-baseline.json`（4 条）、`system-config.json`（4 条）、
+  `system-log.json`（3 条）规则集，引擎零改动；请求按 `dimensions` 过滤，报告格式与 03 一致。
+  验证：`ConfigAuditDimensionsTest`（8 例）通过（`gradlew :repograph-app:test` 退出码 0）。

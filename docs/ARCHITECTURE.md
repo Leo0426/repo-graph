@@ -23,6 +23,7 @@ app 内包位于 `repograph-app/src/main/java/com/repograph/`：
 | 模型建议 | `advisory`；提供独立辅助结果，不改启发式报告或漏洞状态 |
 | 工作流与步骤台账 | `agent`；通过稳定引用组合已有领域结果 |
 | 不可信源码及工具进程 | `asset` 接入归档，`scanner` 适配外部扫描器 |
+| 配置核查与威胁检测 | `securityreview`；规则即数据（classpath JSON），输入文件进报告出，不持久化 |
 | HTTP 和页面 | `api` 控制器及 `src/main/resources/templates`、`static` |
 
 旧规则中的 `repograph-core/graph/vector` 指以上逻辑包边界，不能据此创建反向依赖。

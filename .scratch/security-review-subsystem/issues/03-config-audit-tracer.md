@@ -1,6 +1,6 @@
 # 03 配置核查工具 tracer bullet：安全策略核查端到端
 
-Status: needs-triage
+Status: resolved
 
 - 类型：AFK
 - 被阻塞于：无
@@ -21,3 +21,11 @@ Status: needs-triage
 ## 验证方式
 
 Gradle 测试通过 + 手动对样例文件运行核查并检查报告内容。
+
+## 评论
+
+- 2026-10-14（agent）：已实现。契约 `com.repograph.core.securityreview` + 实现 `com.repograph.securityreview`
+  + REST `POST /api/v1/config-audit/reports`；规则即数据（classpath `security-review/rules/security-policy.json`，
+  5 条 SECURITY_POLICY 规则，覆盖 PRESENT/VALUE_PATTERN/FORBIDDEN 三类匹配器）。
+  验证：`DefaultConfigAuditServiceTest`（14 例）+ `ConfigAuditControllerTest`（2 例）通过
+  （`gradlew :repograph-app:test` 退出码 0）。

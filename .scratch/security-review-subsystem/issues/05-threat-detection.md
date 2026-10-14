@@ -1,6 +1,6 @@
 # 05 威胁检测工具：在役装备攻击历史与违规外联记录
 
-Status: needs-triage
+Status: resolved
 
 - 类型：AFK
 - 被阻塞于：04（复用其日志数据接入路径）
@@ -21,3 +21,13 @@ Status: needs-triage
 ## 验证方式
 
 Gradle 测试 + 对三类样例日志各跑一次检测并核对报告。
+
+## 评论
+
+- 2026-10-14（agent）：已实现。契约 `ThreatDetectionService`/`ThreatReport` + 实现
+  `DefaultThreatDetectionService` + REST `POST /api/v1/threat-detection/reports`；威胁模式同为
+  classpath JSON（`security-review/threat-rules/`，攻击历史 3 条 + 外联 2 条，支持逐行与
+  minCount 聚合两类规则）；外联白名单支持精确 IP / CIDR 网段 / 字符串精确匹配
+  （`OutboundWhitelist`）。验证：`DefaultThreatDetectionServiceTest`（6 例，含攻击历史检出、
+  白名单外目标检出、正常日志零误报）+ `ThreatDetectionControllerTest`（2 例）通过
+  （`gradlew :repograph-app:test` 退出码 0）。
