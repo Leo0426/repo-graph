@@ -649,10 +649,13 @@ GET /api/v1/graph/entrypoints?projectId=abc123def456&lang=java
 
 > 确定性结构摘要（无 LLM）。输入只来自图查询事实，输出可复现；摘要不参与漏洞研判。
 
-#### `POST /api/v1/summaries/generate?projectId=` — 生成并持久化
+#### `POST /api/v1/summaries/generate?projectId=` — 提交后台生成
 
-同步执行：项目级结构卡 + 每个包的确定性子摘要。返回生成的全部 `SummaryDocument`。
-同一 (projectId, scopeId) 每次生成 docVersion 递增，旧版本保留。
+异步：202 返回 `{agentRunId, pollVia}`；通过 `GET /api/v1/agent-runs/{id}` 轮询
+（playbook = `WIKI_SUMMARY`，步骤 FACTS / LLM_ARCH / PERSIST）。
+生成内容：项目级结构卡（确定性章节 + LLM 架构摘要章节，LLM 关闭时仅确定性）+
+每个包的确定性子摘要。LLM 通道复用 advisory 页面开关；同一事实指纹下阶段缓存命中
+不重复消耗模型调用。队列满返回 503 `EXECUTOR_REJECTED`。
 
 #### `GET /api/v1/summaries?projectId=` — 最新版本列表
 
@@ -1036,9 +1039,10 @@ echo -n "/path/to/project" | sha256sum | cut -c1-12
 
 | 局限 | 说明 |
 |------|------|
-| 无 LLM 摘要 | 当前仅确定性结构卡与包摘要（S1）；LLM 架构摘要为 S2 计划 |
-| 无文档入库 | 摘要存 SQLite 不写入图/向量，语义检索暂不命中摘要内容 |
+| 无文档入库 | 摘要存 SQLite 不写入图/向量，语义检索暂不命中摘要内容（S3，含 `is_generated`/`doc_version` metadata key 三处映射核对） |
 | 无增量更新 | 文件变更后需手动重新 generate；包级 dirty 增量为 S3 计划 |
+| 无 Web 文档树页 | REST 已就绪；工作台"项目文档"页面尚未实现（S3） |
+| LLM 章节无重试 | 单章节失败跳过并标 PARTIAL；阶段缓存保证重试时不重复消耗已成功章节 |
 
 ### 9.7 审核队列
 

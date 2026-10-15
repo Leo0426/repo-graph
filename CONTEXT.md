@@ -87,8 +87,8 @@ repograph-app/   Spring Boot Web/REST 服务
     GitChurnAnalyzer          git log 变更频率
     HealthReportService       聚合六维度生成健康分（100 起扣分制）
   com.repograph.export/      GraphExportService（包级依赖图 → DOT / Mermaid）
-  com.repograph.wiki/        分层摘要生成（结构事实收集 + 确定性包摘要 + SummaryStore；
-                               DeepMap 借鉴设计 S1，LLM 架构摘要为 S2）
+  com.repograph.wiki/        分层摘要生成（结构事实收集 + 确定性包摘要 + LLM 架构摘要 +
+                               阶段缓存/续跑 + SummaryStore；DeepMap 借鉴设计 S1/S2）
   com.repograph.api/         Spring MVC REST 控制器
   com.repograph.app/         索引管道（DefaultIndexPipeline）+ Spring Boot 入口
   com.repograph.agent/       SAST 报警研判 Agent 工作台（AgentRun 步骤时间线 + 人工审核检查点）
