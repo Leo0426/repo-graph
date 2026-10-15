@@ -27,6 +27,9 @@ dependencies {
     implementation(libs.treesitter)
     implementation(libs.treesitter.c)
     implementation(libs.treesitter.python)
+    implementation(libs.treesitter.javascript)
+    implementation(libs.treesitter.typescript)
+    implementation(libs.treesitter.tsx)
 
     // Vector store
     implementation(libs.qdrant)

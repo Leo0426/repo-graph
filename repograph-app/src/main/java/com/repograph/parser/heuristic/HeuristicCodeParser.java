@@ -8,6 +8,7 @@ import com.repograph.core.parser.ParseOptions;
 import com.repograph.core.parser.ParseResult;
 import com.repograph.core.util.CodeUnitIdUtil;
 import com.repograph.core.util.PathUtil;
+import com.repograph.parser.LanguageRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -44,7 +45,10 @@ public class HeuristicCodeParser implements CodeParser {
     private static final Map<String, HeuristicConfig> CONFIGS = Map.of(
             "java", buildJavaConfig(),
             "c",    buildCConfig(),
-            "python", buildPythonConfig()
+            "cpp",  buildCppConfig(),
+            "python", buildPythonConfig(),
+            "javascript", buildJsFamilyConfig("javascript"),
+            "typescript", buildJsFamilyConfig("typescript")
     );
 
     @Override
@@ -55,7 +59,7 @@ public class HeuristicCodeParser implements CodeParser {
     @Override
     public ParseResult parse(Path file, ParseOptions options) throws ParseException {
         ParseOptions opts = options != null ? options : ParseOptions.defaults();
-        String language = detectLanguage(file.getFileName().toString());
+        String language = LanguageRegistry.languageOf(file.getFileName().toString());
         if (language == null) {
             return ParseResult.empty();
         }
@@ -240,12 +244,7 @@ public class HeuristicCodeParser implements CodeParser {
         return indent;
     }
 
-    private static String detectLanguage(String fileName) {
-        if (fileName.endsWith(".java")) return "java";
-        if (fileName.endsWith(".c") || fileName.endsWith(".h")) return "c";
-        if (fileName.endsWith(".py")) return "python";
-        return null;
-    }
+    // detectLanguage 已由 LanguageRegistry 统一提供（原先此处有第三份重复映射）
 
     // ── 配置构建器 ────────────────────────────────────────────────────────────
 
@@ -271,6 +270,42 @@ public class HeuristicCodeParser implements CodeParser {
         return new HeuristicConfig(List.of(
                 new HeuristicConfig.UnitPattern("c", funcPattern, CodeUnitKind.FUNCTION, true),
                 new HeuristicConfig.UnitPattern("c", structPattern, CodeUnitKind.STRUCT, true)
+        ));
+    }
+
+    /**
+     * C++ 启发式配置：C++ 暂无 tree-sitter 精确解析器，.cpp/.hpp 经由此配置
+     * 获得降级解析（FUNCTION/CLASS），不再被静默跳过。
+     */
+    private static HeuristicConfig buildCppConfig() {
+        Pattern funcPattern = Pattern.compile(
+                "^[\\w\\s\\*:~<>]+\\s+(\\w+)\\s*\\([^;]*\\)\\s*(?:const\\s*)?\\{?$");
+        Pattern classPattern = Pattern.compile(
+                "^(?:template\\s*<[^>]*>\\s*)?(?:class|struct)\\s+(\\w+)");
+        return new HeuristicConfig(List.of(
+                new HeuristicConfig.UnitPattern("cpp", funcPattern, CodeUnitKind.FUNCTION, true),
+                new HeuristicConfig.UnitPattern("cpp", classPattern, CodeUnitKind.CLASS, true)
+        ));
+    }
+
+    /** JS/TS 共用启发式配置：大括号计数法，类/函数/箭头函数常量/方法速记四种模式。 */
+    private static HeuristicConfig buildJsFamilyConfig(String language) {
+        Pattern classPattern = Pattern.compile(
+                "(?:export\\s+)?(?:default\\s+)?(?:abstract\\s+)?class\\s+(\\w+)");
+        Pattern funcPattern = Pattern.compile(
+                "(?:export\\s+)?(?:default\\s+)?(?:async\\s+)?function\\s*\\*?\\s*(\\w+)\\s*\\(");
+        Pattern constArrowPattern = Pattern.compile(
+                "(?:export\\s+)?(?:const|let|var)\\s+(\\w+)\\s*=\\s*(?:async\\s*)?\\(");
+        // 类/对象字面量方法速记：find(id) { — 排除控制流关键字与函数声明
+        Pattern methodPattern = Pattern.compile(
+                "^(?!(?:if|for|while|switch|catch|do|else|try|return|function|class|new"
+                        + "|typeof|await|export|import|const|let|var)\\b)"
+                        + "(?:async\\s+)?(\\w+)\\s*\\([^;{]*\\)\\s*\\{\\s*$");
+        return new HeuristicConfig(List.of(
+                new HeuristicConfig.UnitPattern(language, classPattern, CodeUnitKind.CLASS, true),
+                new HeuristicConfig.UnitPattern(language, funcPattern, CodeUnitKind.FUNCTION, true),
+                new HeuristicConfig.UnitPattern(language, constArrowPattern, CodeUnitKind.FUNCTION, true),
+                new HeuristicConfig.UnitPattern(language, methodPattern, CodeUnitKind.METHOD, true)
         ));
     }
 

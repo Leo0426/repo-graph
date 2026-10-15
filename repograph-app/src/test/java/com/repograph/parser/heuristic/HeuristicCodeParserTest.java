@@ -1,5 +1,6 @@
 package com.repograph.parser.heuristic;
 
+import com.repograph.core.model.CodeUnit;
 import com.repograph.core.model.CodeUnitKind;
 import com.repograph.core.parser.ParseOptions;
 import com.repograph.core.parser.ParseResult;
@@ -13,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 /**
  * {@link HeuristicCodeParser} 单元测试，验证基于状态机的降级解析逻辑。
@@ -271,6 +273,79 @@ class HeuristicCodeParserTest {
         ParseResult result = parser.parse(file, opts());
 
         assertThat(result.units()).isEmpty();
+    }
+
+    // ── 新语言：javascript / typescript / cpp ─────────────────────────────────
+
+    @Test
+    void supports_javascript_returnsTrue() {
+        assertThat(parser.supports("javascript")).isTrue();
+    }
+
+    @Test
+    void supports_typescript_returnsTrue() {
+        assertThat(parser.supports("typescript")).isTrue();
+    }
+
+    @Test
+    void supports_cpp_returnsTrue() {
+        assertThat(parser.supports("cpp")).isTrue();
+    }
+
+    @Test
+    void parse_jsClassAndFunction_extractsUnits() throws Exception {
+        Path file = javaFile("repo.js",
+                "class UserRepo {\n"
+                + "    find(id) {\n"
+                + "        return load(id);\n"
+                + "    }\n"
+                + "}\n"
+                + "\n"
+                + "function load(id) {\n"
+                + "    return id;\n"
+                + "}\n");
+
+        ParseResult result = parser.parse(file, opts());
+
+        assertThat(result.units())
+                .extracting(CodeUnit::kind, CodeUnit::simpleName)
+                .contains(
+                        tuple(CodeUnitKind.CLASS, "UserRepo"),
+                        tuple(CodeUnitKind.METHOD, "find"),
+                        tuple(CodeUnitKind.FUNCTION, "load"));
+    }
+
+    @Test
+    void parse_jsArrowConst_extractsFunction() throws Exception {
+        Path file = javaFile("handler.js",
+                "const handler = (req) => {\n"
+                + "    return req;\n"
+                + "}\n");
+
+        ParseResult result = parser.parse(file, opts());
+
+        assertThat(result.units())
+                .extracting(CodeUnit::kind, CodeUnit::simpleName)
+                .contains(tuple(CodeUnitKind.FUNCTION, "handler"));
+    }
+
+    @Test
+    void parse_cppFunction_extractsFunction() throws Exception {
+        Path file = javaFile("engine.cpp",
+                "int compute(int value) {\n"
+                + "    return value * 2;\n"
+                + "}\n"
+                + "\n"
+                + "class Engine {\n"
+                + "};\n");
+
+        ParseResult result = parser.parse(file, opts());
+
+        assertThat(result.units())
+                .extracting(CodeUnit::kind, CodeUnit::simpleName)
+                .contains(
+                        tuple(CodeUnitKind.FUNCTION, "compute"),
+                        tuple(CodeUnitKind.CLASS, "Engine"));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
