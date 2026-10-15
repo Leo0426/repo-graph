@@ -11,7 +11,7 @@ repograph:
   neo4j:
     uri: bolt://localhost:7687
     user: neo4j
-    password: neo4jneo4j
+    password: ${REPOGRAPH_NEO4J_PASSWORD:neo4jneo4j}
   agent:
     queue-capacity: 128
   index:
