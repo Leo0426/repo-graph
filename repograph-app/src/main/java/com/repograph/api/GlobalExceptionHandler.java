@@ -23,6 +23,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import java.util.Map;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * 全局 REST API 异常处理器，将常见运行时异常转换为结构化 HTTP 错误响应。
@@ -119,6 +120,21 @@ public class GlobalExceptionHandler {
         log.debug("Bad request: {}", ex.getMessage());
         return ResponseEntity.badRequest()
                 .body(Map.of("error", ex.getMessage() != null ? ex.getMessage() : "Invalid argument"));
+    }
+
+    /**
+     * 处理后台任务等待队列已满（索引、分层摘要等），返回 503 Service Unavailable。
+     *
+     * @param ex 捕获到的 {@link RejectedExecutionException}
+     * @return 含 {@code error} 字段的 503 响应体
+     */
+    @ExceptionHandler(RejectedExecutionException.class)
+    public ResponseEntity<Map<String, String>> handleExecutorRejected(
+            RejectedExecutionException ex) {
+        log.warn("Background task rejected (queue full): {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(Map.of("code", "EXECUTOR_REJECTED",
+                        "error", "Background task queue is full, retry later"));
     }
 
     /**

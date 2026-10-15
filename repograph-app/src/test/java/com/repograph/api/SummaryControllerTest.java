@@ -2,9 +2,9 @@ package com.repograph.api;
 
 import com.repograph.core.wiki.SummaryDocument;
 import com.repograph.core.wiki.SummaryLevel;
-import com.repograph.core.wiki.SummaryGenerationService;
 import com.repograph.core.wiki.SummaryTreeNode;
 import com.repograph.wiki.SummaryStore;
+import com.repograph.wiki.WikiSummaryJobService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -12,8 +12,11 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.RejectedExecutionException;
 
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -33,7 +36,7 @@ class SummaryControllerTest {
     MockMvc mvc;
 
     @MockitoBean
-    SummaryGenerationService generationService;
+    WikiSummaryJobService jobService;
 
     @MockitoBean
     SummaryStore store;
@@ -45,14 +48,22 @@ class SummaryControllerTest {
     }
 
     @Test
-    void generate_returnsGeneratedDocs() throws Exception {
-        when(generationService.generate("proj1")).thenReturn(List.of(
-                doc(SummaryDocument.PROJECT_SCOPE, SummaryLevel.PROJECT)));
+    void generate_returnsAcceptedWithRunId() throws Exception {
+        when(jobService.submit("proj1")).thenReturn("run-1");
 
         mvc.perform(post("/api/v1/summaries/generate").param("projectId", "proj1"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].scopeId").value(SummaryDocument.PROJECT_SCOPE))
-                .andExpect(jsonPath("$[0].level").value("PROJECT"));
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.agentRunId").value("run-1"))
+                .andExpect(jsonPath("$.pollVia").value("/api/v1/agent-runs/run-1"));
+    }
+
+    @Test
+    void generate_queueFull_returns503() throws Exception {
+        when(jobService.submit("proj1")).thenThrow(new RejectedExecutionException("full"));
+
+        mvc.perform(post("/api/v1/summaries/generate").param("projectId", "proj1"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("EXECUTOR_REJECTED"));
     }
 
     @Test

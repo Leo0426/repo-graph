@@ -99,6 +99,18 @@ public class AppConfiguration {
     }
 
     /**
+     * 分层摘要生成专用单线程执行器（LLM 调用耗时长，不占用 advisory/架构评审线程）。
+     *
+     * @param capacity 等待队列容量
+     * @return 分层摘要执行器
+     */
+    @Bean(name = "wikiSummaryExecutor", destroyMethod = "shutdown")
+    public ExecutorService wikiSummaryExecutor(
+            @org.springframework.beans.factory.annotation.Value("${repograph.wiki.queue-capacity:16}") int capacity) {
+        return taskExecutor("repograph-wiki-summary", capacity);
+    }
+
+    /**
      * 创建有界项目索引执行器。
      * @param capacity 等待队列容量
      * @return 由 Spring 关闭的执行器

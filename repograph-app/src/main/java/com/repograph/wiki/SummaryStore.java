@@ -80,7 +80,8 @@ public class SummaryStore {
         SummaryDocument stored = new SummaryDocument(
                 id, document.projectId(), document.level(), document.scopeId(),
                 document.title(), document.sections(), document.citations(),
-                document.docVersion(), document.generatedAt(), document.status());
+                document.docVersion(), document.generatedAt(), document.status(),
+                document.model(), document.missingInfo());
         String url = "jdbc:sqlite:" + dbPath;
         try (Connection conn = DriverManager.getConnection(url);
              PreparedStatement ps = conn.prepareStatement("""

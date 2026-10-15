@@ -1,9 +1,9 @@
 package com.repograph.api;
 
 import com.repograph.core.wiki.SummaryDocument;
-import com.repograph.core.wiki.SummaryGenerationService;
 import com.repograph.core.wiki.SummaryTreeNode;
 import com.repograph.wiki.SummaryStore;
+import com.repograph.wiki.WikiSummaryJobService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -13,12 +13,13 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 /**
- * 分层摘要（结构卡 + 包摘要）REST API —— DeepMap 借鉴设计 S1 切片。
+ * 分层摘要（结构卡 + LLM 架构摘要 + 包摘要）REST API。
  *
- * <p>S1 为确定性生成（无 LLM），generate 同步执行并返回全部文档；
- * S2 引入 LLM 架构摘要后 generate 将切换为 202 + 后台执行。
+ * <p>generate 提交后台任务（S2 起为异步）：202 返回 AgentRun id，
+ * 通过 GET /api/v1/agent-runs/{id} 轮询进度；文档就绪后经 list/tree/get 读取。
  *
  * @author leolu
  * @since 0.7.0
@@ -27,23 +28,27 @@ import java.util.List;
 @RequestMapping("/api/v1/summaries")
 public class SummaryController {
 
-    private final SummaryGenerationService generationService;
+    private final WikiSummaryJobService jobService;
     private final SummaryStore store;
 
-    public SummaryController(SummaryGenerationService generationService, SummaryStore store) {
-        this.generationService = generationService;
+    public SummaryController(WikiSummaryJobService jobService, SummaryStore store) {
+        this.jobService = jobService;
         this.store = store;
     }
 
     /**
-     * 为项目生成分层摘要并持久化（同步，无 LLM）。
+     * 提交异步生成任务（结构事实 + LLM 架构摘要 + 包摘要）。
      *
      * @param projectId 项目唯一标识符
-     * @return 生成的全部摘要文档（项目级 + 各包级）
+     * @return 202，含 agentRunId 与轮询地址
      */
     @PostMapping("/generate")
-    public List<SummaryDocument> generate(@RequestParam String projectId) {
-        return generationService.generate(projectId);
+    public ResponseEntity<Map<String, String>> generate(@RequestParam String projectId) {
+        String runId = jobService.submit(projectId);
+        return ResponseEntity.accepted().body(Map.of(
+                "agentRunId", runId,
+                "projectId", projectId,
+                "pollVia", "/api/v1/agent-runs/" + runId));
     }
 
     /**

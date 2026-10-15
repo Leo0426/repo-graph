@@ -8,5 +8,8 @@ package com.repograph.core.agent;
 public enum AgentPlaybook {
 
     /** 外部 SAST 报警的证据化研判工作流。 */
-    SAST_TRIAGE
+    SAST_TRIAGE,
+
+    /** 分层摘要生成工作流（结构卡 + LLM 架构摘要）。 */
+    WIKI_SUMMARY
 }
