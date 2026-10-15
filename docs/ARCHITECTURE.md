@@ -18,6 +18,7 @@ app 内包位于 `repograph-app/src/main/java/com/repograph/`：
 | 向量/Embedding 适配 | `vector`；通过 core 接口被上层消费 |
 | 索引编排 | `app/pipeline`；协调解析、图、Embedding、向量与增量缓存 |
 | 检索及上下文预算 | `retrieval`；组合图、向量、关键词，输出 Context Pack |
+| 分层摘要与结构卡 | `wiki`；消费 graph/metrics 事实源输出确定性文档，不改启发式事实；LLM 摘要（S2）沿用 advisory 通道约束 |
 | 外部报警与人工审核 | `finding`；持有导入、研判、反馈、抑制、快照和审核事实 |
 | 内置扫描与漏洞状态 | `vuln`；持有 VulnFinding 与漏洞证据 |
 | 模型建议 | `advisory`；提供独立辅助结果，不改启发式报告或漏洞状态 |

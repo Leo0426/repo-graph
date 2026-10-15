@@ -645,7 +645,30 @@ GET /api/v1/graph/entrypoints?projectId=abc123def456&lang=java
 
 ---
 
-### 5.5 其他
+### 5.5 分层摘要
+
+> 确定性结构摘要（无 LLM）。输入只来自图查询事实，输出可复现；摘要不参与漏洞研判。
+
+#### `POST /api/v1/summaries/generate?projectId=` — 生成并持久化
+
+同步执行：项目级结构卡 + 每个包的确定性子摘要。返回生成的全部 `SummaryDocument`。
+同一 (projectId, scopeId) 每次生成 docVersion 递增，旧版本保留。
+
+#### `GET /api/v1/summaries?projectId=` — 最新版本列表
+
+每个范围（PROJECT / 各包）取 docVersion 最大的一份。
+
+#### `GET /api/v1/summaries/tree?projectId=` — 文档树
+
+返回 `SummaryTreeNode`（name / path / level / docVersion / keywords）。
+
+#### `GET /api/v1/summaries/{id}` — 单份文档
+
+不存在时 404。
+
+---
+
+### 5.6 其他
 
 #### `GET /api/v1/health` — 健康检查
 
@@ -1009,7 +1032,15 @@ echo -n "/path/to/project" | sha256sum | cut -c1-12
 | 外部服务依赖 | 图存储托管在 Neo4j，repograph-app 无法连接 Neo4j 时图相关接口不可用 |
 | 无时序语义 | 所有边无时间信息，不区分初始化/销毁顺序 |
 
-### 9.6 审核队列
+### 9.6 分层摘要
+
+| 局限 | 说明 |
+|------|------|
+| 无 LLM 摘要 | 当前仅确定性结构卡与包摘要（S1）；LLM 架构摘要为 S2 计划 |
+| 无文档入库 | 摘要存 SQLite 不写入图/向量，语义检索暂不命中摘要内容 |
+| 无增量更新 | 文件变更后需手动重新 generate；包级 dirty 增量为 S3 计划 |
+
+### 9.7 审核队列
 
 | 局限 | 说明 |
 |------|------|
