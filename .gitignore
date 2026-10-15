@@ -29,3 +29,7 @@ docker-compose.override.yml
 
 # InfCode IDE local workspace cache
 .infcode/
+
+# Local agent/IDE workspace
+.claude/settings.local.json
+.worktrees/
