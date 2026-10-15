@@ -30,15 +30,8 @@ public class ParserDispatcher {
 
     private static final Logger log = LoggerFactory.getLogger(ParserDispatcher.class);
 
-    private static final Map<String, String> EXTENSION_TO_LANGUAGE = Map.of(
-            "java", "java",
-            "c", "c",
-            "h", "c",
-            "py", "python",
-            "class", "class",   // 字节码 — 路由到 JavaBytecodeParser
-            "md", "doc",
-            "markdown", "doc"
-    );
+    private static final Map<String, String> EXTENSION_TO_LANGUAGE =
+            LanguageRegistry.EXTENSION_TO_LANGUAGE;
 
     private final List<CodeParser> parsers;
 
@@ -154,17 +147,12 @@ public class ParserDispatcher {
     }
 
     /**
-     * 根据文件扩展名推断语言标识符。
+     * 根据文件扩展名推断语言标识符（单一事实源见 {@link LanguageRegistry}）。
      *
      * @param file 源文件路径，不为 {@code null}
      * @return 语言标识符（如 {@code "java"}），不支持的扩展名返回 {@code null}
      */
     private String detectLanguage(Path file) {
-        String fileName = file.getFileName().toString();
-        int dotIdx = fileName.lastIndexOf('.');
-        if (dotIdx < 0) {
-            return null;
-        }
-        return EXTENSION_TO_LANGUAGE.get(fileName.substring(dotIdx + 1).toLowerCase());
+        return LanguageRegistry.languageOf(file);
     }
 }

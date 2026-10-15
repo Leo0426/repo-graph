@@ -76,6 +76,42 @@ class ParserDispatcherTest {
     }
 
     @Test
+    void dispatch_jsExtension_routesToJavascriptParser() throws IOException {
+        Path jsFile = Files.createTempFile(tempDir, "app", ".js");
+        ParserDispatcher dispatcher = new ParserDispatcher(List.of(
+                stubParser("javascript",
+                        ParseResult.of(List.of(dummyUnit("app")), List.of(), "JsStub"))));
+
+        ParseResult result = dispatcher.dispatch(jsFile, null);
+
+        assertThat(result.parserUsed()).isEqualTo("JsStub");
+    }
+
+    @Test
+    void dispatch_cppExtension_routesToCppParser_noLongerSilentlySkipped() throws IOException {
+        Path cppFile = Files.createTempFile(tempDir, "engine", ".cpp");
+        ParserDispatcher dispatcher = new ParserDispatcher(List.of(
+                stubParser("cpp",
+                        ParseResult.of(List.of(dummyUnit("engine")), List.of(), "CppStub"))));
+
+        ParseResult result = dispatcher.dispatch(cppFile, null);
+
+        assertThat(result.parserUsed()).isEqualTo("CppStub");
+    }
+
+    @Test
+    void dispatch_tsxExtension_routesToTypescriptParser() throws IOException {
+        Path tsxFile = Files.createTempFile(tempDir, "App", ".tsx");
+        ParserDispatcher dispatcher = new ParserDispatcher(List.of(
+                stubParser("typescript",
+                        ParseResult.of(List.of(dummyUnit("App")), List.of(), "TsStub"))));
+
+        ParseResult result = dispatcher.dispatch(tsxFile, null);
+
+        assertThat(result.parserUsed()).isEqualTo("TsStub");
+    }
+
+    @Test
     void successfulEmptyParseIsNotReportedAsParserFailure() throws IOException {
         ParserDispatcher dispatcher = new ParserDispatcher(List.of(
                 stubParser("java", ParseResult.of(List.of(), List.of(), "EmptyParser"))));

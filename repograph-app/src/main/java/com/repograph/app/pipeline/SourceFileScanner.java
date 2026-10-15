@@ -1,6 +1,7 @@
 package com.repograph.app.pipeline;
 
 import com.repograph.core.pipeline.IndexOptions;
+import com.repograph.parser.LanguageRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -25,15 +26,9 @@ class SourceFileScanner {
 
     private static final Logger log = LoggerFactory.getLogger(SourceFileScanner.class);
 
-    /** 源码扩展名映射，默认扫描。 */
-    private static final Map<String, String> EXTENSION_TO_LANGUAGE = Map.of(
-            "java", "java",
-            "c", "c",
-            "h", "c",
-            "py", "python",
-            "md", "doc",
-            "markdown", "doc"
-    );
+    /** 源码扩展名映射（单一事实源见 LanguageRegistry）。 */
+    private static final Map<String, String> EXTENSION_TO_LANGUAGE =
+            LanguageRegistry.EXTENSION_TO_LANGUAGE;
 
     /**
      * 字节码扩展名映射。仅当 IndexOptions.languages 中显式包含 {@code "class"} 时才启用，
@@ -80,7 +75,7 @@ class SourceFileScanner {
         if (langs == null || langs.isEmpty()) {
             // 默认模式：只扫源码，不扫字节码或文档，防止 build/ 目录产生重复索引
             return EXTENSION_TO_LANGUAGE.entrySet().stream()
-                    .filter(e -> !e.getValue().equals("doc"))
+                    .filter(e -> !"doc".equals(e.getValue()) && !"class".equals(e.getValue()))
                     .map(Map.Entry::getKey)
                     .collect(Collectors.toSet());
         }
