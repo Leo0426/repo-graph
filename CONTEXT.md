@@ -88,6 +88,9 @@ repograph-app/   Spring Boot Web/REST 服务
   com.repograph.export/      GraphExportService（包级依赖图 → DOT / Mermaid）
   com.repograph.api/         Spring MVC REST 控制器
   com.repograph.app/         索引管道（DefaultIndexPipeline）+ Spring Boot 入口
+  com.repograph.agent/       SAST 报警研判 Agent 工作台（AgentRun 步骤时间线 + 人工审核检查点）
+  com.repograph.architecture/ 架构评审服务（接 advisory 的 Ollama 架构审查模型）
+  com.repograph.securityreview/ 主机安全审计（攻击历史威胁检测 + 敏感配置基线审计）
 
 repograph-mcp/   独立 MCP stdio 服务（JSON-RPC，供 AI 工具调用，通过 HTTP 转发至 repograph-app）
 ```
