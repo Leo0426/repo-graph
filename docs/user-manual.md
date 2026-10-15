@@ -34,7 +34,7 @@ RepoGraph 是一个**本地代码知识图谱**工具，通过静态分析将代
 | **SBOM 生成** | Maven pom.xml → CycloneDX JSON |
 | **AI Agent 集成** | MCP stdio 协议，工具直接对接 Cursor 等 MCP 客户端 |
 
-**支持语言**：Java（JavaParser AST）、C/C++（Tree-sitter）、Python（Tree-sitter）
+**支持语言**：Java（JavaParser AST）、C（Tree-sitter）、JavaScript / TypeScript（Tree-sitter，含 TSX）、C++（启发式降级，无精确解析）、Python（Tree-sitter）
 
 ---
 
@@ -923,7 +923,7 @@ RepoGraph 使用统一的全限定名格式标识所有代码符号：
 
 | 策略 | 触发条件 | 精度 |
 |------|---------|------|
-| `PRECISE` | 强制使用 AST 解析器（Java/C/Python） | 高 |
+| `PRECISE` | 强制使用 AST 解析器（Java/C/JS/TS/Python） | 高 |
 | `HEURISTIC` | 强制使用启发式正则解析 | 中 |
 | `AUTO`（推荐） | 先精确，解析失败/空结果则降级启发式 | 高（降级容错） |
 
@@ -943,15 +943,17 @@ RepoGraph 使用统一的全限定名格式标识所有代码符号：
 
 **各语言边支持矩阵**
 
-| 边类型 | Java | C | Python |
-|--------|:----:|:--:|:------:|
-| CONTAINS | ✓ | ✓ | ✓ |
-| CALLS | ✓ | ✓ | ✓ |
-| IMPORTS | ✓ | ✓ | ✓ |
-| EXTENDS | ✓ | — | ✓ |
-| IMPLEMENTS | ✓ | — | — |
-| DEFINES_TYPE | ✓ | — | — |
-| OVERRIDES | ✓ | — | — |
+| 边类型 | Java | C | Python | JS/TS |
+|--------|:----:|:--:|:------:|:-----:|
+| CONTAINS | ✓ | ✓ | ✓ | — |
+| CALLS | ✓ | ✓ | ✓ | ✓ |
+| IMPORTS | ✓ | ✓ | ✓ | — |
+| EXTENDS | ✓ | — | ✓ | — |
+| IMPLEMENTS | ✓ | — | — | — |
+| DEFINES_TYPE | ✓ | — | — | — |
+| OVERRIDES | ✓ | — | — | — |
+
+> JS/TS 目前仅产出 CALLS 边（文件内解析 + 未解析占位），暂无流分析；C++ 仅启发式解析，不产边。
 
 ### 8.4 projectId
 
@@ -991,21 +993,28 @@ echo -n "/path/to/project" | sha256sum | cut -c1-12
 | 宏展开 | 宏定义的函数调用可能漏检 |
 | 函数指针 | 通过指针的间接调用不追踪 |
 
-### 9.4 图谱
+### 9.4 JavaScript / TypeScript / C++ 解析
+
+| 局限 | 说明 |
+|------|------|
+| JS/TS 无流分析 | 仅索引、检索与 CALLS 边；CFG/PDG/污点暂不支持 |
+| JS/TS 边少 | 不产出 CONTAINS/IMPORTS 边；跨文件调用不解析 |
+| C++ 仅启发式 | 无 tree-sitter 精确解析器，模板/命名空间解析粒度受限，标记 degraded |
+| TSX best-effort | 嵌入 JSX 的复杂组件可能解析不完整 |
+
+### 9.5 图谱
 
 | 局限 | 说明 |
 |------|------|
 | 外部服务依赖 | 图存储托管在 Neo4j，repograph-app 无法连接 Neo4j 时图相关接口不可用 |
 | 无时序语义 | 所有边无时间信息，不区分初始化/销毁顺序 |
 
-### 9.5 审核队列
+### 9.6 审核队列
 
 | 局限 | 说明 |
 |------|------|
 | PDF 无视觉回归 | `export?format=pdf` 已可用（内嵌 Noto Sans SC）；测试仅做 PDFBox 文本抽取断言，未做像素级视觉回归 |
-| 无批量导出 | 一次只能导出单个快照，尚不支持跨快照批量打包 |
 | 无认领超时释放 | 长期 `IN_REVIEW` 且无人跟进的条目不会自动退回 `PENDING` |
-| 无分页 | `GET /api/v1/review-queue` 一次返回全部匹配条目 |
 
 ---
 

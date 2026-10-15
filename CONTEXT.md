@@ -29,7 +29,7 @@ AI Native SAST 报警研判与修复 Agent：接入现有 SAST / SCA / CI 工具
 - SBOM 提取（Maven / Gradle / npm / pip）
 
 **技术栈**：Java 22+，Spring Boot 3.x，Gradle（Kotlin DSL）；Web UI：Thymeleaf + HTMX + Alpine.js。
-解析目标：Java / C / Python 源码 + Markdown 文档 + Java 字节码（可选）。
+解析目标：Java / C / JavaScript / TypeScript 源码 + C++（启发式降级）+ Markdown 文档 + Java 字节码（可选）。
 
 ## 模块结构
 
@@ -54,8 +54,8 @@ repograph-app/   Spring Boot Web/REST 服务
 
   com.repograph.parser/
     java/         JavaParser AST 精确解析
-    treesitter/   Tree-sitter FFM 封装（C / Python）
-    heuristic/    启发式状态机（精确解析失败时降级）
+    treesitter/   Tree-sitter FFM 封装（C / JavaScript / TypeScript）
+    heuristic/    启发式状态机（精确解析失败时降级；C++ 仅此路径）
     doc/          MarkdownDocParser（.md/.markdown → DOCUMENT CodeUnit）
 
   com.repograph.graph/       Neo4j 代码图门面（Bolt 5.x）
@@ -501,6 +501,7 @@ Neo4j Docker 启动示例：`-p 7474:7474 -p 7687:7687`（7474 浏览器 UI，76
     仅 CFG + 保守 DataFlowSummary（参数提取、return 标识符收集）；不生成 PDG；
     C 支持 if/for/while/do-while/switch/return/break/continue；
     Python 支持 if/elif/else/for/while/try/raise/break/continue。
+  - JavaScript / TypeScript / C++：暂无流分析，仅参与索引、检索与调用图（CALLS 边由解析器提供）。
 - **精度边界**：Java 数据依赖为保守启发式，不构建 SSA；C/Python 因缺乏类型信息，
   DataFlowSummary 为启发式近似，fieldReads/fieldWrites 为空；
   异常边为 try 体首节点到各 catch 的保守近似，不建模每条语句的精确抛出点。

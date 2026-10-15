@@ -27,7 +27,7 @@
 - **AI 集成**：MCP stdio 服务，把 GraphRAG / Context Pack / 研判能力暴露给编码 Agent
 
 **技术栈**：Java 25，Spring Boot 3.x，Gradle（Kotlin DSL）
-**解析目标**：Java / C / Python 源码 + Markdown + Java 字节码（可选）
+**解析目标**：Java / C / JavaScript / TypeScript 源码 + C++（启发式）+ Markdown + Java 字节码（可选）
 **存储后端**：[Qdrant](https://qdrant.tech/)（向量）、[Neo4j](https://neo4j.com/)（图）、[Ollama](https://ollama.ai/)（Embedding）、SQLite（增量缓存）
 
 > 详细使用说明见 **[用户手册](docs/user-manual.md)**（前置依赖 / 配置 / REST API / MCP 工具完整参考）。
@@ -59,7 +59,7 @@ RepoGraph 的终极方向是成为 **LLM Agent 的上下文提供者**：让 Age
 
 | 能力域 | 能力 |
 | --- | --- |
-| 代码解析 | Java（AST）、C / Python（Tree-sitter，失败自动降级）、Java 字节码（可选）、Markdown 文档（按 H1-H3 切为 DOCUMENT 单元） |
+| 代码解析 | Java（AST）、C / Python / JavaScript / TypeScript（Tree-sitter，失败自动降级）、C++（启发式）、Java 字节码（可选）、Markdown 文档（按 H1-H3 切为 DOCUMENT 单元） |
 | 索引 | 增量索引（文件级缓存）、文件监听自动更新、多项目隔离管理 |
 | 向量检索 | 语义搜索（NL → 代码）、代码相似搜索（片段 → 实现） |
 | GraphRAG | Hybrid 种子召回（向量 + 关键词）、关键词 BM25-like 检索、调用图展开、影响面扩展、安全感知重排序 |
@@ -95,7 +95,7 @@ RepoGraph 的终极方向是成为 **LLM Agent 的上下文提供者**：让 Age
 ```
 repograph-app/   Spring Boot Web 服务（REST API、索引管道、检索）
   ├─ core/        领域模型 + 接口定义（CodeUnit / VectorStore / GraphQueryService）
-  ├─ parser/      JavaParser AST、Tree-sitter FFM（C/Python）、Markdown、启发式状态机
+  ├─ parser/      JavaParser AST、Tree-sitter FFM（C/JS/TS）、Markdown、启发式状态机
   ├─ graph/       Neo4j Bolt 门面（调用链 / 影响面 / 继承图）
   ├─ vector/      Qdrant gRPC（向量）+ Ollama（Embedding）
   ├─ flow/        函数内 CFG / PDG / 数据流摘要 + 跨过程污点分析

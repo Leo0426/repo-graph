@@ -50,7 +50,7 @@ repograph-app/src/main/java/com/repograph/
   core/         Domain model + interfaces (CodeUnit, VectorStore, GraphQueryService)
   parser/       Language parsers
     java/         JavaParser AST
-    treesitter/   Tree-sitter FFM (C, Python)
+    treesitter/   Tree-sitter FFM (C, JavaScript, TypeScript)
     heuristic/    Fallback state-machine parser
   graph/        Neo4j facade (call chains, impact, type hierarchy)
   vector/       Qdrant gRPC store + Ollama embedding service

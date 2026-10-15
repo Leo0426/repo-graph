@@ -27,7 +27,7 @@ A local-first code knowledge graph and semantic analysis tool for static heurist
 - **AI integration** — MCP stdio server exposing GraphRAG / Context Pack / triage capabilities to coding agents
 
 **Stack**: Java 25, Spring Boot 3.x, Gradle (Kotlin DSL)
-**Parsed sources**: Java / C / Python source + Markdown + Java bytecode (optional)
+**Parsed sources**: Java / C / JavaScript / TypeScript source + C++ (heuristic) + Markdown + Java bytecode (optional)
 **Storage backends**: [Qdrant](https://qdrant.tech/) (vector) · [Neo4j](https://neo4j.com/) (graph) · [Ollama](https://ollama.ai/) (embeddings) · SQLite (incremental cache)
 
 > Full usage details are in the **[User Manual](docs/user-manual.md)** (prerequisites / configuration / REST API / MCP tool reference — in Chinese).
@@ -59,7 +59,7 @@ The current phase ships as a **standalone code-audit platform**: every analysis 
 
 | Domain | Capabilities |
 | --- | --- |
-| Parsing | Java (AST), C / Python (Tree-sitter, graceful fallback), Java bytecode (optional), Markdown docs (H1–H3 sections → DOCUMENT units) |
+| Parsing | Java (AST), C / Python / JavaScript / TypeScript (Tree-sitter, graceful fallback), C++ (heuristic), Java bytecode (optional), Markdown docs (H1–H3 sections → DOCUMENT units) |
 | Indexing | Incremental (file-level cache), file watching with auto-update, multi-project isolation |
 | Vector search | Semantic search (NL → code), code similarity search (snippet → implementations) |
 | GraphRAG | Hybrid seed recall (vector + keyword), keyword BM25-like search, call graph expansion, impact expansion, security-aware rerank |
@@ -95,7 +95,7 @@ Two Gradle sub-projects:
 ```
 repograph-app/   Spring Boot web service (REST API, index pipeline, retrieval)
   ├─ core/        Domain model + interface definitions (CodeUnit / VectorStore / GraphQueryService)
-  ├─ parser/      JavaParser AST, Tree-sitter FFM (C/Python), Markdown, heuristic state machine
+  ├─ parser/      JavaParser AST, Tree-sitter FFM (C/JS/TS), Markdown, heuristic state machine
   ├─ graph/       Neo4j Bolt facade (call chain / impact / inheritance)
   ├─ vector/      Qdrant gRPC (vectors) + Ollama (embeddings)
   ├─ flow/        Intra-procedural CFG / PDG / data-flow summaries + interprocedural taint
