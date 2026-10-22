@@ -23,6 +23,7 @@ app 内包位于 `repograph-app/src/main/java/com/repograph/`：
 | 内置扫描与漏洞状态 | `vuln`；持有 VulnFinding 与漏洞证据 |
 | 模型建议 | `advisory`；提供独立辅助结果，不改启发式报告或漏洞状态 |
 | 工作流与步骤台账 | `agent`；通过稳定引用组合已有领域结果 |
+| SQLite 文件目录准备 | `persistence`；共享文件系统前置检查，各存储在打开数据库前调用，不依赖 Bean 初始化顺序 |
 | 不可信源码及工具进程 | `asset` 接入归档，`scanner` 适配外部扫描器 |
 | 配置核查与威胁检测 | `securityreview`；规则即数据（classpath JSON），输入文件进报告出，不持久化 |
 | HTTP 和页面 | `api` 控制器及 `src/main/resources/templates`、`static` |

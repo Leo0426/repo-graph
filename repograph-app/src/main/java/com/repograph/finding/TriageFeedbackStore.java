@@ -1,5 +1,6 @@
 package com.repograph.finding;
 
+import com.repograph.persistence.SqliteDatabasePath;
 import com.repograph.core.finding.TriageFeedback;
 import com.repograph.core.finding.TriageFeedbackStatus;
 import org.slf4j.Logger;
@@ -41,7 +42,7 @@ public class TriageFeedbackStore {
      */
     public TriageFeedbackStore(
             @Value("${repograph.index.db-path:${user.home}/.repograph/index.db}") String dbPath) {
-        this.dbPath = dbPath;
+        this.dbPath = SqliteDatabasePath.prepare(dbPath);
         initTable();
     }
 

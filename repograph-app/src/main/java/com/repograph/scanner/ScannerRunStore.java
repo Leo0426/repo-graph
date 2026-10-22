@@ -1,5 +1,6 @@
 package com.repograph.scanner;
 
+import com.repograph.persistence.SqliteDatabasePath;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.repograph.core.finding.ExternalFinding;
@@ -38,7 +39,7 @@ public class ScannerRunStore {
     public ScannerRunStore(
             @Value("${repograph.index.db-path:${user.home}/.repograph/index.db}") String dbPath,
             ObjectMapper objectMapper) {
-        this.dbPath = dbPath;
+        this.dbPath = SqliteDatabasePath.prepare(dbPath);
         this.objectMapper = objectMapper;
         initTables();
     }

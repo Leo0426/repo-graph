@@ -1,5 +1,6 @@
 package com.repograph.wiki;
 
+import com.repograph.persistence.SqliteDatabasePath;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.repograph.core.wiki.SummaryDocument;
 import org.slf4j.Logger;
@@ -38,7 +39,7 @@ public class SummaryStore {
     public SummaryStore(
             @Value("${repograph.index.db-path:${user.home}/.repograph/index.db}") String dbPath,
             ObjectMapper objectMapper) {
-        this.dbPath = dbPath;
+        this.dbPath = SqliteDatabasePath.prepare(dbPath);
         this.objectMapper = objectMapper;
         initTable();
     }
