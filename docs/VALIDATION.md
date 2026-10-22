@@ -48,6 +48,18 @@ QdrantVectorStoreIT 从 application.yml 读取 gRPC 地址，默认与 Compose �
 JavaBytecodeParserTest 使用当前 JDK 在 `@TempDir` 中编译独立 fixture，验证方法调用、
 EXTENDS/IMPLEMENTS 分离、嵌套类和匿名类处理。缺少编译器或 fixture 会直接失败，不再因旧模块路径跳过。
 
+规则导出由 `RuleFormatterTest` 验证 YAML/JSON 快照、元数据一致、严重程度映射、字面转义和
+确定性输出。真实 Semgrep 验证使用：
+
+```bash
+./gradlew :repograph-app:test --tests '*RuleFormatterSemgrepIT' \
+  -Dtest.semgrep.command=/absolute/path/to/semgrep
+```
+
+该 IT 在临时目录生成规则和正负样本，验证目标引擎实际匹配结果；关闭遥测、版本检查且只使用本地
+配置。未提供命令时显式跳过；配置的命令不存在、超时或解析失败均为失败，不能算通过。
+两个固定样本不证明任意 Java 正则都与 PCRE2 等价，新增规则仍应在目标 Semgrep 版本验证回归样本。
+
 索引一致性回归由 `DefaultIndexPipelineTest`、`DefaultIndexStoreTest`、`IncrementalIndexCacheTest`、
 `CodeGraphTest`、`QdrantVectorStoreTest` 与监听/API/资产测试共同覆盖：文件变空和符号移除、稳定节点入边、
 图事务回滚、清理失败后重建 SQLite 实例重试、同项目串行和可中断等待、监听停止/重新注册/关闭的旧任务失效。

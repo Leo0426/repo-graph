@@ -1,0 +1,1 @@
+{"cwe":"CWE-78","frameworks":["spring"],"languages":["java"],"ruleId":"java.command-injection","severity":"HIGH","sinks":[{"matcherKind":"REGEX","pattern":"Runtime\\.getRuntime\\(\\)\\.exec","regexEngine":"JAVA","regexFlags":["DOTALL"]}],"source":"internal-security-team","sources":[],"version":3}

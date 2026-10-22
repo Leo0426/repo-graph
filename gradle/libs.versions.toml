@@ -22,6 +22,7 @@ asm               = "9.10.1"
 grpc              = "1.63.0"
 
 [libraries]
+snakeyaml           = { module = "org.yaml:snakeyaml" } # version managed by the Spring Boot BOM
 javaparser        = { module = "com.github.javaparser:javaparser-symbol-solver-core", version.ref = "javaparser" }
 treesitter        = { module = "io.github.bonede:tree-sitter",                        version.ref = "treesitter" }
 treesitter-c      = { module = "io.github.bonede:tree-sitter-c",                      version.ref = "treesitter-c" }

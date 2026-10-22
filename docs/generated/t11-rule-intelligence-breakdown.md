@@ -4,23 +4,26 @@
 > 拆分方式:垂直切片(tracer bullet),每片端到端可验证。
 > 2026-10-16 压缩:T11-1(规则注册 + 生命周期 + 回归闸门 + 版本化/回滚)与 T11-2(效果评估看板)
 > 已于 2026-08-01 完成,验收清单与实现细节见 [CONTEXT.md](../../CONTEXT.md) "规则注册与发布回归闸门"一节,
-> 本文只保留待做的 T11-3/T11-4。
+> 本文保留 T11-3 导出交付记录和待做的 T11-4。
 > 已落地的领域词:`DetectionRule`、`RuleRegistry`、`RuleEvaluationReport`(实现在 `com.repograph.finding`,
 > 契约在 core);当前 matcher 仅支持 `REGEX / SUBSTRING` + 内联代码片段回归集。
 
 ---
 
-### T11-3　规则格式化导出(Semgrep / source-sink)
+### T11-3　规则格式化导出(Semgrep / source-sink，已完成)
 
 - **类型**:AFK
 - **被阻塞于**:T11-1(已完成)
 - **要构建什么**:`RuleFormatter` 从统一 `DetectionRule` 元数据生成 Semgrep YAML 和 source-sink
-  JSON/XML,保留统一元数据(id/cwe/version)为注解,不同目标格式共享同一份规则元数据。
+  JSON,保留统一元数据(id/cwe/version)为注解,不同目标格式共享同一份规则元数据。
 - **验收标准**:
-  - [ ] 一条规则 → Semgrep YAML(id/pattern/severity 正确)
-  - [ ] 同一条规则 → source-sink JSON(source/sink 定义 + 统一 id/cwe/version 注解)
-  - [ ] 两种格式来自同一元数据,改元数据两者同步变化
+  - [x] 一条规则 → Semgrep YAML(id/pattern-regex/severity 正确)
+  - [x] 同一条规则 → source-sink JSON(空 sources + matcher sink + 统一 id/cwe/version 注解)
+  - [x] 两种格式来自同一元数据,改元数据两者同步变化
 - **验证方式**:`RuleFormatterTest`(两种目标格式快照 + 元数据一致)
+- **2026-10-22 交付**：增加真实 `RuleFormatterSemgrepIT`；SUBSTRING 通过转义后的 pattern-regex
+  保留字面语义，REGEX 对齐 DOTALL/非 MULTILINE 默认。接口为编程 API，JSON 保留 matcher 原文；
+  具体边界及证据见 [本地工单](../../.scratch/t11-3-rule-formatter/issues/01-rule-formatter.md)。
 
 ### T11-4　外部情报候选区 + 许可检查 + 人工评审门
 
@@ -39,7 +42,7 @@
 ## 执行顺序与整体验收
 
 ```
-T11-1(✅) → T11-2(✅) → T11-3(格式化,小) → T11-4(情报 + HITL 门)
+T11-1(✅) → T11-2(✅) → T11-3(✅) → T11-4(情报 + HITL 门)
 ```
 
 **整体验收(计划要求)**:≥2 条规则走完「候选 → 评审 → 测试 → 发布 → 评估 → 回滚」全流程。
