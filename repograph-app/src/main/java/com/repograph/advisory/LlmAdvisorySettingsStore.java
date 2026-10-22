@@ -1,5 +1,6 @@
 package com.repograph.advisory;
 
+import com.repograph.persistence.SqliteDatabasePath;
 import com.repograph.core.advisory.LlmAdvisorySettings;
 import com.repograph.core.advisory.LlmAdvisorySettingsService;
 import org.springframework.beans.factory.annotation.Value;
@@ -39,7 +40,7 @@ public class LlmAdvisorySettingsStore implements LlmAdvisorySettingsService {
             @Value("${repograph.advisory.enabled}") boolean configuredEnabled,
             @Value("${repograph.advisory.ollama.base-url}") String configuredBaseUrl,
             @Value("${repograph.advisory.ollama.model}") String configuredModel) {
-        this.dbPath = dbPath;
+        this.dbPath = SqliteDatabasePath.prepare(dbPath);
         initTable();
         insertDefaults(configuredEnabled, configuredBaseUrl, configuredModel);
     }

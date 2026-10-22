@@ -1,5 +1,6 @@
 package com.repograph.app.pipeline;
 
+import com.repograph.persistence.SqliteDatabasePath;
 import com.repograph.core.pipeline.IndexResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,7 +38,7 @@ public class IndexHistoryStore {
 
     public IndexHistoryStore(
             @Value("${repograph.index.db-path:${user.home}/.repograph/index.db}") String dbPath) {
-        this.dbPath = dbPath;
+        this.dbPath = SqliteDatabasePath.prepare(dbPath);
         initTable();
     }
 

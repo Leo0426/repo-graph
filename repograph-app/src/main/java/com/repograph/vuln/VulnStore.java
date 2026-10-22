@@ -1,5 +1,6 @@
 package com.repograph.vuln;
 
+import com.repograph.persistence.SqliteDatabasePath;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -32,7 +33,7 @@ public class VulnStore {
 
     public VulnStore(
             @Value("${repograph.index.db-path:${user.home}/.repograph/index.db}") String dbPath) {
-        this.dbPath = dbPath;
+        this.dbPath = SqliteDatabasePath.prepare(dbPath);
         initTable();
     }
 

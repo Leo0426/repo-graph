@@ -1,5 +1,6 @@
 package com.repograph.finding;
 
+import com.repograph.persistence.SqliteDatabasePath;
 import com.repograph.core.finding.DetectionRule;
 import com.repograph.core.finding.DetectionRuleDraft;
 import com.repograph.core.finding.ExternalFindingSeverity;
@@ -42,7 +43,7 @@ public class RuleRegistryStore implements RuleRegistry {
      */
     public RuleRegistryStore(
             @Value("${repograph.index.db-path:${user.home}/.repograph/index.db}") String dbPath) {
-        this.dbPath = dbPath;
+        this.dbPath = SqliteDatabasePath.prepare(dbPath);
         initTables();
     }
 

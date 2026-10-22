@@ -1,5 +1,6 @@
 package com.repograph.asset;
 
+import com.repograph.persistence.SqliteDatabasePath;
 import com.repograph.core.asset.AssetStatus;
 import com.repograph.core.asset.ImportedAsset;
 import org.slf4j.Logger;
@@ -36,7 +37,7 @@ public class ImportedAssetStore {
      */
     public ImportedAssetStore(
             @Value("${repograph.index.db-path:${user.home}/.repograph/index.db}") String dbPath) {
-        this.dbPath = dbPath;
+        this.dbPath = SqliteDatabasePath.prepare(dbPath);
         initTable();
     }
 

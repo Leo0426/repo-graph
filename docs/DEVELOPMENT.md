@@ -31,6 +31,11 @@ app 提供 Web/REST，MCP 另行作为 stdio 进程启动，使用 `repograph-mc
 MCP 日志在 `~/.repograph/mcp.log`，不会出现在 stdout。
 `~/.repograph/` 包含 SQLite、导入源码和运行数据，不是可随意清空的构建缓存；构建输出在子项目 `build/`。
 
+首次启动无需手动创建 `~/.repograph/`。每个 SQLite 存储在打开数据库前都会递归创建
+`repograph.index.db-path` 的父目录；自定义的多级目录也适用，已有数据库不会被覆盖。
+若启动报 `Cannot create SQLite database directory`，按错误中的路径检查运行用户的目录写入权限，
+以及路径中是否有同名普通文件。修正权限或配置到可写目录后重启，不要通过删除运行数据库排障。
+
 检索故障先核对 REST/gRPC、Embedding 模型/维度/collection 和实际 projectId。
 索引及 Agent 运行需检查终态、错误、missingInfo/omittedReasons，不能只看请求已接受。
 

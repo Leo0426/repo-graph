@@ -1,5 +1,6 @@
 package com.repograph.finding;
 
+import com.repograph.persistence.SqliteDatabasePath;
 import com.repograph.core.finding.RuleSuppression;
 import com.repograph.core.finding.RuleSuppressionAuditEvent;
 import com.repograph.core.finding.RuleSuppressionScope;
@@ -36,7 +37,7 @@ public class RuleSuppressionStore {
      */
     public RuleSuppressionStore(
             @Value("${repograph.index.db-path:${user.home}/.repograph/index.db}") String dbPath) {
-        this.dbPath = dbPath;
+        this.dbPath = SqliteDatabasePath.prepare(dbPath);
         initTables();
     }
 

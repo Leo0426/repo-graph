@@ -1,5 +1,6 @@
 package com.repograph.wiki;
 
+import com.repograph.persistence.SqliteDatabasePath;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,7 +37,7 @@ public class SummaryGenerationCache {
     public SummaryGenerationCache(
             @Value("${repograph.index.db-path:${user.home}/.repograph/index.db}") String dbPath,
             ObjectMapper objectMapper) {
-        this.dbPath = dbPath;
+        this.dbPath = SqliteDatabasePath.prepare(dbPath);
         this.objectMapper = objectMapper;
         initTable();
     }

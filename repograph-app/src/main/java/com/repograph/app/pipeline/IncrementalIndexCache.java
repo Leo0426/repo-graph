@@ -1,5 +1,6 @@
 package com.repograph.app.pipeline;
 
+import com.repograph.persistence.SqliteDatabasePath;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -53,7 +54,7 @@ public class IncrementalIndexCache {
      */
     public IncrementalIndexCache(
             @Value("${repograph.index.db-path:${user.home}/.repograph/index.db}") String dbPath) {
-        this.dbPath = dbPath;
+        this.dbPath = SqliteDatabasePath.prepare(dbPath);
         initDb();
     }
 
@@ -355,10 +356,6 @@ public class IncrementalIndexCache {
 
     private void initDb() {
         try {
-            Path dbFile = Path.of(dbPath);
-            if (dbFile.getParent() != null) {
-                Files.createDirectories(dbFile.getParent());
-            }
             String url = "jdbc:sqlite:" + dbPath;
             try (Connection conn = DriverManager.getConnection(url);
                  Statement stmt = conn.createStatement()) {

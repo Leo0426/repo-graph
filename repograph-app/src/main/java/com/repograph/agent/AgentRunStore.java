@@ -1,5 +1,6 @@
 package com.repograph.agent;
 
+import com.repograph.persistence.SqliteDatabasePath;
 import com.repograph.core.agent.AgentPlaybook;
 import com.repograph.core.agent.AgentRun;
 import com.repograph.core.agent.AgentRunRepository;
@@ -40,7 +41,7 @@ public class AgentRunStore implements AgentRunRepository {
      */
     public AgentRunStore(
             @Value("${repograph.index.db-path:${user.home}/.repograph/index.db}") String dbPath) {
-        this.dbPath = dbPath;
+        this.dbPath = SqliteDatabasePath.prepare(dbPath);
         initTables();
     }
 
