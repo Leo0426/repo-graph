@@ -17,6 +17,7 @@ dependencies {
     implementation(libs.sqlite.jdbc)
     implementation(libs.neo4j.driver)
     implementation(libs.jackson.databind)
+    implementation(libs.snakeyaml)
     implementation(libs.commons.compress)
 
     // Parser — AST (JavaParser) + bytecode (SootUp) + tree-sitter
@@ -43,7 +44,7 @@ dependencies {
     testImplementation(libs.neo4j.harness)
 }
 
-// Forward benchmark.* and test.qdrant.* system properties to the test JVM.
+// Forward benchmark.*, test.qdrant.* and the optional Semgrep executable to the test JVM.
 // Uses providers.systemProperty() so the configuration cache is correctly
 // invalidated when any of these values change between runs.
 tasks.named<Test>("test") {
@@ -52,7 +53,8 @@ tasks.named<Test>("test") {
         "benchmark.qdrant.host", "benchmark.qdrant.port",
         "benchmark.qdrant.collection", "benchmark.qdrant.vectorSize",
         "benchmark.ollama.url", "benchmark.ollama.model", "benchmark.ollama.timeout",
-        "test.qdrant.host", "test.qdrant.port"
+        "test.qdrant.host", "test.qdrant.port",
+        "test.semgrep.command"
     ).forEach { key ->
         val value = providers.systemProperty(key)
         if (value.isPresent) systemProperty(key, value.get())

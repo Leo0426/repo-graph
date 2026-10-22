@@ -26,7 +26,7 @@ Slither 等成熟扫描内核，继续保持"代码智能与报警研判层"定�
 | T8 无回显与上传链路 | OOB token + 上传证据链 | ⬜ 未启动（P2 HITL，被 T7 阻塞） |
 | T9 审核队列与三格式交付 | ReportSnapshot + Markdown/JSON/PDF + 审计 | ✅ 完成（分页/批量导出已补；PDF 视觉回归遗留，见 `.scratch/t9-review-queue-leftovers/issues/03`） |
 | T10 批量扫描任务与 Slither | 异步任务、取消、配额、重试、Slither 适配 | ✅ 全部切片完成（2026-08-01） |
-| T11 规则情报与效果评估 | DetectionRule 注册/闸门/评估/格式化/情报 | ◐ T11-1、T11-2 完成；T11-3、T11-4 待做（见 T11 拆分） |
+| T11 规则情报与效果评估 | DetectionRule 注册/闸门/评估/格式化/情报 | ◐ T11-1、T11-2、T11-3 完成；T11-4 待做（见 T11 拆分） |
 
 ## 架构边界（后续实现继续遵守）
 

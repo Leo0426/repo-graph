@@ -48,6 +48,18 @@ QdrantVectorStoreIT 从 application.yml 读取 gRPC 地址，默认与 Compose �
 JavaBytecodeParserTest 使用当前 JDK 在 `@TempDir` 中编译独立 fixture，验证方法调用、
 EXTENDS/IMPLEMENTS 分离、嵌套类和匿名类处理。缺少编译器或 fixture 会直接失败，不再因旧模块路径跳过。
 
+规则导出由 `RuleFormatterTest` 验证 YAML/JSON 快照、元数据一致、严重程度映射、字面转义和
+确定性输出。真实 Semgrep 验证使用：
+
+```bash
+./gradlew :repograph-app:test --tests '*RuleFormatterSemgrepIT' \
+  -Dtest.semgrep.command=/absolute/path/to/semgrep
+```
+
+该 IT 在临时目录生成规则和正负样本，验证目标引擎实际匹配结果；关闭遥测、版本检查且只使用本地
+配置。未提供命令时显式跳过；配置的命令不存在、超时或解析失败均为失败，不能算通过。
+两个固定样本不证明任意 Java 正则都与 PCRE2 等价，新增规则仍应在目标 Semgrep 版本验证回归样本。
+
 首次启动回归由 `SqliteStoreInitializationTest` 和 `FirstRunStartupTest` 覆盖：16 个 SQLite 存储
 分别从不存在的多级父目录初始化、保留已有数据，并对目录被普通文件占用给出明确错误；完整 Spring
 Web 应用使用临时 `user.home` 启动，经 HTTP 提交 Java 项目索引、轮询到 `done`，核对 SQLite 历史

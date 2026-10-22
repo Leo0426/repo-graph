@@ -242,9 +242,14 @@ HTTP 调用被中断时保留线程中断标志，让上层取消流程可以继
   `GET /api/v1/rules/{ruleId}/evaluation?projectId=`（即时评估+落快照）与
   `GET /api/v1/rules/{ruleId}/evaluations?projectId=`（快照列表）；注册规则 version 尚未前置写入
   研判产物，版本归属经快照序列近似。
+- 规则导出（T11-3）：core 的 `RuleFormatter` / finding 的 `DefaultRuleFormatter` 从同一
+  `DetectionRule` 生成完整 Semgrep YAML 和 source-sink JSON，键序固定，不改变规则状态。
+  Semgrep 的 message/languages 与原始元数据同源；SUBSTRING 转为字面转义的 pattern-regex，
+  REGEX 前置 `(?s-m)` 对齐注册表默认 flags，并保留原始 matcher/表达式/源引擎注解。
+  Java 正则与目标 PCRE2 的方言兼容仍需在目标引擎验证。JSON sources 固定为空，sink 只表达现有
+  matcher，REGEX 保留 JAVA/DOTALL 信息，不伪造污点 source 或已验证的数据流语义。
 - 当前 matcher 仅支持 `REGEX / SUBSTRING` 和内联代码片段回归集；它是 T11 的版本化发布脊柱，尚未替换
-  `CodeVulnScanner` 的内置规则，也不自动接入外部情报。格式化与情报评审分别留给 T11-3/T11-4，
-  效果评估已完成（见上）。
+  `CodeVulnScanner` 的内置规则，也不自动接入外部情报。导出入口是编程 API，情报评审仍留给 T11-4。
 
 ## 外部扫描器编排
 

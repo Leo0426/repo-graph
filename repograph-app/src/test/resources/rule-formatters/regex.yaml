@@ -1,0 +1,18 @@
+rules:
+- id: java.command-injection
+  languages:
+  - java
+  message: Runtime command injection
+  metadata:
+    cwe: CWE-78
+    repograph-frameworks:
+    - spring
+    repograph-languages:
+    - java
+    repograph-matcher-kind: REGEX
+    repograph-pattern: Runtime\.getRuntime\(\)\.exec
+    repograph-regex-engine: JAVA
+    repograph-source: internal-security-team
+    repograph-version: 3
+  pattern-regex: (?s-m)Runtime\.getRuntime\(\)\.exec
+  severity: ERROR
