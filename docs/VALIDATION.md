@@ -60,6 +60,12 @@ EXTENDS/IMPLEMENTS 分离、嵌套类和匿名类处理。缺少编译器或 fix
 配置。未提供命令时显式跳过；配置的命令不存在、超时或解析失败均为失败，不能算通过。
 两个固定样本不证明任意 Java 正则都与 PCRE2 等价，新增规则仍应在目标 Semgrep 版本验证回归样本。
 
+首次启动回归由 `SqliteStoreInitializationTest` 和 `FirstRunStartupTest` 覆盖：16 个 SQLite 存储
+分别从不存在的多级父目录初始化、保留已有数据，并对目录被普通文件占用给出明确错误；完整 Spring
+Web 应用使用临时 `user.home` 启动，经 HTTP 提交 Java 项目索引、轮询到 `done`，核对 SQLite 历史
+和再次索引的增量跳过。SQLite、解析器、索引管道与 HTTP 服务为真实实现；Neo4j、Qdrant 和
+Embedding 使用测试替身，该回归不证明外部服务集成通过。
+
 索引一致性回归由 `DefaultIndexPipelineTest`、`DefaultIndexStoreTest`、`IncrementalIndexCacheTest`、
 `CodeGraphTest`、`QdrantVectorStoreTest` 与监听/API/资产测试共同覆盖：文件变空和符号移除、稳定节点入边、
 图事务回滚、清理失败后重建 SQLite 实例重试、同项目串行和可中断等待、监听停止/重新注册/关闭的旧任务失效。

@@ -1,5 +1,6 @@
 package com.repograph.finding;
 
+import com.repograph.persistence.SqliteDatabasePath;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.repograph.core.finding.RuleEvaluationReport;
 import org.slf4j.Logger;
@@ -41,7 +42,7 @@ public class RuleEvaluationStore {
     public RuleEvaluationStore(
             @Value("${repograph.index.db-path:${user.home}/.repograph/index.db}") String dbPath,
             ObjectMapper objectMapper) {
-        this.dbPath = dbPath;
+        this.dbPath = SqliteDatabasePath.prepare(dbPath);
         this.objectMapper = objectMapper;
         initTable();
     }
