@@ -1,258 +1,188 @@
-<div align="right">
-
-[中文](README.md)
-
-</div>
-
-<div align="center">
-  <img src="repograph-app/src/main/resources/static/img/logo.png" alt="RepoGraph" width="200"/>
-</div>
-
-<div align="center">
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Java 25](https://img.shields.io/badge/Java-25-blue.svg)](https://openjdk.org/)
-
-</div>
+<p align="center">
+  <img src="repograph-app/src/main/resources/static/img/repograph-mark.svg" width="64" alt="RepoGraph">
+</p>
 
 # RepoGraph
 
-A local-first code knowledge graph and semantic analysis tool for static heuristic code analysis. Runs entirely on your machine — no code leaves your network.
+**Turn a code repository into traceable context and evidence for security review.**
 
-- **Semantic / similarity search** — find implementations by natural language or code snippet; Markdown docs are searchable too
-- **Code graph analysis** — call chains, impact analysis, type hierarchy, with receiver-type-aware call resolution
-- **Flow analysis** — Java method-level CFG / PDG / data-flow summaries, interprocedural taint tracking
-- **Vulnerability management** — code rules / dependency CVE / taint scanning as three complementary paths, findings gated by a state machine
-- **Quality & SBOM** — cyclomatic complexity, coupling, package cycles, git hotspots, health score; Maven/Gradle/npm/pip → CycloneDX
-- **AI integration** — MCP stdio server exposing GraphRAG / Context Pack / triage capabilities to coding agents
+[中文](README.md) · [Quick start](#quick-start) · [Development](docs/DEVELOPMENT.md) · [Validation](docs/VALIDATION.md) · [MIT License](LICENSE)
 
-**Stack**: Java 25, Spring Boot 3.x, Gradle (Kotlin DSL)
-**Parsed sources**: Java / C / JavaScript / TypeScript source + C++ (heuristic) + Markdown + Java bytecode (optional)
-**Storage backends**: [Qdrant](https://qdrant.tech/) (vector) · [Neo4j](https://neo4j.com/) (graph) · [Ollama](https://ollama.ai/) (embeddings) · SQLite (incremental cache)
+RepoGraph brings source code, call relationships, retrieval, and scan results into one workspace. It helps engineering and security teams understand implementations, trace impact, and review security findings. Use the web console or REST API directly, or give coding agents access through the separate MCP server.
 
-> Full usage details are in the **[User Manual](docs/user-manual.md)** (prerequisites / configuration / REST API / MCP tool reference — in Chinese).
+Indexing and storage can run locally or on your private network. Generation can use local Ollama, a cloud provider, or an enterprise gateway. When you enable a remote generation provider, relevant context is sent to that service. Retrieval embeddings and generation models have separate configurations.
 
----
+## What you can do
 
-## Positioning
-
-RepoGraph's end goal is to be a **context provider for LLM agents**: let an agent locate the right context on demand inside a large codebase through tool calls, instead of stuffing the whole repo into a context window. The near-term product line converges on an **AI-native SAST triage agent for enterprise security teams** — ingesting results from CodeQL / Semgrep / SonarQube / SCA and turning alerts into explainable, verifiable, fixable triage reports.
-
-The current phase ships as a **standalone code-audit platform**: every analysis capability is built and validated on the platform (web console / REST) first, then exposed as MCP tools step by step (see [Roadmap](#roadmap)).
-
-**Scope boundary**: static heuristic analysis, not full compiler semantics — coarse-to-medium granularity is enough for retrieval and auditing; higher-precision cases are delegated to external scanners such as CodeQL.
-
----
-
-## Highlights
-
-- **Fully local, zero cloud** — parsing, embedding, and retrieval all happen on your machine; code never touches an external API. Built for private codebases and air-gapped networks.
-- **GraphRAG in one call** — vector seeds + keyword seeds → call graph expansion → impact expansion → security-aware rerank, fused into a single API with no LLM in the loop.
-- **Structured chunks, 3-layer semantic text** — class-level Javadoc/annotations + method Javadoc + method signature are stacked so natural-language queries hit private/package-level methods; separate semantic and code-similarity vectors don't interfere.
-- **Incremental indexing** — file-level MD5 cache; changing one file rebuilds only that file. Million-line codebases update in seconds.
-- **Framework-aware** — auto-detects Spring MVC / JAX-RS / MyBatis annotations and marks entry points, no manual tagging.
-- **Three complementary vuln paths** — static rules (fast) + source-level interprocedural taint + offline CVE; findings move through a confirmation state machine, fully offline.
-
----
-
-## Features
-
-| Domain | Capabilities |
+| Workspace | Capabilities |
 | --- | --- |
-| Parsing | Java (AST), C / Python / JavaScript / TypeScript (Tree-sitter, graceful fallback), C++ (heuristic), Java bytecode (optional), Markdown docs (H1–H3 sections → DOCUMENT units) |
-| Indexing | Incremental (file-level cache), file watching with auto-update, multi-project isolation |
-| Vector search | Semantic search (NL → code), code similarity search (snippet → implementations) |
-| GraphRAG | Hybrid seed recall (vector + keyword), keyword BM25-like search, call graph expansion, impact expansion, security-aware rerank |
-| Symbol / code graph | Symbol details & locate, autocomplete, call chains, impact analysis, type hierarchy — all support `projectId` filtering |
-| Flow analysis | Data-flow summaries, Java method-level CFG / PDG, interprocedural taint tracking |
-| Framework | Spring MVC / JAX-RS / MyBatis entry-point detection and marking |
-| Vulnerability | Code scanning (9 CWE rules), source-level taint scanning, dependency CVE (offline advisory) |
-| Quality metrics | Cyclomatic complexity / coupling / package cycles (Tarjan SCC) / git hotspots, six-dimension health report |
-| SBOM | Maven / Gradle / npm / pip → CycloneDX JSON |
-| Visualization | Web console (`http://localhost:8080`), package dependency graph export (DOT / Mermaid, cycles highlighted) |
-| AI integration | MCP stdio server (`repograph-mcp`, 23 tools) |
-| Quality eval | Retrieval benchmark (Hit@K, MRR@10, HitScore + threshold gate) |
+| Repositories | Import source and archives, build incremental indexes, view repository summaries, and enter tasks in repository context |
+| Code understanding | Natural-language, code-similarity and keyword search; symbol lookup; call graphs and impact analysis; project Wiki |
+| Defect discovery | Code, taint and dependency scans; external findings; agent-assisted triage; evidence reading and human review; quality metrics and SBOM |
+| Capability checks | Inspect infrastructure, embedding, generation and offline retrieval evaluation as separate capabilities |
+| Administration | Account approval, organization membership, project ownership, generation providers and audit records |
 
-> Flow analysis: Java supports CFG + PDG + taint summaries (precise AST); C / Python get CFG + conservative data-flow summaries only. Data dependencies are conservative heuristics, not SSA.
-> Call entry points and parameters for each capability are in the [User Manual](docs/user-manual.md).
+- **GraphRAG and Context Packs:** combine vectors, keywords and code relationships into citable context. Retrieval and context assembly do not require a generation model.
+- **Evidence-based triage:** ingest Semgrep JSON, SARIF / CodeQL and other supported findings, then review them against code and call paths. Model suggestions do not automatically confirm vulnerabilities; human decisions retain separate audit records.
+- **Multiple languages:** Java AST parsing; Tree-sitter with fallback for C, Python, JavaScript and TypeScript; heuristic C++ parsing; Markdown and optional Java bytecode parsing.
+- **Everyday workflows:** current-repository scope, explicit search across authorized repositories, continuous source reading, a command palette, Chinese and English, system/light/dark themes, and mobile layouts.
 
----
+## Interface
 
-## Screenshots
+These screenshots use demo data in the isolated UI preview.
 
-| Semantic Search | Code Graph |
+| Repository workspace | Search and source evidence |
 | --- | --- |
-| ![Semantic Search](docs/screenshots/01-semantic-search.png) | ![Code Graph](docs/screenshots/02-graph-callers.png) |
-| **Flow Analysis (CFG / PDG)** | **Vulnerability Panel** |
-| ![Flow Analysis](docs/screenshots/05-flow-cfg.png) | ![Vulnerability Panel](docs/screenshots/07-vuln-panel.png) |
+| ![Repository workspace in the light theme](docs/screenshots/workspace-light.png) | ![Search and source evidence in the dark theme](docs/screenshots/search-dark.png) |
 
----
+## Quick start
 
-## Module Structure
+### 1. Prepare the environment
 
-Two Gradle sub-projects:
-
-```
-repograph-app/   Spring Boot web service (REST API, index pipeline, retrieval)
-  ├─ core/        Domain model + interface definitions (CodeUnit / VectorStore / GraphQueryService)
-  ├─ parser/      JavaParser AST, Tree-sitter FFM (C/JS/TS), Markdown, heuristic state machine
-  ├─ graph/       Neo4j Bolt facade (call chain / impact / inheritance)
-  ├─ vector/      Qdrant gRPC (vectors) + Ollama (embeddings)
-  ├─ flow/        Intra-procedural CFG / PDG / data-flow summaries + interprocedural taint
-  ├─ retrieval/   GraphRAG + keyword recall + security-aware rerank + Context Pack
-  ├─ framework/   Spring / JAX-RS / MyBatis annotation detection, entry-point marking
-  ├─ sbom/        Maven / Gradle / npm / pip → CycloneDX JSON
-  ├─ vuln/        Vulnerability scanning (code rules / taint / dependency CVE) + findings state machine
-  ├─ metrics/     Cyclomatic complexity / coupling / package cycles / git hotspots / health report
-  ├─ export/      Package-level dependency graph export (DOT / Mermaid)
-  ├─ api/         Spring MVC REST controllers
-  └─ app/         Index pipeline + Spring Boot entry point
-
-repograph-mcp/          Standalone MCP stdio server (AI tool bridge, forwards to repograph-app over HTTP)
-```
-
----
-
-## Prerequisites
-
-| Service | How to start |
-|---------|--------------|
-| **Qdrant** | `docker run -d -p 16333:6333 -p 16334:6334 qdrant/qdrant` |
-| **Neo4j** | `docker run -d -p 7474:7474 -p 7687:7687 -e NEO4J_AUTH=neo4j/neo4jneo4j neo4j:5` |
-| **Ollama** | Run locally or remotely; pull the model `ollama pull manutic/nomic-embed-code` |
-| **JDK 25** | Needs `--enable-native-access=ALL-UNNAMED` (Tree-sitter FFM) |
-
----
-
-## Quick Start
+- **JDK 25:** the Gradle toolchain targets Java 25. The app requires native access at runtime.
+- **Docker and Docker Compose:** run Qdrant and Neo4j.
+- **Ollama:** serves the default retrieval embedding model. Configure generation later through the administration page.
 
 ```bash
-# 1. Build
-./gradlew build -x test        # skip tests for a fast build
+git clone https://github.com/Leo0426/repo-graph.git
+cd repo-graph
 
-# 2. Start the REST server
+# Start vector and graph storage
+docker compose up -d
+```
+
+Start the Ollama service, then download the default embedding model:
+
+```bash
+ollama pull qwen3-embedding:latest
+```
+
+Default connections:
+
+| Dependency | Address / configuration |
+| --- | --- |
+| Web / REST | `http://localhost:8080` |
+| Qdrant | REST `16333`, gRPC `16334`; the app uses gRPC |
+| Neo4j | Bolt `7687`, browser `7474`; local Compose credentials: `neo4j / neo4jneo4j` |
+| Ollama embeddings | `http://localhost:11434`, `qwen3-embedding:latest`, 4096 dimensions |
+
+See [application.yml](repograph-app/src/main/resources/application.yml) for addresses, models and collections. When changing the embedding model, check its dimensions and collection and build a matching index. Replace Compose example credentials and configure HTTPS before a shared or public deployment.
+
+### 2. Build and start
+
+```bash
+./gradlew :repograph-app:bootJar :repograph-mcp:bootJar -x test
+
 java --enable-native-access=ALL-UNNAMED \
   -jar repograph-app/build/libs/repograph-app-0.5.0.jar
-
-# 3. Index a project (async, returns 202; poll with the status endpoint)
-curl -X POST "http://localhost:8080/api/v1/index/project" \
-  -H "Content-Type: application/json" \
-  -d '{"projectRoot": "/path/to/your/project"}'
-
-# 4. Semantic search
-curl "http://localhost:8080/api/v1/search/semantic?q=HTTP+REST+endpoint+handler&lang=java&limit=10"
 ```
 
-Configuration lives in `repograph-app/src/main/resources/application.yml`; full field reference in [User Manual §4](docs/user-manual.md).
+`-x test` builds without running tests. The first build downloads Gradle and dependencies. After a version change, use the actual artifact name under `build/libs/`.
 
-**Build outputs:**
-- `repograph-app/build/libs/repograph-app-0.5.0.jar` — Web / REST server
-- `repograph-mcp/build/libs/repograph-mcp-exec.jar` — MCP stdio server
+### 3. Sign in and index a repository
 
-**Retrieval benchmark** (index first; Qdrant + Ollama online):
+1. Open [http://localhost:8080](http://localhost:8080) and sign in as `admin`.
+2. On the first start, if `REPOGRAPH_ADMIN_PASSWORD` is unset, a random initial password is written to `~/.repograph/bootstrap-admin-password`. With a custom database directory, the password file is alongside the database.
+3. Under **Repositories → Import & index**, enter an **absolute repository path accessible to the app process**, start indexing, and wait for completion.
+4. Open search, graphs, documentation or defect analysis from the repository row. Check failures and partial completion; an accepted request does not prove indexing succeeded.
 
-```bash
-./gradlew :repograph-app:test --tests "*.benchmark.*"
-# Metrics Hit@1/3/5/10, MRR@10, HitScore; test fails if Hit@10 is below threshold (semantic 65% / code 75%)
-```
+New registrations require administrator approval. Regular users can access only projects assigned to them or their active organizations. Administrators assign projects under **Administration → Project ownership**.
 
----
+### 4. Add a generation model when needed
 
-## REST API
+Under **Administration → Model providers**, add a provider:
 
-Core endpoints below; the full list (vulnerabilities, assets, scanners, triage, …) is in [User Manual §5](docs/user-manual.md).
+1. Choose a service template, or enter the protocol and Base URL for your gateway.
+2. Enter an API key and click **Fetch models** to choose a model. Manual model IDs remain available when the service does not expose a model list.
+3. Save, enable and select the provider for triage, project Wiki and architecture reviews.
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/v1/index/project` | Start indexing (async, returns 202) |
-| `GET` | `/api/v1/search/semantic` | Natural language semantic search |
-| `GET` | `/api/v1/search/graphrag` | GraphRAG (vector + call graph + impact + security rerank) |
-| `GET` | `/api/v1/context/pack` | Build a citation-backed agent context pack |
-| `GET` | `/api/v1/graph/callers` `/callees` `/impact` `/subtypes` | Call graph queries |
-| `GET` | `/api/v1/flow/analyze` `/flow/taint` | Flow analysis and interprocedural taint |
-| `GET` | `/api/v1/metrics/report` | Code health report (6 dimensions + score) |
-| `POST` | `/api/v1/vulns/scan/{code,taint,deps}` | Three vulnerability scanning paths |
+Supported protocols are OpenAI Chat Completions, OpenAI-compatible APIs, Anthropic Messages and Ollama. Templates include OpenAI, Anthropic, Gemini's compatible endpoint, DeepSeek, Qwen, SiliconFlow, Ollama and a custom gateway. Model availability depends on the service and account.
 
----
+Saving configuration and fetching model lists do not send generation requests. **Test connection** sends a short message and may incur a charge. Triage does not require token prices; unknown costs are not recorded as free. Saved API keys are not displayed; leaving the field blank while editing can retain the saved key. See the [development guide](docs/DEVELOPMENT.md#账号与-provider-本地配置) for credential changes and backups.
 
-## GraphRAG Retrieval
+## Connect a coding agent with MCP
 
-`GET /api/v1/search/graphrag` is the recommended entry point for high-quality code retrieval, fusing four stages into a single call with no LLM in the loop:
+Start the app first and prepare an approved account with access to the required repositories. MCP runs as a separate stdio process and calls the app over HTTP, with the same permissions as that account in the web console.
 
-```
-Natural language query
-  └─ 1. Code Structure Chunking  (index-time: 3-layer semantic text)
-       └─ 2. Call Graph Retrieval (vector/keyword seeds → callers + callees expansion)
-            └─ 3. Impact Expansion (impact analysis, security-relevant nodes only)
-                 └─ 4. Security-aware Rerank (static signal scoring + finalScore)
-```
-
-Security scoring weights static signals across entry points, auth, SQL/command execution, deserialization, and crypto: `finalScore = vectorScore + 0.5 × securityScore`. Parameters, response structure, and the full scoring table are in the [User Manual](docs/user-manual.md).
-
----
-
-## MCP Integration
-
-RepoGraph ships an MCP stdio server for Cursor and any other MCP-compatible AI tool.
+Set `REPOGRAPH_USERNAME` and `REPOGRAPH_PASSWORD` in the MCP client's process environment, then add this server configuration:
 
 ```json
 {
   "mcpServers": {
     "repograph": {
       "command": "java",
-      "args": ["-jar", "/path/to/repograph-mcp-exec.jar", "--base-url", "http://localhost:8080"]
+      "args": [
+        "-jar",
+        "/absolute/path/to/repo-graph/repograph-mcp/build/libs/repograph-mcp-0.5.0-exec.jar",
+        "--base-url",
+        "http://localhost:8080"
+      ]
     }
   }
 }
 ```
 
-23 tools grouped by domain:
+Replace the absolute JAR path. Keep passwords out of command-line arguments and committed configuration. MCP handles login, sessions and CSRF automatically. Its stdout is reserved for JSON-RPC; logs go to `~/.repograph/mcp.log`.
 
-- **Retrieval** — `search_semantic` / `search_keyword` / `search_code` / `search_graphrag` / `build_context_pack`
-- **Code graph** — `lookup_symbol` / `locate_at` / `find_callers` / `find_callees` / `get_impact` / `find_subtypes` / `find_entrypoints`
-- **Flow / vulns** — `analyze_flow` / `trace_taint` / `scan_vuln_code` / `list_vulns` / `get_health_report`
-- **SAST triage** — `triage_finding` (import Semgrep/SARIF/CodeQL and produce a triage report) / `record_triage_feedback` / `list_triage_feedback`
-- **Project management** — `list_projects` / `trigger_index` / `index_status`
+Common tools:
 
-Tool parameters are documented in the [User Manual](docs/user-manual.md).
+| Task | Examples |
+| --- | --- |
+| Find implementations and collect context | `search_semantic`, `search_code`, `search_keyword`, `search_graphrag`, `build_context_pack` |
+| Trace relationships | `lookup_symbol`, `locate_at`, `find_callers`, `find_callees`, `get_impact` |
+| Security analysis | `analyze_flow`, `trace_taint`, `triage_finding`, `record_triage_feedback` |
+| Manage indexes | `list_projects`, `trigger_index`, `index_status` |
 
----
+## Architecture and data
 
-## Vulnerability Management
+There are two Gradle subprojects. Names such as `core`, `graph` and `vector` refer to packages inside the app:
 
-> **Status**: implemented (v0.5.0). Built on top of the GraphRAG security infrastructure, fully local, no network required.
+```text
+repograph-app/   Spring Boot Web / REST
+  core/         Domain models and interfaces
+  parser/       Source, document and bytecode parsing
+  graph/        Neo4j code relationships
+  vector/       Qdrant vectors and Ollama embeddings
+  retrieval/    GraphRAG, keywords and Context Packs
+  finding/      External findings, triage and human review
+  agent/        Workflows and step records
+  modelprovider/ Generation configuration, encrypted credentials and protocols
 
-Three complementary scanning paths, all writing to the same findings store:
-
-| Scanner | How it works | Speed | Best for |
-|---------|-------------|-------|----------|
-| Code scan | Intra-method string rules (9 CWE: SQL/command injection, XXE, weak crypto, hardcoded secrets, path traversal, unsafe deserialization/random, sensitive logging) | Fast | Quick sweeps, has false positives |
-| Taint scan | Interprocedural taint tracking (HTTP entry → sink, source-level heuristic) | Slow | Multi-hop taint chains |
-| Dependency scan | SBOM × offline CVE advisory | Fast | Dependency CVEs |
-
-Findings move through the state machine `SUSPECTED → CONFIRMED → FIXED / DISMISSED`; only `CONFIRMED` counts toward the report, with call-chain impact from graph traversal.
-
----
-
-## Roadmap
-
-The product line converges on an **AI-native SAST triage & remediation agent for enterprise security teams**: not rebuilding a scanner from scratch, but ingesting existing SAST / SCA / CI alerts and turning them into explainable, verifiable, fixable, closed-loop triage reports. Full roadmap in [roadmap-codesec-triage-agent.md](docs/generated/roadmap-codesec-triage-agent.md).
-
-```
-Phase 1 (done)         Standalone code-audit platform — build and validate the core analysis capabilities
-Phase 2 (in progress)  LLM-agent context provider — expose GraphRAG / Context Pack / vuln management as MCP tools
-Phase 3 (planned)      SAST triage agent — ingest external alerts, produce evidence chains, false-positive verdicts, and fix suggestions
+repograph-mcp/   Separate MCP stdio server → HTTP → app
 ```
 
-**Phase 2 done**: `search_graphrag` / `search_keyword` / `build_context_pack` / `triage_finding` MCP tools, triage feedback loop, security and agent-orientation tools.
-**Next**: persistent BM25 / FTS, hierarchical summaries, citation validation, cross-sub-project call resolution, Go language support.
+Neo4j stores code relationships, Qdrant stores retrieval vectors, and SQLite stores index caches, accounts, permissions, provider configuration and triage/review records. Runtime data defaults to `~/.repograph/`; container storage uses Compose volumes. Back up provider data together with the adjacent `provider-encryption-key` or the configured master key. Do not delete runtime data as if it were a build cache.
 
-**Phase 3** spans P0–P4: alert explainer → false-positive triage → PR/CI integration → fix loop → enterprise. Local PRD and task list in `.scratch/codesec-triage-agent/`.
+## Development and validation
 
----
+```bash
+# Regular Java tests, including embedded Neo4j
+./gradlew test --tests '*Test'
 
-## Known Limitations
+# Same entry point as repository CI; inspect skipped tests in the reports
+./gradlew check
+```
 
-- Without a full classpath, call resolution can fail when external dependency sources are missing
-- Lombok / annotation-processor generated code is unreliable; reflection and dynamic proxy calls cannot be statically traced
-- C preprocessor macro expansion, conditional compilation, and function pointer calls are not precisely resolved
+Browser tests use an isolated preview with API fixtures and do not read the user's database. See the [UI test guide](repograph-app/src/test/ui/README.md) for setup and Playwright requirements. The [validation guide](docs/VALIDATION.md) covers real Qdrant integration, Semgrep executable checks and retrieval benchmarks. Skipped tests are not evidence of validation.
+
+## Scope and limitations
+
+RepoGraph provides static analysis and supporting evidence. It is not a full compiler and does not guarantee that every vulnerability will be found:
+
+- Incomplete classpaths, missing dependency sources, reflection and generated code can leave call targets unresolved.
+- Taint analysis, complexity metrics and data dependencies include conservative heuristics and require evidence review.
+- Dependency scan coverage and freshness depend on the local Advisory data that has been imported.
+- Remote models provide suggestions. Security conclusions and review actions still require human judgment.
+- The app currently uses a single instance, SQLite and local sessions, without shared sessions across instances.
+
+## Documentation
+
+Most detailed guides are currently in Chinese.
+
+- [Development](docs/DEVELOPMENT.md): installation, configuration, accounts, providers, MCP and troubleshooting.
+- [Validation](docs/VALIDATION.md): test entry points, prerequisites and interpretation.
+- [User manual](docs/user-manual.md): domain capabilities, REST API and MCP reference; use the development guide for current startup and authentication instructions.
+- [Architecture](docs/ARCHITECTURE.md): package boundaries and main workflows.
+- [Contributing](CONTRIBUTING.md): development conventions and contributions.
+
+Released under the [MIT License](LICENSE).
