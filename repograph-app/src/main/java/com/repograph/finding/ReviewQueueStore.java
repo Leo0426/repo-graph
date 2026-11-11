@@ -35,6 +35,19 @@ import java.util.UUID;
 @Service
 public class ReviewQueueStore implements ReviewQueueService {
 
+    /** Returns an entry by stable ID for ownership checks, without modifying state. */
+    public Optional<ReviewQueueEntry> findEntry(String id) {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + dbPath);
+             PreparedStatement query = connection.prepareStatement("SELECT * FROM review_queue_entries WHERE id = ?")) {
+            query.setString(1, id);
+            try (ResultSet row = query.executeQuery()) {
+                return row.next() ? Optional.of(fromRow(row)) : Optional.empty();
+            }
+        } catch (SQLException failure) {
+            throw new IllegalStateException("Cannot read resource ownership", failure);
+        }
+    }
+
     private final String dbPath;
     private final ObjectMapper objectMapper;
 
@@ -315,6 +328,22 @@ public class ReviewQueueStore implements ReviewQueueService {
         }
     }
 
+    /** Reads current review states for one immutable snapshot without paging through other reports. */
+    public List<ReviewQueueEntry> entriesForSnapshot(String snapshotId) {
+        List<ReviewQueueEntry> entries = new ArrayList<>();
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + dbPath);
+             PreparedStatement query = connection.prepareStatement(
+                     "SELECT * FROM review_queue_entries WHERE snapshot_id = ? ORDER BY fingerprint, id")) {
+            query.setString(1, snapshotId);
+            try (ResultSet rows = query.executeQuery()) {
+                while (rows.next()) entries.add(fromRow(rows));
+            }
+            return List.copyOf(entries);
+        } catch (SQLException failure) {
+            throw new IllegalStateException("Failed to read snapshot review entries", failure);
+        }
+    }
+
     /**
      * 在单事务内做条件状态迁移：仅当条目当前状态等于 {@code fromStatus} 才生效，
      * 生效时同时更新 {@code claimed_by} 并追加一条审计事件。
@@ -428,6 +457,7 @@ public class ReviewQueueStore implements ReviewQueueService {
                     CREATE INDEX IF NOT EXISTS idx_review_queue_lookup
                     ON review_queue_entries(project_id, status, rule_id, updated_at)
                     """);
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_review_queue_snapshot ON review_queue_entries(snapshot_id)");
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to initialize review queue tables", e);
         }

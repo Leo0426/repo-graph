@@ -1,5 +1,7 @@
 package com.repograph.api;
 
+import com.repograph.identity.ProjectAccess;
+
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -13,6 +15,7 @@ import java.util.Map;
  */
 @Controller
 @RequestMapping("/api/fragments")
+@ProjectAccess(mode = ProjectAccess.Mode.AUTHENTICATED)
 public class FragmentController {
 
     private final HealthService healthService;

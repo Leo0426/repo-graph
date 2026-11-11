@@ -1,0 +1,169 @@
+{
+  "browser": "157.0.8103.40",
+  "viewport": "1440x1000",
+  "source": "real templates and fictional API fixtures; three samples; 45 animation-frame scroll steps",
+  "results": [
+    {
+      "kind": "repositories",
+      "count": 20,
+      "samples": [
+        {
+          "responseToReadyMs": 27.8,
+          "renderedRows": 20,
+          "domNodes": 1887,
+          "scrollFrameP95Ms": 16.7,
+          "maxFrameMs": 16.8
+        },
+        {
+          "responseToReadyMs": 25.5,
+          "renderedRows": 20,
+          "domNodes": 1887,
+          "scrollFrameP95Ms": 16.8,
+          "maxFrameMs": 16.8
+        },
+        {
+          "responseToReadyMs": 17.8,
+          "renderedRows": 20,
+          "domNodes": 1887,
+          "scrollFrameP95Ms": 16.7,
+          "maxFrameMs": 16.8
+        }
+      ]
+    },
+    {
+      "kind": "repositories",
+      "count": 200,
+      "samples": [
+        {
+          "responseToReadyMs": 33.2,
+          "renderedRows": 50,
+          "domNodes": 2969,
+          "scrollFrameP95Ms": 16.8,
+          "maxFrameMs": 16.8
+        },
+        {
+          "responseToReadyMs": 28.5,
+          "renderedRows": 50,
+          "domNodes": 2969,
+          "scrollFrameP95Ms": 16.8,
+          "maxFrameMs": 16.8
+        },
+        {
+          "responseToReadyMs": 30.3,
+          "renderedRows": 50,
+          "domNodes": 2969,
+          "scrollFrameP95Ms": 16.7,
+          "maxFrameMs": 16.7
+        }
+      ]
+    },
+    {
+      "kind": "repositories",
+      "count": 1000,
+      "samples": [
+        {
+          "responseToReadyMs": 90.9,
+          "renderedRows": 50,
+          "domNodes": 4569,
+          "scrollFrameP95Ms": 16.7,
+          "maxFrameMs": 16.8
+        },
+        {
+          "responseToReadyMs": 107.4,
+          "renderedRows": 50,
+          "domNodes": 4569,
+          "scrollFrameP95Ms": 16.7,
+          "maxFrameMs": 16.8
+        },
+        {
+          "responseToReadyMs": 98.7,
+          "renderedRows": 50,
+          "domNodes": 4569,
+          "scrollFrameP95Ms": 16.7,
+          "maxFrameMs": 16.8
+        }
+      ]
+    },
+    {
+      "kind": "findings",
+      "count": 20,
+      "samples": [
+        {
+          "responseToReadyMs": 32.9,
+          "renderedRows": 20,
+          "domNodes": 2234,
+          "scrollFrameP95Ms": 16.7,
+          "maxFrameMs": 16.8
+        },
+        {
+          "responseToReadyMs": 32.9,
+          "renderedRows": 20,
+          "domNodes": 2234,
+          "scrollFrameP95Ms": 16.8,
+          "maxFrameMs": 16.8
+        },
+        {
+          "responseToReadyMs": 29.2,
+          "renderedRows": 20,
+          "domNodes": 2234,
+          "scrollFrameP95Ms": 16.8,
+          "maxFrameMs": 16.8
+        }
+      ]
+    },
+    {
+      "kind": "findings",
+      "count": 200,
+      "samples": [
+        {
+          "responseToReadyMs": 48.9,
+          "renderedRows": 50,
+          "domNodes": 3526,
+          "scrollFrameP95Ms": 16.7,
+          "maxFrameMs": 16.8
+        },
+        {
+          "responseToReadyMs": 49.2,
+          "renderedRows": 50,
+          "domNodes": 3526,
+          "scrollFrameP95Ms": 16.7,
+          "maxFrameMs": 16.8
+        },
+        {
+          "responseToReadyMs": 47.5,
+          "renderedRows": 50,
+          "domNodes": 3526,
+          "scrollFrameP95Ms": 16.7,
+          "maxFrameMs": 16.8
+        }
+      ]
+    },
+    {
+      "kind": "findings",
+      "count": 1000,
+      "samples": [
+        {
+          "responseToReadyMs": 48.4,
+          "renderedRows": 50,
+          "domNodes": 3526,
+          "scrollFrameP95Ms": 16.7,
+          "maxFrameMs": 16.8
+        },
+        {
+          "responseToReadyMs": 48.3,
+          "renderedRows": 50,
+          "domNodes": 3526,
+          "scrollFrameP95Ms": 16.7,
+          "maxFrameMs": 16.8
+        },
+        {
+          "responseToReadyMs": 48.1,
+          "renderedRows": 50,
+          "domNodes": 3526,
+          "scrollFrameP95Ms": 16.7,
+          "maxFrameMs": 16.8
+        }
+      ]
+    }
+  ]
+}

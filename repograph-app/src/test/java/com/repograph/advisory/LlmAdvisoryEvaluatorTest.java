@@ -46,13 +46,26 @@ class LlmAdvisoryEvaluatorTest {
         assertThat(evaluation.totalEstimatedCostUsd()).isCloseTo(0.03d, within(0.000_001d));
     }
 
+    @Test
+    void unknownCostDoesNotBecomeAFreeOrPartialTotal() throws Exception {
+        var evaluation = new LlmAdvisoryEvaluator().evaluate(List.of(
+                sample("paid", TriageVerdict.NEEDS_REVIEW, TriageVerdict.NEEDS_REVIEW,
+                        TriageVerdict.NEEDS_REVIEW, 10, 0.01),
+                sample("unknown", TriageVerdict.NEEDS_REVIEW, TriageVerdict.NEEDS_REVIEW,
+                        TriageVerdict.NEEDS_REVIEW, 20, null)));
+        assertThat(evaluation.advisoryAvailable()).isEqualTo(2);
+        assertThat(evaluation.totalEstimatedCostUsd()).isNull();
+        var json = new com.fasterxml.jackson.databind.ObjectMapper();
+        assertThat(json.readTree(json.writeValueAsBytes(evaluation)).path("totalEstimatedCostUsd").isNull()).isTrue();
+    }
+
     private static LabeledAdvisorySample sample(
             String id,
             TriageVerdict expected,
             TriageVerdict heuristicVerdict,
             TriageVerdict advisoryVerdict,
             long latencyMs,
-            double cost) {
+            Double cost) {
         TriageReport report = report(id, heuristicVerdict);
         LlmAdvisoryResult advisory = advisoryVerdict == null
                 ? LlmAdvisoryResult.disabled(report)

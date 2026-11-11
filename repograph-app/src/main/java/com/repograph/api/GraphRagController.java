@@ -1,5 +1,7 @@
 package com.repograph.api;
 
+import com.repograph.identity.ProjectAccess;
+
 import com.repograph.core.retrieval.GraphRagOptions;
 import com.repograph.core.retrieval.GraphRagResult;
 import com.repograph.retrieval.GraphRagService;
@@ -23,6 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/v1/search")
+@ProjectAccess
 public class GraphRagController {
 
     private static final int MAX_SEED_LIMIT = 20;

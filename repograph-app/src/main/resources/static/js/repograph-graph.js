@@ -7,6 +7,12 @@ let graphQuerySequence = 0;
 let graphSymbolsSequence = 0;
 let graphFitNodes = [];
 let graphFitTop = 24;
+let graphDisplayedContext = null;
+
+function renderGraphModeLabel() {
+  const value = document.getElementById('graph-current-mode');
+  if (value) value.textContent = t('graph.currentMode', t(`graph.${state.graphMode}`));
+}
 
 function graphMotionDuration() {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 220;
@@ -20,13 +26,18 @@ function stopGraphSimulations() {
 }
 
 function clearGraphSelection() {
+  if (typeof readerView !== 'undefined' && readerView.source === 'graph') closeResultReader(false);
   state.selectedNode = null;
   document.getElementById('node-detail').style.display = 'none';
   document.getElementById('node-detail-content').replaceChildren();
   d3.selectAll('#graph-svg .graph-node').attr('aria-pressed', 'false');
+  d3.selectAll('#graph-svg .graph-node, #graph-svg .graph-connection').classed('is-context', false).classed('is-selected', false);
+  document.getElementById('graph-source-status').textContent = '';
 }
 
 function clearGraphCanvas() {
+  if (typeof readerView !== 'undefined' && readerView.source === 'graph') closeResultReader(false);
+  graphDisplayedContext = null;
   stopGraphSimulations();
   clearGraphSelection();
   hideTooltip();
@@ -80,6 +91,7 @@ function invalidateGraphQuery() {
 function setGraphMode(mode, btn) {
   invalidateGraphQuery();
   state.graphMode = mode;
+  renderGraphModeLabel();
   document.getElementById('graph-tab-row').querySelectorAll('.tab').forEach(tb => {
     tb.classList.remove('active');
     tb.setAttribute('aria-pressed', 'false');
@@ -122,10 +134,15 @@ function initGraphCanvas() {
 }
 
 function graphZoomIn() {
-  if (graphSvgEl && graphZoomBehavior) graphSvgEl.interrupt().transition().duration(graphMotionDuration()).call(graphZoomBehavior.scaleBy, 1.4);
+  if (graphSvgEl && graphZoomBehavior) graphZoomTarget().call(graphZoomBehavior.scaleBy, 1.4);
 }
 function graphZoomOut() {
-  if (graphSvgEl && graphZoomBehavior) graphSvgEl.interrupt().transition().duration(graphMotionDuration()).call(graphZoomBehavior.scaleBy, 0.7);
+  if (graphSvgEl && graphZoomBehavior) graphZoomTarget().call(graphZoomBehavior.scaleBy, 0.7);
+}
+function graphZoomTarget() {
+  const selection = graphSvgEl.interrupt();
+  const duration = graphMotionDuration();
+  return duration ? selection.transition().duration(duration) : selection;
 }
 function graphReset() {
   if (!graphSvgEl || !graphZoomBehavior) return;
@@ -141,7 +158,7 @@ function graphReset() {
   const scale = Math.max(0.01, Math.min(1, width / (maxX - minX), height / (maxY - minY)));
   // Keep Fit reachable even when a large graph needs more zoom-out than the normal wheel limit.
   graphZoomBehavior.scaleExtent([Math.min(0.05, scale), 4]);
-  graphSvgEl.interrupt().transition().duration(graphMotionDuration()).call(
+  graphZoomTarget().call(
     graphZoomBehavior.transform,
     d3.zoomIdentity.translate(el.clientWidth / 2 - (minX + maxX) / 2 * scale,
       graphFitTop + height / 2 - (minY + maxY) / 2 * scale).scale(scale)
@@ -205,7 +222,7 @@ async function doGraphQuery() {
   try {
     if (mode === 'flow') {
       const result = await api.flowAnalyze(target, projectId);
-      if (current()) renderFlowAnalysis(result);
+      if (current()) { graphDisplayedContext = context; renderFlowAnalysis(result); }
       return;
     }
     let units;
@@ -223,7 +240,7 @@ async function doGraphQuery() {
     else if (mode === 'callees') units = await api.callees(target, depth, projectId);
     else if (mode === 'impact') units = await api.impact(target, projectId);
     else units = await api.subtypes(target, projectId);
-    if (current()) renderGraph(rootLabel, units);
+    if (current()) { graphDisplayedContext = context; renderGraph(rootLabel, units); }
   } catch (error) {
     if (current()) {
       clearGraphCanvas();
@@ -303,7 +320,7 @@ function renderFlowGraph(view) {
       .attr('refX', 18).attr('refY', 0)
       .attr('markerWidth', 5).attr('markerHeight', 5)
       .attr('orient', 'auto')
-      .append('path').attr('d', 'M0,-5L10,0L0,5').attr('fill', '#64748B');
+      .append('path').attr('d', 'M0,-5L10,0L0,5').attr('fill', 'var(--text-3)');
   }
 
   // alphaDecay 0.1: converges ~2× faster than the previous 0.05
@@ -317,17 +334,18 @@ function renderFlowGraph(view) {
     .force('collision', d3.forceCollide(38));
 
   const edgeColor = edge => {
-    if (edge.kind === 'DATA_DEPENDENCY') return '#A78BFA';
-    if (edge.kind === 'CONTROL_DEPENDENCY') return '#FBBF24';
-    if (edge.kind === 'TRUE_BRANCH') return '#3EFFA0';
-    if (edge.kind === 'FALSE_BRANCH') return '#F87171';
-    return '#64748B';
+    if (edge.kind === 'DATA_DEPENDENCY') return 'var(--purple)';
+    if (edge.kind === 'CONTROL_DEPENDENCY') return 'var(--amber)';
+    if (edge.kind === 'TRUE_BRANCH') return 'var(--mint)';
+    if (edge.kind === 'FALSE_BRANCH') return 'var(--red)';
+    return 'var(--text-3)';
   };
 
   const link = g.append('g').selectAll('line').data(links).join('line')
+    .attr('class', 'graph-connection')
     .attr('stroke', edgeColor)
     .attr('stroke-width', edge => edge.kind.includes('DEPENDENCY') ? 1.7 : 1.3)
-    .attr('stroke-opacity', .64)
+    .attr('stroke-opacity', 1)
     .attr('stroke-dasharray', edge => edge.kind === 'CONTROL_DEPENDENCY' ? '4 4' : null)
     .attr('marker-end', 'url(#flow-arrow)');
 
@@ -337,7 +355,11 @@ function renderFlowGraph(view) {
     .text(edge => edge.symbol || edge.kind.replace('_BRANCH', '').replace('_DEPENDENCY', ''));
 
   const node = g.append('g').selectAll('g').data(nodes).join('g')
-    .attr('cursor', 'default')
+    .attr('class', 'graph-node flow-node').attr('role', 'button').attr('tabindex', 0)
+    .attr('aria-label', d => `${d.label} · L${d.line}`).attr('aria-pressed', 'false')
+    .attr('cursor', 'pointer')
+    .on('click', (event, d) => selectFlowNode(d))
+    .on('keydown', (event, d) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectFlowNode(d); } })
     .call(d3.drag()
       .on('start', (e, d) => { if (!e.active) _currentFlowSim?.alphaTarget(.3).restart(); d.fx = d.x; d.fy = d.y; })
       .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
@@ -345,17 +367,17 @@ function renderFlowGraph(view) {
 
   node.append('rect')
     .attr('x', -31).attr('y', -18).attr('width', 62).attr('height', 36).attr('rx', 9)
-    .attr('fill', d => d.kind === 'CONDITION' ? 'rgba(251,191,36,.12)' : 'rgba(62,255,160,.08)')
-    .attr('stroke', d => d.kind === 'CONDITION' ? '#FBBF24' : d.kind === 'RETURN' ? '#A78BFA' : '#3EFFA0')
+    .attr('fill', d => d.kind === 'CONDITION' ? 'rgb(var(--warning-rgb) / .1)' : 'rgb(var(--accent-rgb) / .08)')
+    .attr('stroke', d => d.kind === 'CONDITION' ? 'var(--amber)' : d.kind === 'RETURN' ? 'var(--purple)' : 'var(--mint)')
     .attr('stroke-width', 1.2);
 
   node.append('text')
     .attr('text-anchor', 'middle').attr('dy', '-.2em')
-    .attr('fill', '#CBD5E1').attr('font-family', 'var(--fm)').attr('font-size', 8.5)
+    .attr('fill', 'var(--text)').attr('font-family', 'var(--fm)').attr('font-size', 12)
     .text(d => d.label.length > 16 ? d.label.slice(0, 15) + '…' : d.label);
   node.append('text')
     .attr('text-anchor', 'middle').attr('dy', '1.15em')
-    .attr('fill', '#334155').attr('font-family', 'var(--fm)').attr('font-size', 7.5)
+    .attr('fill', 'var(--text-3)').attr('font-family', 'var(--fm)').attr('font-size', 11)
     .text(d => `${d.kind} · L${d.line}`);
 
   _currentFlowSim.on('tick', () => {
@@ -402,8 +424,8 @@ function renderGraph(rootQn, units) {
   const wasCapped   = cappedUnits.length < units.length;
   const isLarge     = cappedUnits.length >= GRAPH_LARGE_THRESHOLD;
 
-  const rootNode = { id: rootQn, qualifiedName: rootQn, kind: 'ROOT', isRoot: true, x: 0, y: 0 };
-  const allNodes = [rootNode, ...cappedUnits.map(u => ({ ...u, id: u.qualifiedName || u.id, isRoot: false }))];
+  const rootNode = { id: 'query:' + rootQn, qualifiedName: rootQn, kind: 'ROOT', isRoot: true, x: 0, y: 0 };
+  const allNodes = [rootNode, ...cappedUnits.map((u, index) => ({ ...u, unit: u, id: u.id || u.qualifiedName || String(index), isRoot: false }))];
   const links = allNodes.slice(1).map(node => ({ source: rootNode, target: node }));
   graphFitNodes = allNodes;
   graphFitTop = 24;
@@ -433,9 +455,10 @@ function renderGraph(rootQn, units) {
 
   // ── Links ─────────────────────────────────────────────────────────────────
   const link = g.append('g').attr('class', 'links').selectAll('line').data(links).join('line')
-    .attr('stroke', 'url(#link-grad)')
-    .attr('stroke-width',   isLarge ? 0.7 : 1.5)
-    .attr('stroke-opacity', isLarge ? 0.22 : 0.5);
+    .attr('class', 'graph-connection')
+    .attr('stroke', 'var(--graph-edge)')
+    .attr('stroke-width', isLarge ? 1 : 1.5)
+    .attr('stroke-opacity', 1);
 
   // ── Nodes ─────────────────────────────────────────────────────────────────
   const node = g.append('g').attr('class', 'nodes').selectAll('g').data(allNodes).join('g')
@@ -472,8 +495,8 @@ function renderGraph(rootQn, units) {
 
   node.append('circle')
     .attr('r', d => d.isRoot ? 22 : (isLarge ? 7 : 14))
-    .attr('fill',   d => d.isRoot ? 'rgba(248,113,113,0.2)' : `${kindColor(d.kind)}22`)
-    .attr('stroke', d => d.isRoot ? '#F87171' : kindColor(d.kind))
+    .attr('fill',   d => d.isRoot ? 'rgb(var(--danger-rgb) / .12)' : `color-mix(in srgb, ${kindColor(d.kind)} 10%, var(--bg-2))`)
+    .attr('stroke', d => d.isRoot ? 'var(--red)' : kindColor(d.kind))
     .attr('stroke-width', d => d.isRoot ? 2 : 1.5)
     // Keep nodes crisp without per-node SVG glow compositing.
     .attr('filter', null);
@@ -481,7 +504,7 @@ function renderGraph(rootQn, units) {
   node.append('text')
     .attr('text-anchor', 'middle')
     .attr('dy', d => d.isRoot ? 38 : 30)
-    .attr('fill', d => d.isRoot ? '#F87171' : kindColor(d.kind))
+    .attr('fill', d => d.isRoot ? 'var(--red)' : kindColor(d.kind))
     .attr('font-family', 'var(--fm)')
     .attr('font-size', 12)
     .attr('font-weight', '700')
@@ -532,26 +555,90 @@ function _updateGraphPositions(link, node) {
 
 function selectNode(d) {
   state.selectedNode = d;
-  d3.selectAll('#graph-svg .graph-node').attr('aria-pressed', node => String(node === d));
+  highlightGraphRelations(d);
+  const group = d.isRoot && !graphSourceContext().target;
+  document.getElementById('graph-source-btn').disabled = group || !graphSourceContext().projectId;
+  document.getElementById('graph-pivot-btn').disabled = group;
+  document.getElementById('graph-source-status').textContent = group ? t('graph.groupNotSymbol') : graphSourceContext().projectId ? '' : t('search.chooseRepository');
+  const pivot = document.querySelector('#graph-pivot-btn span');
+  pivot.dataset.i18n = 'btn.pivotNode'; pivot.textContent = t('btn.pivotNode');
   const el = document.getElementById('node-detail');
   el.style.display = '';
   document.getElementById('node-detail-content').innerHTML = `
     <div class="nd-label">${t('nd.kind')}</div>
-    <div class="nd-value"><span class="kind-badge" style="${kindStyle(d.kind)}">${d.kind}</span></div>
+    <div class="nd-value"><span class="kind-badge" style="${kindStyle(d.kind)}">${esc(t('kind.' + d.kind.toLowerCase()) === 'kind.' + d.kind.toLowerCase() ? d.kind : t('kind.' + d.kind.toLowerCase()))}</span></div>
     <div class="nd-label">${t('nd.name')}</div>
     <div class="nd-value" style="color:var(--mint)">${esc(d.qualifiedName || d.id)}</div>
     ${d.filePath ? `<div class="nd-label">${t('nd.file')}</div><div class="nd-value">${esc(d.filePath)}</div>` : ''}
     ${d.startLine ? `<div class="nd-label">${t('nd.lines')}</div><div class="nd-value">${d.startLine}–${d.endLine}</div>` : ''}
   `;
+  if (typeof readerView !== 'undefined' && readerView.source === 'graph' && readerDialog.open) {
+    if (d.unit) openSelectedGraphSource(); else closeResultReader(false);
+  }
+}
+
+function highlightGraphRelations(selected) {
+  const neighbors = new Set([selected.id]);
+  const id = endpoint => typeof endpoint === 'object' ? endpoint.id : endpoint;
+  d3.selectAll('#graph-svg .graph-connection').classed('is-context', edge => {
+    const related = id(edge.source) === selected.id || id(edge.target) === selected.id;
+    if (related) { neighbors.add(id(edge.source)); neighbors.add(id(edge.target)); }
+    return related;
+  });
+  d3.selectAll('#graph-svg .graph-node').attr('aria-pressed', node => String(node.id === selected.id))
+    .classed('is-selected', node => node.id === selected.id).classed('is-context', node => neighbors.has(node.id));
+}
+
+function graphSourceContext() { return graphDisplayedContext || graphQueryContext(); }
+
+function selectFlowNode(node) {
+  if (typeof readerView !== 'undefined' && readerView.source === 'graph') closeResultReader(false);
+  state.selectedNode = { ...node, flow: true };
+  highlightGraphRelations(node);
+  document.getElementById('node-detail').style.display = '';
+  document.getElementById('node-detail-content').innerHTML = `<div class="nd-label">${esc(node.kind)}</div><div class="nd-value">${esc(node.label)}</div><div class="nd-value">L${node.line}</div>`;
+  document.getElementById('graph-source-btn').disabled = !graphSourceContext().projectId;
+  document.getElementById('graph-pivot-btn').disabled = false;
+  document.getElementById('graph-source-status').textContent = graphSourceContext().projectId ? '' : t('search.chooseRepository');
+  const pivot = document.querySelector('#graph-pivot-btn span');
+  pivot.dataset.i18n = 'graph.methodCallers'; pivot.textContent = t('graph.methodCallers');
+}
+
+async function openSelectedGraphSource() {
+  const selected = state.selectedNode, context = graphSourceContext(), sequence = graphQuerySequence;
+  if (!selected || !context.projectId) return;
+  const button = document.getElementById('graph-source-btn');
+  if (selected.unit) { openCodeReader(selected.unit, context.projectId, button); return; }
+  if (!context.target) { document.getElementById('graph-source-status').textContent = t('graph.groupNotSymbol'); return; }
+  button.disabled = true;
+  document.getElementById('graph-source-status').textContent = t('reader.loading');
+  try {
+    const target = selected.flow ? context.target : selected.qualifiedName;
+    const unit = await api.symbol(target, context.projectId);
+    if (sequence !== graphQuerySequence || state.selectedNode !== selected || Alpine.store('repograph').panel !== 'graph') return;
+    if (unit?.qualifiedName !== target || !unit.kind) throw new Error(t('reader.mismatch'));
+    document.getElementById('graph-source-status').textContent = '';
+    openCodeReader(unit, context.projectId, button);
+  } catch (error) {
+    if (sequence === graphQuerySequence && state.selectedNode === selected) document.getElementById('graph-source-status').textContent = error.message;
+  } finally { if (sequence === graphQuerySequence && state.selectedNode === selected) button.disabled = false; }
 }
 
 function pivotToNode() {
   if (!state.selectedNode) return;
-  document.getElementById('graph-target').value = state.selectedNode.qualifiedName || state.selectedNode.id;
+  const node = state.selectedNode;
+  const context = graphSourceContext();
+  const target = node.flow ? context.target : node.qualifiedName || node.id;
+  if (node.flow || ['entrypoints','deadcode','testgap'].includes(state.graphMode)) {
+    setGraphMode('callers', document.querySelector('#graph-tab-row button[onclick*="\'callers\'"]'));
+  }
+  document.getElementById('graph-project').value = context.projectId || '';
+  document.getElementById('graph-target').value = target;
   doGraphQuery();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  renderGraphModeLabel();
   document.querySelectorAll('#graph-tab-row .tab').forEach(button =>
     button.setAttribute('aria-pressed', String(button.classList.contains('active'))));
   ['graph-target', 'graph-project', 'entrypoints-project', 'graph-depth'].forEach(id => {

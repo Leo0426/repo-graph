@@ -1,0 +1,71 @@
+<!DOCTYPE html><html xmlns:th="http://www.thymeleaf.org"><body>
+<div th:fragment="panel" id="panel-admin" class="panel" :class="{ active: $store.repograph.panel === 'admin' }">
+
+  <div class="panel-body">
+    <section class="card admin-profile"><div><h2 id="account-name">Account</h2><p id="account-description"></p></div>
+      <button class="btn btn-ghost" onclick="logoutAccount()"><span data-i18n="shell.logout">退出登录</span></button>
+      <details><summary><span data-i18n="admin.password">修改密码</span></summary>
+        <form id="password-form" onsubmit="event.preventDefault();changeAccountPassword()">
+          <label for="old-password"><span data-i18n="admin.oldPassword">当前密码</span></label><input id="old-password" type="password" autocomplete="current-password" required>
+          <label for="new-password"><span data-i18n="admin.newPassword">新密码（至少 12 字符）</span></label><input id="new-password" type="password" autocomplete="new-password" minlength="12" required>
+          <button type="submit" class="btn btn-primary"><span data-i18n="admin.changePassword">修改并重新登录</span></button>
+        </form>
+      </details>
+    </section>
+    <div id="admin-status" role="status" aria-live="polite"></div>
+    <section data-admin-only hidden>
+      <div class="admin-toolbar"><h2><span data-i18n="admin.title">管理工作台</span></h2><button id="admin-refresh" class="btn btn-ghost" onclick="loadAdmin()"><span data-i18n="btn.refresh">刷新</span></button></div>
+      <div class="tab-row" id="admin-tabs" aria-label="管理分类" data-i18n-aria-label="admin.categories">
+        <button class="tab-btn active" data-tab="accounts" onclick="selectAdminTab('accounts')"><span data-i18n="admin.accounts">账号审核</span></button>
+        <button class="tab-btn" data-tab="organizations" onclick="selectAdminTab('organizations')"><span data-i18n="admin.organizations">组织与成员</span></button>
+        <button class="tab-btn" data-tab="projects" onclick="selectAdminTab('projects')"><span data-i18n="admin.projects">项目归属</span></button>
+        <button class="tab-btn" data-tab="providers" onclick="selectAdminTab('providers')"><span data-i18n="admin.providers">模型 Provider</span></button>
+        <button class="tab-btn" data-tab="audit" onclick="selectAdminTab('audit')"><span data-i18n="admin.audit">管理审计</span></button>
+      </div>
+      <section id="admin-accounts" class="admin-section"><div class="admin-toolbar"><label for="admin-account-filter"><span data-i18n="admin.filterAccounts">筛选账号</span></label><span class="select-control"><select id="admin-account-filter" onchange="renderAdminAccounts()"><option value="" data-i18n="admin.all">全部</option><option value="PENDING" data-i18n="admin.status.PENDING">待审核</option><option value="ACTIVE" data-i18n="admin.status.ACTIVE">已启用</option><option value="REJECTED" data-i18n="admin.status.REJECTED">已拒绝</option><option value="DISABLED" data-i18n="provider.ui.disabled">已停用</option></select></span></div><div id="admin-account-list"></div></section>
+      <section id="admin-organizations" class="admin-section" hidden>
+        <form id="organization-form" class="admin-toolbar" onsubmit="event.preventDefault();createAdminOrganization()"><label for="organization-name"><span data-i18n="admin.orgName">组织名称</span></label><input id="organization-name" maxlength="100" required><button class="btn btn-primary" type="submit"><span data-i18n="admin.createOrg">创建组织</span></button></form>
+        <div class="admin-columns"><div id="admin-organization-list"></div><div id="admin-members"></div></div>
+      </section>
+      <section id="admin-projects" class="admin-section" hidden><p><span data-i18n="admin.ownershipHint">未分配的存量项目仅管理员可见。修改归属立即改变成员的访问范围。</span></p><div id="admin-project-list"></div></section>
+      <section id="admin-providers" class="admin-section" hidden>
+        <p><span data-i18n="provider.ui.description">研判、项目 Wiki 和架构评审共用当前选中的生成模型。停用当前 Provider 后暂停模型生成；检索用的 Embedding 仍在服务配置中单独管理。</span></p>
+        <div class="admin-toolbar"><h2><span data-i18n="provider.ui.title">生成模型 Provider</span></h2><button id="provider-new" class="btn btn-primary" onclick="editProvider()"><span data-i18n="provider.ui.add">新增 Provider</span></button><button class="btn btn-ghost" onclick="loadProviders()"><span data-i18n="provider.ui.refresh">刷新列表</span></button></div>
+        <div id="provider-status" role="status" aria-live="polite"></div>
+        <div class="admin-columns"><div id="provider-list"></div>
+          <form id="provider-form" class="card" hidden onsubmit="event.preventDefault();saveProvider()">
+            <fieldset id="provider-fields"><legend id="provider-editor-title"><span data-i18n="provider.ui.add">新增 Provider</span></legend>
+              <div id="provider-preset-controls">
+                <label for="provider-preset" data-i18n="provider.preset.label">从服务模板开始</label>
+                <span class="select-control"><select id="provider-preset"><option value="custom" data-i18n="provider.preset.custom">自定义 / 企业网关</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini" data-i18n="provider.preset.gemini">Google Gemini · OpenAI 兼容</option><option value="deepseek">DeepSeek</option><option value="qwen" data-i18n="provider.preset.qwen">通义千问 / 阿里云百炼</option><option value="siliconflow" data-i18n="provider.preset.siliconflow">硅基流动</option><option value="ollama" data-i18n="provider.preset.ollama">Ollama · 本地模型</option></select></span>
+                <button type="button" class="btn btn-ghost" data-i18n="provider.preset.apply" id="provider-apply-preset" onclick="applyProviderPreset()">应用模板</button>
+                <small data-i18n="provider.preset.description">仅填入连接草稿，不保存或调用模型。模型 ID 请按账号可用列表填写，地址和协议可调整。</small>
+              </div>
+              <p id="provider-preset-hint"></p>
+              <label for="provider-name"><span data-i18n="provider.ui.name">名称</span></label><input id="provider-name" maxlength="100" required placeholder="例如：公司模型网关" data-i18n-ph="provider.ui.namePh">
+              <label for="provider-protocol"><span data-i18n="provider.ui.protocol">协议</span></label><span class="select-control"><select id="provider-protocol" onchange="updateProviderHint()"><option value="OPENAI">OpenAI · Chat Completions（max_completion_tokens）</option><option value="OPENAI_COMPATIBLE" data-i18n="provider.protocol.compatible">OpenAI 兼容 · Chat Completions（max_tokens）</option><option value="ANTHROPIC">Anthropic · Messages</option><option value="OLLAMA">Ollama · Chat</option></select></span>
+              <label for="provider-base-url">Base URL</label><input id="provider-base-url" type="url" maxlength="500" required aria-describedby="provider-url-hint"><small id="provider-url-hint"></small>
+              <label for="provider-api-key">API key</label><input id="provider-api-key" type="password" autocomplete="off" maxlength="8192" aria-describedby="provider-key-hint"><small id="provider-key-hint" data-i18n="provider.ui.keyOptional">可选；自托管服务可留空。密钥保存后不会回显。</small>
+              <label class="provider-check"><input id="provider-clear-key" type="checkbox"> <span data-i18n="provider.ui.clearKey">清除已保存的 API key</span></label>
+              <label for="provider-model"><span data-i18n="provider.ui.model">模型 ID</span></label>
+              <div class="provider-model-control">
+                <input id="provider-model" maxlength="200" required placeholder="选择或填写模型 ID" data-i18n-ph="provider.ui.modelPh" aria-describedby="provider-model-status">
+                <button id="provider-fetch-models" type="button" class="btn btn-ghost" onclick="fetchProviderModels()" data-i18n="provider.ui.fetchModels">获取模型列表</button>
+              </div>
+              <div id="provider-model-picker" hidden>
+                <label for="provider-model-options" data-i18n="provider.ui.availableModels">可用模型</label>
+                <span class="select-control"><select id="provider-model-options" onchange="chooseProviderModel()"><option value="" data-i18n="provider.ui.chooseModel">选择模型</option></select></span>
+              </div>
+              <small id="provider-model-status" role="status" aria-live="polite"></small>
+              <div class="provider-limits"><label><span data-i18n="provider.ui.timeout">超时（毫秒）</span><input id="provider-timeout" type="number" min="1000" max="600000" step="1000" value="180000" required></label><label><span data-i18n="provider.ui.output">最大输出 tokens</span><input id="provider-output" type="number" min="1" max="65536" value="4096" required></label></div>
+              <label class="provider-check"><input id="provider-enabled" type="checkbox" checked> <span data-i18n="provider.ui.enabled">启用此 Provider</span></label>
+              <div class="admin-actions"><button id="provider-save" type="submit" class="btn btn-primary"><span data-i18n="provider.ui.save">保存配置</span></button><button type="button" class="btn btn-ghost" onclick="closeProviderEditor()"><span data-i18n="btn.cancel">取消</span></button></div>
+            </fieldset>
+          </form>
+        </div>
+        <p><small><span data-i18n="provider.ui.testHint">连接测试会发送一条简短测试消息，可能产生少量模型费用。保存配置本身不会调用模型。</span></small></p>
+      </section>
+      <section id="admin-audit" class="admin-section" hidden><p><span data-i18n="admin.recentAudit">最近 100 条管理记录</span></p><div id="admin-audit-list"></div></section>
+    </section>
+  </div>
+</div></body></html>

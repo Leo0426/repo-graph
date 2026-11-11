@@ -205,17 +205,26 @@ public class QdrantVectorStore implements VectorStore {
 
     @Override
     public SearchPage semanticSearch(String nlQuery, SearchOptions opts) {
+        if (opts != null && opts.allowedProjectIds() != null && opts.allowedProjectIds().isEmpty()) {
+            return new SearchPage(List.of(), Math.max(0, opts.offset()), opts.limit(), false);
+        }
         List<float[]> vecs = embeddingService.embed(List.of(nlQuery));
         return semanticSearchByVector(vecs.get(0), opts);
     }
 
     @Override
     public SearchPage codeSearch(String codeSnippet, SearchOptions opts) {
+        if (opts != null && opts.allowedProjectIds() != null && opts.allowedProjectIds().isEmpty()) {
+            return new SearchPage(List.of(), Math.max(0, opts.offset()), opts.limit(), false);
+        }
         List<float[]> vecs = embeddingService.embed(List.of(codeSnippet));
         return codeSearchByVector(vecs.get(0), opts);
     }
 
     private SearchPage searchByVector(float[] queryVector, String vectorName, SearchOptions opts) {
+        if (opts.allowedProjectIds() != null && opts.allowedProjectIds().isEmpty()) {
+            return new SearchPage(List.of(), Math.max(0, opts.offset()), opts.limit(), false);
+        }
         Filter filter = buildFilter(opts);
         int safeOffset = Math.max(0, opts.offset());
         SearchPoints.Builder reqBuilder = SearchPoints.newBuilder()
@@ -235,7 +244,9 @@ public class QdrantVectorStore implements VectorStore {
         try {
             List<ScoredPoint> scored = client.searchAsync(reqBuilder.build()).get();
             List<SearchResult> results = scored.stream()
-                    .map(p -> new SearchResult(payloadToCodeUnit(p.getPayloadMap()), p.getScore()))
+                    .map(p -> new SearchResult(payloadToCodeUnit(p.getPayloadMap()), p.getScore(),
+                            p.getPayloadMap().containsKey("project_id")
+                                    ? p.getPayloadMap().get("project_id").getStringValue() : null))
                     .collect(Collectors.toList());
             return new SearchPage(results, safeOffset, opts.limit(), results.size() == opts.limit());
         } catch (InterruptedException e) {
@@ -415,6 +426,12 @@ public class QdrantVectorStore implements VectorStore {
         }
         if (opts.projectId() != null) {
             filter.addMust(ConditionFactory.matchKeyword("project_id", opts.projectId()));
+            hasCondition = true;
+        }
+        if (opts.allowedProjectIds() != null) {
+            var projects = Filter.newBuilder();
+            opts.allowedProjectIds().forEach(id -> projects.addShould(ConditionFactory.matchKeyword("project_id", id)));
+            filter.addMust(io.qdrant.client.grpc.Points.Condition.newBuilder().setFilter(projects));
             hasCondition = true;
         }
         if (opts.entryOnly()) {

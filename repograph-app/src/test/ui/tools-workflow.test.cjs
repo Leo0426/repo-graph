@@ -30,6 +30,7 @@ async function workspace(t, options = {}) {
   });
   await page.goto(new URL('#tools', baseUrl).href, { waitUntil: 'networkidle' });
   await page.waitForFunction(() => document.querySelector('#panel-tools.active'));
+  await page.locator('.repository-utilities > summary').click();
   return { page, fixture };
 }
 

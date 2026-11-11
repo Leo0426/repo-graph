@@ -193,6 +193,32 @@ class DefaultLlmAdvisoryServiceTest {
     }
 
     @Test
+    void oneReviewUsesItsCapturedModelForBudgetAndExecution() {
+        var response = new LlmModelResponse(TriageVerdict.NEEDS_REVIEW, 0.5f, List.of(), List.of(), LlmUsage.NONE);
+        CapturingModel live = new CapturingModel(response);
+        CapturingModel captured = new CapturingModel(response);
+        live.estimatedCost = 999;
+        live.snapshot = captured;
+        var result = service(live, properties(true, 5000, 1000, 0.05d, 1000, 0),
+                new RecordingAuditSink()).review(heuristicReportWithEvidence("safe excerpt"));
+        assertThat(result.status()).isEqualTo(LlmAdvisoryStatus.COMPLETED);
+        assertThat(live.request).isNull();
+        assertThat(captured.request).isNotNull();
+    }
+
+    @Test
+    void unknownProviderPriceAllowsReviewWithinInputAndTimeoutLimits() {
+        CapturingModel model = new CapturingModel(new LlmModelResponse(TriageVerdict.NEEDS_REVIEW,
+                0.5f, List.of(), List.of(), LlmUsage.NONE));
+        model.estimatedCost = Double.NaN;
+        var result = service(model, properties(true, 5000, 1000, 0.05d, 1000, 0),
+                new RecordingAuditSink()).review(heuristicReportWithEvidence("safe excerpt"));
+        assertThat(result.status()).isEqualTo(LlmAdvisoryStatus.COMPLETED);
+        assertThat(result.modelUsed()).isTrue();
+        assertThat(model.request).isNotNull();
+    }
+
+    @Test
     void review_enforcesHardInputCharacterBudget() {
         CapturingModel model = new CapturingModel(new LlmModelResponse(
                 TriageVerdict.NEEDS_REVIEW,
@@ -387,6 +413,9 @@ class DefaultLlmAdvisoryServiceTest {
         private final LlmModelResponse response;
         private LlmAdvisoryRequest request;
         private double estimatedCost = 0.001d;
+        private LlmAdvisoryModel snapshot = this;
+
+        @Override public LlmAdvisoryModel forRequest() { return snapshot; }
 
         private CapturingModel(LlmModelResponse response) {
             this.response = response;

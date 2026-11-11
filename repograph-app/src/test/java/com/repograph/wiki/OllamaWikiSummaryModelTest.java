@@ -1,91 +1,54 @@
 package com.repograph.wiki;
 
-import com.repograph.core.advisory.LlmAdvisorySettings;
-import com.repograph.core.advisory.LlmAdvisorySettingsService;
 import com.repograph.core.wiki.WikiModelException;
+import com.repograph.modelprovider.ModelHttpFixture;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.client.RestClientResponseException;
-import org.springframework.web.client.RestTemplate;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
-import java.util.Map;
+import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.when;
 
-/**
- * {@link OllamaWikiSummaryModel} 单元测试。
- *
- * @author leolu
- * @since 0.7.0
- */
-@ExtendWith(MockitoExtension.class)
+/** Wiki adapter contract through real settings and HTTP for each generation protocol. @author leolu */
 class OllamaWikiSummaryModelTest {
+    @TempDir Path temporary;
 
-    @Mock
-    LlmAdvisorySettingsService settingsService;
-
-    @Mock
-    RestTemplate restTemplate;
-
-    private OllamaWikiSummaryModel model() {
-        return new OllamaWikiSummaryModel(settingsService, restTemplate);
-    }
-
-    private static LlmAdvisorySettings settings(boolean enabled) {
-        return new LlmAdvisorySettings(enabled, "OLLAMA", "http://localhost:11434",
-                "test-model", "2026-10-15T10:00:00Z");
-    }
-
-    @Test
-    void available_requiresEnabledSettings() {
-        when(settingsService.current()).thenReturn(settings(false));
-
-        assertThat(model().available()).isFalse();
-        assertThat(model().model()).isEmpty();
+    @ParameterizedTest
+    @ValueSource(strings = {"OLLAMA", "OPENAI", "ANTHROPIC"})
+    void selectedProviderReturnsWikiContent(String protocol) throws Exception {
+        try (var fixture = new ModelHttpFixture(temporary, protocol)) {
+            fixture.text("正文");
+            var model = new OllamaWikiSummaryModel(fixture.gateway);
+            assertThat(model.available()).isTrue();
+            assertThat(model.model()).isEqualTo("test-model");
+            assertThat(model.complete("sys", "user")).isEqualTo("正文");
+            assertThat(fixture.requests.get()).isEqualTo(1);
+        }
     }
 
     @Test
-    void complete_returnsContent() {
-        when(settingsService.current()).thenReturn(settings(true));
-        when(restTemplate.postForObject(
-                eq("http://localhost:11434/api/chat"),
-                any(HttpEntity.class),
-                eq(OllamaWikiSummaryModel.ChatResponse.class)))
-                .thenReturn(new OllamaWikiSummaryModel.ChatResponse(
-                        new OllamaWikiSummaryModel.Message("assistant", "正文")));
-
-        assertThat(model().complete("sys", "user")).isEqualTo("正文");
+    void disabledProviderMakesNoHttpRequest() throws Exception {
+        try (var fixture = new ModelHttpFixture(temporary, "OPENAI")) {
+            fixture.disable();
+            var model = new OllamaWikiSummaryModel(fixture.gateway);
+            assertThat(model.available()).isFalse();
+            assertThat(model.model()).isEmpty();
+            assertThatThrownBy(() -> model.complete("sys", "user")).isInstanceOf(WikiModelException.class);
+            assertThat(fixture.requests.get()).isZero();
+        }
     }
 
     @Test
-    void complete_httpError_throwsWikiModelException() {
-        when(settingsService.current()).thenReturn(settings(true));
-        when(restTemplate.postForObject(
-                anyString(), any(HttpEntity.class),
-                eq(OllamaWikiSummaryModel.ChatResponse.class)))
-                .thenThrow(new RestClientResponseException("boom",
-                        HttpStatus.BAD_GATEWAY.value(), "Bad Gateway", null, null, null));
-
-        assertThatThrownBy(() -> model().complete("sys", "user"))
-                .isInstanceOf(WikiModelException.class)
-                .hasMessageContaining("HTTP 502");
-    }
-
-    @Test
-    void complete_disabled_throwsWithoutHttpCall() {
-        when(settingsService.current()).thenReturn(settings(false));
-
-        assertThatThrownBy(() -> model().complete("sys", "user"))
-                .isInstanceOf(WikiModelException.class);
+    void httpFailureExposesOnlySafeStatus() throws Exception {
+        try (var fixture = new ModelHttpFixture(temporary, "ANTHROPIC")) {
+            fixture.raw(502, "sensitive source and provider secret");
+            var model = new OllamaWikiSummaryModel(fixture.gateway);
+            assertThatThrownBy(() -> model.complete("sys", "user"))
+                    .isInstanceOf(WikiModelException.class).hasMessageContaining("HTTP 502")
+                    .satisfies(error -> assertThat(error.getMessage()).doesNotContain("sensitive source"));
+        }
     }
 }

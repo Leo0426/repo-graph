@@ -33,3 +33,19 @@ index.db 路径为 `${user.home}/.repograph/index.db`。增量缓存会创建父
 ## 评论
 
 - 2026-10-15 全仓审计发现。
+- 2026-10-20 修复完成。核对启动顺序：7 个 SQLite store（AgentRunStore、ScanTaskStore、ScannerRunStore、
+  ReviewQueueStore、RuleRegistryStore、RuleSuppressionStore、IncrementalIndexCache）在**构造函数**中
+  建表触库，其余 store 懒初始化；全仓 16 个 store 共享 `repograph.index.db-path`，仅
+  `IncrementalIndexCache` 创建父目录。Spring 不保证这些单例的创建顺序，普通 `@PostConstruct`
+  初始化组件无法保证先于它们运行，因此新增 `SqliteStorageInitializer`（`app/config`）以
+  `BeanFactoryPostProcessor` + `EnvironmentAware` 形式在所有 Bean 实例化之前解析
+  `repograph.index.db-path`（默认与各 store 的 `@Value` 一致）并 `Files.createDirectories`
+  创建父目录链；`~/.repograph/assets`、`~/.repograph/scans` 由各自的导入/扫描流程在使用前创建，
+  不在此重复处理。docs/DEVELOPMENT.md 排障节已同步。新增
+  `SqliteStorageInitializerTest`（4 用例）：临时目录复现目录不存在场景（嵌套父目录链创建、
+  配置值内嵌占位符解析、目录已存在与相对路径静默通过、目录创建后 AgentRunStore 构造即触库可正常完成）。
+  验证：`./gradlew :repograph-app:test --tests '*SqliteStorageInitializerTest'
+  --tests '*InterruptedTaskRecoveryTest'` 通过（4+1 用例，0 跳过 0 失败）；
+  `./gradlew test --tests '*Test'`（app+mcp，含嵌入式 Neo4j）通过，1055 用例 0 跳过 0 失败 0 错误。
+  未运行：`*IT`（Qdrant 集成，需真实服务）、benchmark（需真实 Qdrant/Ollama）、UI node --test 套件
+  （本改动不涉及 Web 交互）。代码修复尚未 commit；GitHub 同步因 `gh` 未登录跳过。

@@ -91,7 +91,7 @@ class SqliteStoreInitializationTest {
         ObjectMapper mapper = new ObjectMapper();
         return Stream.of(
                 store("settings", path -> new LlmAdvisorySettingsStore(path, false,
-                        "http://localhost:11434", "fixture"), "llm_advisory_settings"),
+                        "http://localhost:11434", "fixture"), "model_providers"),
                 store("agent", AgentRunStore::new, "agent_runs"),
                 store("index history", IndexHistoryStore::new, "index_history"),
                 store("incremental cache", IncrementalIndexCache::new, "file_cache"),

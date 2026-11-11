@@ -63,7 +63,7 @@ test('a running query blocks duplicate submission and displays the actual stage 
   const { page } = await workbench(t, async page => {
     await page.route('**/api/v1/index/project/status?*', route => json(route,
       { status: 'running', stage: 'embedding', done: 25, total: 100, pct: 25 }));
-    await page.route('**/api/v1/index/project?*', route => { starts++; return json(route, { status: 'running' }, 202); });
+    await page.route(url => url.pathname === '/api/v1/index/project', route => { starts++; return json(route, { status: 'running' }, 202); });
   });
   await page.locator('#index-root').fill('/demo/running');
   await page.locator('#status-btn').click();
@@ -84,7 +84,7 @@ test('submission uses native keyboard settings, prevents repeat starts, and wait
   let requests = 0, submitted;
   t.after(() => gate.resolve());
   const { page } = await workbench(t, async page => {
-    await page.route('**/api/v1/index/project?*', async route => {
+    await page.route(url => url.pathname === '/api/v1/index/project', async route => {
       requests++; submitted = new URL(route.request().url()).searchParams;
       started.resolve(); await gate.promise;
       await json(route, { status: 'running', message: 'Accepted' }, 202);
@@ -163,7 +163,7 @@ test('status polling is serialized and connection failures retain last facts unt
 test('HTTP conflict resumes monitoring while rejected submission and fatal state remain failures', async t => {
   let attempts = 0;
   const { page } = await workbench(t, async page => {
-    await page.route('**/api/v1/index/project?*', route => ++attempts === 1
+    await page.route(url => url.pathname === '/api/v1/index/project', route => ++attempts === 1
       ? json(route, { status: 'error', message: 'EXECUTOR_REJECTED' }, 503)
       : json(route, { status: 'running', message: 'Already running' }, 409));
     await page.route('**/api/v1/index/project/status?*', route => json(route, { status: 'error: PROCESS_RESTARTED' }));
@@ -191,7 +191,7 @@ test('empty input is validated inline and 390px execution remains usable in both
   await page.locator('#index-root').fill('/demo/'.repeat(25) + 'Project');
   await page.locator('#status-btn').click();
   await page.waitForFunction(() => document.getElementById('index-state-card').dataset.state === 'partial');
-  await page.locator('.index-heading > button').click();
+  await page.locator('#index-view-execution').click();
   assert.equal(await page.locator('#index-configuration').evaluate(el => el.open), false);
   await page.locator('#index-errors-panel > summary').click();
   for (const language of ['zh', 'en']) {

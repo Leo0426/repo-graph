@@ -38,8 +38,8 @@ function distCard(titleKey, map, total, colorFn, emptyKey, clickable, shareKey) 
   const rows = distRows(map, total, colorFn, clickable);
   return `<section class="dist-card stats-distribution-card">
     <h4>${t(titleKey)}<span class="total">${t('stats.total', statsNumber(total))}</span></h4>
-    <p class="stats-card-hint">${t(shareKey || 'stats.shareUnits')}</p>
     <div class="dist-rows">${rows || `<div class="dist-empty">${t(emptyKey || 'stats.noDistribution')}</div>`}</div>
+    <p class="stats-card-hint result-footnote">${t(shareKey || 'stats.shareUnits')}</p>
     ${clickable && rows ? `<p class="stats-card-action-hint">↗ ${t('stats.kindAction')}</p>` : ''}
   </section>`;
 }
@@ -81,7 +81,7 @@ function invalidateStatsInput() {
   resetStatsWatchBar();
   const raw = document.getElementById('stats-project-input').value.trim();
   if (!raw && Alpine.store('repograph').panel === 'stats' && location.hash.startsWith('#stats=')) {
-    history.replaceState(null, '', '#stats');
+    history.replaceState({ ...history.state, repograph: workspaceContext() }, '', '#stats');
     Alpine.store('repograph').routeHash = location.hash;
   }
   renderStatsState('empty', raw ? t('stats.queryChanged') : '');
@@ -158,9 +158,12 @@ async function loadProjectStats(force = false) {
     const snapshot = await pending.promise;
     if (!isCurrentRequest()) return;
     if (!snapshot?.projectId) throw new Error(t('stats.invalidResponse'));
-    statsLoadedRaw = raw;
+    if (state.activeProjectId !== snapshot.projectId && state.projects.some(project => project.projectId === snapshot.projectId)) {
+      setGlobalProject(snapshot.projectId, { reloadStats: false, preserveStats: true, historyMode: 'replace' });
+    }
+    statsLoadedRaw = input.value.trim();
     renderProjectStats(snapshot);
-    history.replaceState(null, '', `#stats=${encodeURIComponent(snapshot.projectId)}`);
+    history.replaceState({ ...history.state, repograph: workspaceContext() }, '', `#stats=${encodeURIComponent(snapshot.projectId)}`);
     store.routeHash = location.hash;
   } catch (error) {
     if (isCurrentRequest()) renderStatsState('error', error.message);
@@ -235,14 +238,14 @@ async function loadHealthBadge(projectId) {
     const apiUrl = `/api/v1/metrics/report?projectId=${encodeURIComponent(projectId)}`;
     const pills = [
       totalVulns > 0
-        ? `<span style="background:rgba(251,140,150,.1);color:var(--red);border:1px solid rgba(251,140,150,.25);border-radius:4px;padding:2px 7px;font-size:12px">${t('stats.health.vulns', totalVulns)}</span>`
-        : `<span style="background:rgba(110,231,183,.1);color:var(--mint);border:1px solid rgba(110,231,183,.25);border-radius:4px;padding:2px 7px;font-size:12px">${t('stats.health.noVulns')}</span>`,
+        ? `<span style="background:rgb(var(--danger-rgb) / .1);color:var(--red);border:1px solid rgb(var(--danger-rgb) / .25);border-radius:4px;padding:2px 7px;font-size:12px">${t('stats.health.vulns', totalVulns)}</span>`
+        : `<span style="background:rgb(var(--accent-rgb) / .1);color:var(--mint);border:1px solid rgb(var(--accent-rgb) / .25);border-radius:4px;padding:2px 7px;font-size:12px">${t('stats.health.noVulns')}</span>`,
       r.highComplexityMethods > 0
-        ? `<span style="background:rgba(245,199,106,.1);color:var(--amber);border:1px solid rgba(245,199,106,.25);border-radius:4px;padding:2px 7px;font-size:12px">CC>10: ${r.highComplexityMethods}</span>`
+        ? `<span style="background:rgb(var(--warning-rgb) / .1);color:var(--amber);border:1px solid rgb(var(--warning-rgb) / .25);border-radius:4px;padding:2px 7px;font-size:12px">CC>10: ${r.highComplexityMethods}</span>`
         : '',
       r.packageCycles > 0
-        ? `<span style="background:rgba(251,140,150,.1);color:var(--red);border:1px solid rgba(251,140,150,.25);border-radius:4px;padding:2px 7px;font-size:12px">${t('stats.cycles.count', r.packageCycles)}</span>`
-        : `<span style="background:rgba(110,231,183,.1);color:var(--mint);border:1px solid rgba(110,231,183,.25);border-radius:4px;padding:2px 7px;font-size:12px">${t('stats.cycles.none')}</span>`,
+        ? `<span style="background:rgb(var(--danger-rgb) / .1);color:var(--red);border:1px solid rgb(var(--danger-rgb) / .25);border-radius:4px;padding:2px 7px;font-size:12px">${t('stats.cycles.count', r.packageCycles)}</span>`
+        : `<span style="background:rgb(var(--accent-rgb) / .1);color:var(--mint);border:1px solid rgb(var(--accent-rgb) / .25);border-radius:4px;padding:2px 7px;font-size:12px">${t('stats.cycles.none')}</span>`,
       `<span style="background:var(--bg-3);color:var(--text-2);border:1px solid var(--border);border-radius:4px;padding:2px 7px;font-size:12px">${t('stats.health.gap', gapPct)}</span>`,
     ].filter(Boolean).join('');
 
@@ -380,7 +383,7 @@ async function loadPackageCycles(projectId) {
     }
     const rows = cycles.map((cycle, idx) => {
       const pkgs = (cycle.packages || []).slice().sort();
-      const badge = `<span style="background:rgba(251,140,150,.1);color:var(--red);border:1px solid rgba(251,140,150,.25);border-radius:4px;padding:1px 6px;font-size:12px;margin-right:6px">${t('stats.cycles.involves', pkgs.length)}</span>`;
+      const badge = `<span style="background:rgb(var(--danger-rgb) / .1);color:var(--red);border:1px solid rgb(var(--danger-rgb) / .25);border-radius:4px;padding:1px 6px;font-size:12px;margin-right:6px">${t('stats.cycles.involves', pkgs.length)}</span>`;
       const pkgList = pkgs.map(p => {
         const short = p.split('.').pop();
         return `<span title="${esc(p)}" style="color:var(--amber);font-size:12px;margin-right:4px">${esc(short)}</span>`;

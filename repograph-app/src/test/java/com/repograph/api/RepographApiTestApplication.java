@@ -10,6 +10,8 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * @author leolu
  * @since 0.1.0
  */
+@org.springframework.boot.test.context.TestComponent
+@org.springframework.context.annotation.Import(ControllerTestSecurity.class)
 @SpringBootApplication
 class RepographApiTestApplication {
 }

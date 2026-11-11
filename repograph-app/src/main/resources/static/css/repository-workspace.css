@@ -1,0 +1,39 @@
+/* Five work domains over existing panels; repository selection remains shared state. */
+.workspace-navigation .nav-btn { min-height: 44px; padding: 0 10px; border: 1px solid transparent; border-radius: var(--radius-control); gap: 12px; }
+.workspace-navigation .nav-btn:hover { background: var(--bg-3); }
+.workspace-navigation .nav-btn.active { background: var(--accent-soft); color: var(--mint); box-shadow: none; }
+.workspace-navigation .nav-btn.active::before { display: none; }
+.workspace-navigation .nav-btn.active .nav-label { font-weight: 650; }
+.workspace-navigation .nav-btn .icon { color: var(--text-3); }
+.workspace-navigation .nav-btn.active .icon { color: var(--mint); }
+.workspace-navigation-context { flex-shrink: 0; background: var(--bg); padding: 14px var(--page-inset) 8px; }
+.workspace-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.workspace-tab { background: transparent; border: 1px solid transparent; color: var(--text-2); font: inherit; font-size: var(--text-md); padding: 6px 10px; border-radius: var(--radius-control); cursor: pointer; -webkit-tap-highlight-color: transparent; transition: box-shadow var(--motion-fast), transform var(--motion-fast); }
+.workspace-tab.active { color: var(--text); background: var(--bg-3); font-weight: 600; }
+.workspace-tab:hover { background: var(--bg-3); }
+.workspace-tab:active { transform: translateY(1px); }
+#panel-tools .repository-context { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 16px; padding: 16px 0; border-top: 1px solid var(--border); }
+.repository-context > div > span { display: block; color: var(--text-3); font-size: var(--text-sm); margin-bottom: 4px; }
+.repository-context strong { font-size: var(--text-body); font-weight: 600; overflow-wrap: anywhere; }
+#repository-current-hint { font-size: var(--text-sm); color: var(--text-3); line-height: 1.7; margin-top: 4px; }
+.repository-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.repository-utilities > summary { cursor: pointer; padding: 16px 0; color: var(--text-2); }
+@media (max-width:760px) {
+  .workspace-tab { padding: 8px 10px; }
+  #panel-tools .tools-project-actions { flex-wrap: wrap; }
+  #panel-tools .repository-context { grid-template-columns: minmax(0,1fr); }
+  .repository-actions > .btn { flex: 1 1 auto; }
+}
+@media (prefers-reduced-motion:reduce) { .workspace-tab { transition: none; } }
+/* Active navigation supplies the page title; related page actions share its row. */
+.workspace-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; min-height: 40px; }
+.workspace-actions { margin-left: auto; }
+.page-actions, .page-actions > .tools-heading-actions, .page-actions > .agent-workflow-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.workspace-navigation-context { padding-bottom: 14px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+.workspace-row .btn { min-height: var(--control-height); font-size: var(--text-sm); }
+@media(max-width:760px) {
+  .workspace-navigation-context { margin-bottom: 14px; padding-bottom: 12px; }
+  .workspace-tabs { width: 100%; }
+  .workspace-actions { margin-left: 0; }
+  .workspace-row .btn { min-height: 40px; }
+}

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"><body>
+<div th:fragment="panel" id="panel-wiki" class="panel" :class="{ active: $store.repograph.panel === 'wiki' }">
+
+  <div class="panel-body">
+    <div class="wiki-toolbar">
+      <a href="#tools" class="btn btn-ghost" data-i18n="wiki.back">返回项目工具</a>
+      <strong id="wiki-project"></strong>
+
+
+    </div>
+    <details class="help-note"><summary data-i18n-aria-label="help.wikiSources" aria-label="文档来源与生成方式"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#circle-help"/></svg><span data-i18n="help.wikiSources">文档来源与生成方式</span></summary><div class="help-note-content"><p data-i18n="wiki.hint">使用页头选择项目。模型未启用时仍可生成结构事实；摘要不替代源码或安全研判。</p></div></details>
+    <div id="wiki-status" role="status" aria-live="polite"></div>
+    <section id="wiki-run" aria-live="polite"></section>
+    <div class="wiki-layout" id="wiki-layout" aria-busy="false">
+      <aside class="wiki-sidebar">
+        <label for="wiki-filter" data-i18n="wiki.filter">查找文档或包</label>
+        <input id="wiki-filter" type="search" oninput="renderWikiTree()" aria-controls="wiki-tree">
+        <nav id="wiki-tree" aria-label="项目文档" data-i18n-aria-label="wiki.title"></nav>
+      </aside>
+      <article id="wiki-document" tabindex="-1"></article>
+      <nav id="wiki-toc" aria-label="本页章节" data-i18n-aria-label="wiki.contents"></nav>
+    </div>
+  </div>
+</div>
+<div th:fragment="actions" class="page-actions"><button id="wiki-refresh" class="btn btn-ghost" onclick="loadWiki()" data-i18n="btn.refresh">刷新</button>
+<button id="wiki-generate" class="btn btn-primary" onclick="generateWiki()" data-i18n="wiki.generate">生成 / 更新文档</button></div>
+</body></html>

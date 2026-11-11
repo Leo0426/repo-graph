@@ -1,4 +1,10 @@
 repograph:
+  security:
+    bootstrap-admin-password: ${REPOGRAPH_ADMIN_PASSWORD:}
+    provider-encryption-key: ${REPOGRAPH_PROVIDER_ENCRYPTION_KEY:}
+    login-attempts-per-window: 30
+    registrations-per-window: 5
+    auth-window-seconds: 60
   qdrant:
     host: localhost
     port: 16334
@@ -57,3 +63,9 @@ repograph:
 
 server:
   port: 8080
+  servlet:
+    session:
+      timeout: 30m
+      cookie:
+        http-only: true
+        same-site: lax

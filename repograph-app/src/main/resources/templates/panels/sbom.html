@@ -3,10 +3,7 @@
 <body>
 <div th:fragment="panel" id="panel-sbom" class="panel"
      :class="{ active: $store.repograph.panel === 'sbom' }">
-  <div class="panel-header">
-    <div class="panel-title" data-i18n="sbom.title">软件物料清单</div>
-    <div class="panel-subtitle" data-i18n="sbom.subtitle">CycloneDX 格式 · 直接依赖可视化</div>
-  </div>
+
   <div class="panel-body">
     <section class="card sbom-command-card">
       <form onsubmit="event.preventDefault();loadSbomView()">

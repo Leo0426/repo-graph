@@ -31,6 +31,17 @@ AI Native SAST 报警研判与修复 Agent：接入现有 SAST / SCA / CI 工具
 **技术栈**：Java 22+，Spring Boot 3.x，Gradle（Kotlin DSL）；Web UI：Thymeleaf + HTMX + Alpine.js。
 解析目标：Java / C / JavaScript / TypeScript 源码 + C++（启发式降级）+ Markdown 文档 + Java 字节码（可选）。
 
+## 仓库驱动的前端工作流
+
+当前前端以代码仓库为起点，聚合为五个工作域：仓库工作台（列表/接入索引/概览）、代码理解
+（检索/源码定位/图谱/Wiki）、缺陷发现（扫描/研判审核/质量架构/依赖）、能力验证（服务/检索测评）
+和平台管理（账号/组织/归属/生成模型/审计）。工作域是已有领域能力的 UI 投影，不是新的持久实体。
+默认首页是仓库工作台；选择仓库后沿同一 projectId 进入分析。旧 hash、统计深链与历史导航保留。
+Web 检索默认当前仓库；跨仓库为显式的“全部已授权仓库”，授权集合由服务端在检索排名和分页前计算，
+每条结果保留来源 projectId 供同名符号定位。离线测评仍使用独立语料快照，不跟随页头项目。
+实践 SDD/DDD 的本轮规范及验收记录在 `.scratch/repository-workspace/`，以行为测试验证需求和领域约束。
+模型接入模板只是可编辑连接草稿；生成、检索 Embedding、服务连通和质量测评是不同能力，不混为成功状态。
+
 ## 模块结构
 
 两个 Gradle 子项目，源码均在对应子项目下：
@@ -106,6 +117,16 @@ HTTP 调用被中断时保留线程中断标志，让上层取消流程可以继
 
 ## 核心领域模型
 
+**Account（账号）**：平台登录主体；自助注册只产生待审核普通账号，管理员批准后才获得使用资格。
+账号停用或密码变更会使旧会话失效；内置 `admin` 是初始平台管理员，不是某个项目的隐式个人所有者。
+
+**Organization（组织）**：由管理员维护的项目归属与成员集合；组织成员身份授予组织项目访问，
+成员移除或组织停用撤销访问，但不删除项目事实。
+
+**ProjectOwner（项目归属）**：独立于代码单元与索引的个人/组织所有权绑定；个人绑定指向账号，
+组织绑定指向组织。转移归属不改变 `projectId`；未绑定的存量项目仅对管理员可见。
+企业管理已实现；范围见 `.scratch/enterprise-management/PLAN.md`，验证证据见同目录 `ACCEPTANCE.md`。
+
 **ExternalFinding**：外部 SAST / SCA 工具输入报警的统一模型，位于 `com.repograph.core.finding`。
 - 作用：承载 Semgrep / SARIF / CodeQL / SonarQube 等工具的原始报警，作为报警解释器输入。
 - 边界：`ExternalFinding` 是外部输入事实；`VulnFinding` 是 RepoGraph 内部扫描或研判后的发现记录。
@@ -151,7 +172,8 @@ HTTP 调用被中断时保留线程中断标志，让上层取消流程可以继
 - 调用前剔除外部报警 raw，按字符预算裁剪，并脱敏 password/token/secret/API key/Bearer 等常见秘密；
   证据显式标记为 untrusted，供模型适配器隔离提示指令与数据。
 - 调用后只保留输入 `ContextPack` 中存在的 citation；不存在的引用进入 `missingInfo`，不能成为新证据。
-  调用受单次成本预检和超时约束；本地 Ollama 默认单次超时 3 分钟且超时不立即重试，避免前一次生成仍在
+  调用受输入/输出上限和超时约束；有已知单价时继续执行成本预检，未知单价允许研判且费用标记为未知。
+  本地 Ollama 默认单次超时 3 分钟且超时不立即重试，避免前一次生成仍在
   后台运行时重复提交造成排队。
 - SLF4J 审计只记录请求 ID、报警指纹、提供方/模型、状态、尝试次数、延迟、脱敏次数、token/成本和
   安全错误码，不记录提示词、源码或异常原文。
@@ -590,6 +612,21 @@ Neo4j Docker 启动示例：`-p 7474:7474 -p 7687:7687`（7474 浏览器 UI，76
 
 导出：`GraphExportService` 将包级依赖图输出为 DOT（Graphviz）或 Mermaid 格式；循环依赖包在 DOT 中红色高亮。
 
+## 生成模型 Provider
+
+`ModelProvider` 是平台管理员维护的生成模型连接配置，包含显示名称、协议、API 前缀、模型 ID、启用状态、
+选中状态、超时和输出上限；历史输入/输出 token 单价保留兼容，管理表单不再要求填写价格。
+协议为 Ollama Chat、OpenAI-compatible Chat Completions 或 Anthropic Messages；
+显示名称不决定协议。只有一个配置被选中，选中后可停用；停用意味着暂停后续生成，不自动切换到其他服务。
+
+研判、Wiki 和架构评审共用选中配置；Embedding 属于独立索引/检索配置。单次生成捕获配置与密钥快照，
+编辑/切换不改变已发出的 HTTP 请求。单次研判从预算预检到重试和审计都使用同一配置快照；
+未知单价不阻止研判，费用以 null 表示而不是 0；任何已完成样本费用未知时，评测总费用也为 null。
+已有单价仍用于成本预检和估算，旧 Ollama 页面设置一次迁移，
+旧设置接口成为同一配置的兼容视图。
+API key 属于服务端秘密，不是公开模型字段；公开配置仅包含 `apiKeyConfigured`。持久化和备份契约见
+[Development](docs/DEVELOPMENT.md)。企业管理验收记录见 `.scratch/enterprise-management/ACCEPTANCE.md`。
+
 ## 架构决策记录
 
 | 决策 | 选择 | 原因 |
@@ -619,3 +656,10 @@ Neo4j Docker 启动示例：`-p 7474:7474 -p 7687:7687`（7474 浏览器 UI，76
 | 漏洞变体召回 | CONFIRMED 种子 + Sink/动态参数/token 相似度 | 相似性只产生 SUSPECTED 候选，不直接创建或升级为 CONFIRMED；按项目、规则和候选单元指纹去重 |
 | 共享研判流程 | core 的 TriageWorkflow 契约 + finding 的 DefaultTriageWorkflow | 三个入口共享导入、预算、反馈与抑制策略；阶段化接口保留 Agent 时间线，避免 HTTP 和审核快照各自复制决策逻辑。 |
 | 后台任务启动恢复 | 单 app 进程内标记遗留任务中断，保留证据，显式重试 | 自动续跑需要持久化原始输入和每个副作用的幂等边界；当前 Agent 输入不入运行表，盲目重放可能重复创建审核快照或扫描。因此先让遗留状态可解释、可重试，未来多实例部署需另行设计租约与执行日志。 |
+
+生成 Provider 的 `OPENAI` 使用 `max_completion_tokens`，`OPENAI_COMPATIBLE` 使用 `max_tokens`；
+二者共享 Chat Completions 请求/响应及 SSE。Anthropic Messages 与 Ollama native Chat 保留独立适配。
+前端提供 OpenAI、Anthropic、Gemini（OpenAI 兼容）、DeepSeek、通义、硅基流动、Ollama、自定义网关模板；
+模板不自动保存、不调用模型，切换模板清空未保存密钥和模型。管理员可用当前草稿的 API 前缀、协议及密钥
+显式获取可用模型列表并选择，也可继续手填模型 ID。模型发现不保存草稿、不选择 Provider，也不发送生成请求；
+已有密钥仅可用于原地址和协议，修改连接后必须提供新密钥或明确清除。获取失败保留手填入口。

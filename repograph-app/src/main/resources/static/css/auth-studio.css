@@ -1,0 +1,24 @@
+html.auth-document { height: auto; min-height: 100%; overflow: auto; }
+.auth-page { min-height: 100dvh; height: auto; padding: 40px 20px; overflow: auto; display: grid; place-items: center; background: var(--bg); }
+.auth-shell { width: min(420px,100%); flex: none; display: block; min-width: 0; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--surface-radius); }
+.auth-card { padding: 32px; min-width: 0; }
+.auth-brand { display: flex; align-items: center; gap: 10px; font-size: var(--text-title); font-weight: 600; letter-spacing: -.03em; margin-bottom: 28px; }
+.auth-brand img { width: 36px; height: 36px; }
+.auth-language { display: flex; justify-content: flex-end; gap: 4px; margin-bottom: 16px; }
+.auth-language button { min-height: 40px; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-control); background: transparent; color: var(--text-2); font: 500 var(--text-sm) var(--ui); cursor: pointer; }
+.auth-language button[aria-pressed="true"] { background: var(--accent-soft); color: var(--mint); }
+.auth-card h1 { font-size: var(--text-display); font-weight: 600; letter-spacing: -.03em; margin: 0 0 12px; }
+.auth-card p { color: var(--text-2); line-height: 1.75; font-size: var(--text-md); margin: 0 0 20px; }
+.auth-card label { display: block; font-size: var(--text-md); color: var(--text-2); margin: 14px 0 6px; }
+.auth-card input { width: 100%; min-height: 40px; }
+.auth-card .btn { width: 100%; min-height: 40px; margin-top: 14px; }
+.auth-card #auth-submit { margin-top: 20px; }
+.auth-card #auth-toggle { border-color: transparent; background: transparent; color: var(--text-2); }
+.auth-card #auth-toggle:hover { background: var(--bg-3); }
+#auth-status { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 18px; color: var(--amber); font-size: var(--text-md); line-height: 1.7; }
+.auth-page [hidden] { display: none !important; }
+@media(max-width:640px) {
+  .auth-page { padding: 24px 16px; display: block; }
+  .auth-shell { margin: 0 auto; }
+  .auth-card { padding: 24px 20px; }
+}

@@ -24,6 +24,8 @@ import java.util.List;
  */
 @Configuration(proxyBeanMethods = false)
 @EnableAutoConfiguration(excludeName = {
+        "org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration",
+        "org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration",
         "org.springframework.boot.autoconfigure.neo4j.Neo4jAutoConfiguration",
         "org.springframework.boot.autoconfigure.data.neo4j.Neo4jDataAutoConfiguration",
         "org.springframework.boot.autoconfigure.data.neo4j.Neo4jRepositoriesAutoConfiguration",
@@ -31,7 +33,7 @@ import java.util.List;
         "org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration",
         "org.springframework.boot.autoconfigure.sql.init.SqlInitializationAutoConfiguration"
 })
-@Import(ViewController.class)
+@Import({ViewController.class, com.repograph.api.IdentityViewController.class})
 public class PreviewServer {
 
     /**

@@ -1,5 +1,7 @@
 package com.repograph.api;
 
+import com.repograph.identity.ProjectAccess;
+
 import com.repograph.core.flow.FlowAnalysisResult;
 import com.repograph.core.flow.FlowAnalysisService;
 import com.repograph.core.flow.TaintAnalysisService;
@@ -21,6 +23,7 @@ import java.util.Optional;
  */
 @RestController
 @RequestMapping("/api/v1/flow")
+@ProjectAccess
 public class FlowController {
 
     private final GraphQueryService graphQueryService;

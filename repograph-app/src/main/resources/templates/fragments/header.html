@@ -1,56 +1,68 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
 <header th:fragment="header" class="app-header">
-  <button class="nav-toggle" id="nav-toggle" type="button" aria-controls="main-navigation"
+  <button class="nav-toggle icon-button" id="nav-toggle" type="button" aria-controls="main-navigation"
           :aria-expanded="$store.repograph.navOpen" @click="$store.repograph.toggleNavigation()"
           data-i18n-aria-label="shell.menu" aria-label="打开导航">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-      <path d="M4 6h16M4 12h16M4 18h16"/>
-    </svg>
+    <svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#menu"/></svg>
   </button>
   <div class="logo">
-    <img th:src="@{/img/logo.png}" src="/img/logo.png" alt="RepoGraph" class="logo-img"/>
+    <img th:src="@{/img/repograph-mark.svg}" src="/img/repograph-mark.svg" alt="RepoGraph" class="logo-img"/>
     RepoGraph
   </div>
   <div class="header-sep"></div>
-  <button class="header-search" type="button" onclick="focusGlobalSearch()"
-          data-i18n-aria-label="shell.search" aria-label="搜索代码">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-      <circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/>
-    </svg>
-    <span data-i18n="shell.search">搜索代码</span><kbd>⌘ K</kbd>
+  <button class="header-search icon-button" type="button" onclick="openCommandPalette()"
+          data-i18n-aria-label="command.title" aria-label="命令面板" aria-haspopup="dialog" aria-controls="command-palette">
+    <svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#command"/></svg>
+    <span data-i18n="command.title">命令面板</span><kbd>⌘ K</kbd>
   </button>
   <div class="project-context">
-    <span class="project-context-label" data-i18n="header.project">Project</span>
-    <select id="global-project" onchange="setGlobalProject(this.value)" aria-label="Active project"
+    <span class="select-control"><select id="global-project" onchange="setGlobalProject(this.value)" aria-label="Active project"
             data-i18n-aria-label="header.projectScope">
       <option value="" data-i18n="header.allProjects">All projects</option>
-    </select>
+    </select></span>
   </div>
-  <div class="health-badges">
-    <div class="badge" id="hb-qdrant" data-health="checking">
-      <div class="badge-dot checking" id="hd-qdrant" aria-hidden="true"></div>
-      <span>Qdrant</span>
-      <span class="badge-state" data-i18n="shell.service.checking">检查中</span>
+  <a class="service-indicator icon-button" href="#health" data-i18n-title="health.title" title="服务状态">
+    <svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#activity"/></svg>
+    <i aria-hidden="true" id="service-dot" data-state="checking"></i>
+    <span id="sb-health" class="sr-only" data-state="checking" role="status" data-i18n="shell.status.checking">正在检查服务</span>
+  </a>
+  <details class="header-menu" id="account-menu">
+    <summary class="icon-button" data-i18n-aria-label="shell.account" aria-label="账户与偏好">
+      <svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#user-round"/></svg>
+    </summary>
+    <div class="header-menu-content">
+      <a href="#admin" onclick="document.getElementById('account-menu').open=false" data-i18n="shell.account">账户与偏好</a>
+      <div class="lang-toggle">
+        <button class="lang-btn" id="lang-zh" :class="{ active: $store.repograph.lang === 'zh' }"
+                @click="$store.repograph.setLang('zh')">中文</button>
+        <button class="lang-btn" id="lang-en" :class="{ active: $store.repograph.lang === 'en' }"
+                @click="$store.repograph.setLang('en')">EN</button>
+      </div>
+      <div class="theme-preference" role="group" aria-label="主题" data-i18n-aria-label="theme.title">
+        <span data-i18n="theme.title">主题</span>
+        <div class="theme-options">
+          <button type="button" data-theme-mode="system" aria-pressed="false" onclick="repographTheme.set('system')"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#monitor"/></svg><span data-i18n="theme.system">系统</span></button>
+          <button type="button" data-theme-mode="light" aria-pressed="false" onclick="repographTheme.set('light')"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#sun"/></svg><span data-i18n="theme.light">亮色</span></button>
+          <button type="button" data-theme-mode="dark" aria-pressed="false" onclick="repographTheme.set('dark')"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#moon"/></svg><span data-i18n="theme.dark">暗色</span></button>
+        </div>
+      </div>
+      <div class="health-badges">
+        <div class="badge" id="hb-qdrant" data-health="checking">
+          <div class="badge-dot checking" id="hd-qdrant" aria-hidden="true"></div>
+          <span>Qdrant</span><span class="badge-state" data-i18n="shell.service.checking">检查中</span>
+        </div>
+        <div class="badge" id="hb-ollama" data-health="checking">
+          <div class="badge-dot checking" id="hd-ollama" aria-hidden="true"></div>
+          <span>Ollama</span><span class="badge-state" data-i18n="shell.service.checking">检查中</span>
+        </div>
+        <div class="badge" id="hb-neo4j" data-health="checking">
+          <div class="badge-dot checking" id="hd-neo4j" aria-hidden="true"></div>
+          <span>Neo4j</span><span class="badge-state" data-i18n="shell.service.checking">检查中</span>
+        </div>
+      </div>
+      <button class="btn btn-ghost" type="button" onclick="logoutAccount()" data-i18n="shell.logout">退出登录</button>
     </div>
-    <div class="badge" id="hb-ollama" data-health="checking">
-      <div class="badge-dot checking" id="hd-ollama" aria-hidden="true"></div>
-      <span>Ollama</span>
-      <span class="badge-state" data-i18n="shell.service.checking">检查中</span>
-    </div>
-    <div class="badge" id="hb-neo4j" data-health="checking">
-      <div class="badge-dot checking" id="hd-neo4j" aria-hidden="true"></div>
-      <span>Neo4j</span>
-      <span class="badge-state" data-i18n="shell.service.checking">检查中</span>
-    </div>
-  </div>
-  <div class="lang-toggle">
-    <button class="lang-btn" id="lang-zh"
-            :class="{ active: $store.repograph.lang === 'zh' }"
-            @click="$store.repograph.setLang('zh')">中文</button>
-    <button class="lang-btn" id="lang-en"
-            :class="{ active: $store.repograph.lang === 'en' }"
-            @click="$store.repograph.setLang('en')">EN</button>
-  </div>
+  </details>
 </header>
 </html>

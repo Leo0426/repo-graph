@@ -6,83 +6,25 @@
   <div class="panel-header agent-panel-header">
     <div class="agent-title-row">
       <div>
-        <div class="panel-title" data-i18n="agent.title">Agent 作战台</div>
-        <div class="panel-subtitle" data-i18n="agent.subtitle">可追踪的安全工作流 · 证据链 · 人工检查点</div>
+        <h1 class="panel-title" data-i18n="agent.title">Agent 研判工作台</h1>
+
       </div>
-      <div class="agent-header-controls">
-        <div class="agent-workflow-actions">
-          <button id="agent-prepare-btn" class="btn btn-ghost" type="button" onclick="showAgentPreparation()"
-                  aria-controls="agent-preparation" data-i18n="agent.launch">准备研判</button>
-          <button id="agent-view-runs" class="btn btn-ghost" type="button" onclick="showAgentRuns()"
-                  aria-controls="agent-run-workspace" data-i18n="agent.viewRuns">查看运行</button>
-        </div>
-        <div class="agent-text-size" role="group" data-i18n-aria-label="agent.textSize"
-             aria-label="显示字号">
-          <span data-i18n="agent.textSize">显示字号</span>
-          <button id="agent-text-standard" type="button" onclick="setAgentTextSize('standard')"
-                  data-i18n-title="agent.textStandard" title="标准字号">A</button>
-          <button id="agent-text-large" type="button" onclick="setAgentTextSize('large')"
-                  data-i18n-title="agent.textLarge" title="大字号">A+</button>
-        </div>
-        <div class="agent-system-state"><span></span><b>1</b> PLAYBOOK ONLINE</div>
-      </div>
+
     </div>
   </div>
 
   <div class="panel-body agent-body">
-    <section class="agent-capability-strip" aria-label="Agent capabilities">
-      <button class="agent-capability active" type="button" onclick="openAgentCapability('triage')"
-              data-i18n-title="agent.openTriage" title="进入报警研判">
-        <div class="agent-cap-index">A/01</div>
-        <div><strong>SAST TRIAGE</strong><small data-i18n="agent.cap.sast">报警定位 → 证据组装 → 研判 → 审核</small></div>
-        <span>LIVE</span>
-      </button>
-      <button class="agent-capability available" type="button" onclick="openAgentCapability('architecture')"
-              data-i18n-title="agent.openArchReview" title="进入架构风险评估">
-        <div class="agent-cap-index">A/02</div>
-        <div><strong>ARCH REVIEW</strong><small data-i18n="agent.cap.arch">架构漂移与变更风险评估</small></div>
-        <span>OPEN ↗</span>
-      </button>
-      <button class="agent-capability available" type="button" onclick="openAgentCapability('remediation')"
-              data-i18n-title="agent.openRemediation" title="前往漏洞中心">
-        <div class="agent-cap-index">A/03</div>
-        <div><strong>REMEDIATION</strong><small data-i18n="agent.cap.fix">修复方案生成与验证闭环</small></div>
-        <span>OPEN ↗</span>
-      </button>
-    </section>
-
-    <section id="agent-llm-module" class="agent-llm-module">
-      <button class="agent-llm-header" type="button" onclick="toggleLlmSettings()"
-              aria-controls="agent-llm-settings-body" aria-expanded="false">
-        <span class="agent-llm-mark">AI</span>
-        <span class="agent-llm-name"><b>LLM REVIEW MODULE</b><small data-i18n="agent.llm.desc">本地 Ollama · 仅辅助建议 · 不自动修改漏洞状态</small></span>
-        <span id="agent-llm-state" class="agent-llm-state loading"><i></i><b>LOADING</b><small>—</small></span>
-        <span id="agent-llm-chevron" class="agent-llm-chevron">＋</span>
-      </button>
-      <div id="agent-llm-settings-body" class="agent-llm-settings-body">
-        <div class="agent-llm-policy">
-          <span>POLICY / ADVISORY ONLY</span>
-          <p data-i18n="agent.llm.policy">证据发送前执行字符预算和秘密脱敏；模型 citation 会经过白名单校验。</p>
-        </div>
-        <label class="agent-llm-toggle">
-          <input id="agent-llm-enabled" type="checkbox" onchange="renderLlmDraftState()">
-          <span></span>
-          <b data-i18n="agent.llm.enable">启用 LLM 辅助复核</b>
-        </label>
-        <label><span>PROVIDER</span><input value="OLLAMA" disabled></label>
-        <label class="agent-llm-url"><span>BASE URL</span><input id="agent-llm-base-url" placeholder="http://localhost:11434"></label>
-        <label><span>MODEL</span><input id="agent-llm-model" list="agent-llm-models" placeholder="qwen3:8b"><datalist id="agent-llm-models"></datalist></label>
-        <div class="agent-llm-actions">
-          <button id="agent-llm-test-btn" class="btn btn-ghost" onclick="testLlmConnection()" data-i18n="agent.llm.test">测试连接</button>
-          <button id="agent-llm-save-btn" class="btn btn-primary" onclick="saveLlmSettings()" data-i18n="agent.llm.save">保存设置</button>
-        </div>
-        <div id="agent-llm-message" class="agent-llm-message"></div>
-      </div>
+    <section id="agent-current-task" class="agent-current-task" aria-labelledby="agent-current-heading">
+      <div class="agent-current-copy"><span data-i18n="agent.currentTask">当前任务</span>
+        <h2 id="agent-current-heading"></h2><strong id="agent-current-status"></strong>
+        <p id="agent-current-context"></p><p id="agent-current-note"></p><p id="agent-generation-note"></p></div>
+      <div class="agent-current-actions"><button type="button" class="btn btn-primary" id="agent-current-action" onclick="openCurrentAgentTask()"></button>
+        <button type="button" class="btn btn-ghost" onclick="showAgentPreparation()" data-i18n="agent.prepareAnother">准备另一项研判</button></div>
     </section>
 
     <details id="agent-preparation" class="agent-command-deck" open>
       <summary id="agent-preparation-toggle" class="agent-section-label agent-preparation-toggle">
-        <span>01</span><b data-i18n="agent.launch">准备研判</b>
+        <b data-i18n="agent.launch">准备研判</b>
         <em class="agent-preparation-required" data-i18n="agent.requiredHint">标记 * 的项目为必填项</em>
         <em id="agent-preparation-context" class="agent-preparation-context"></em>
         <span class="agent-preparation-chevron" aria-hidden="true">▾</span>
@@ -97,26 +39,26 @@
 
       <div class="agent-command-grid agent-command-primary">
         <label class="agent-required-field"><span><b data-i18n="agent.project">目标项目</b><i>*</i></span>
-          <select id="agent-project-select" onchange="handleAgentProjectChange()">
+          <span class="select-control"><select id="agent-project-select" onchange="handleAgentProjectChange()">
             <option value="" data-i18n="ph.selectProject">— 选择项目 —</option>
-          </select>
+          </select></span>
           <small id="agent-project-hint" data-i18n="agent.projectHint">选择已完成索引的代码仓库</small>
         </label>
         <label id="agent-scope-field"><span><b data-i18n="agent.vulnerabilityScope">漏洞范围</b></span>
-          <select id="agent-vulnerability-filter" onchange="renderAgentVulnerabilities()">
+          <span class="select-control"><select id="agent-vulnerability-filter" onchange="renderAgentVulnerabilities()">
             <option value="active" data-i18n="agent.scopeActive">待处理（疑似 / 已确认）</option>
             <option value="all" data-i18n="agent.scopeAll">全部漏洞</option>
             <option value="SUSPECTED" data-i18n="agent.scopeSuspected">仅疑似</option>
             <option value="CONFIRMED" data-i18n="agent.scopeConfirmed">仅已确认</option>
-          </select>
-          <small data-i18n="agent.scopeHint">默认隐藏已修复和已忽略记录</small>
+          </select></span>
+          <details class="help-note"><summary data-i18n-aria-label="help.findingScope" aria-label="待研判发现的范围"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#circle-help"/></svg><span data-i18n="help.findingScope">待研判发现的范围</span></summary><div class="help-note-content"><small data-i18n="agent.scopeHint">默认隐藏已修复和已忽略记录</small></div></details>
         </label>
         <label id="agent-format-field" hidden><span><b data-i18n="agent.format">报警格式</b></span>
-          <select id="agent-format" onchange="refreshExternalInputStatus()">
-            <option value="semgrep">SEMGREP JSON</option>
+          <span class="select-control"><select id="agent-format" onchange="refreshExternalInputStatus()">
+            <option value="semgrep">Semgrep JSON</option>
             <option value="sarif">SARIF 2.1</option>
-          </select>
-          <small data-i18n="agent.formatHint">根据导入内容自动识别</small>
+          </select></span>
+          <details class="help-note"><summary data-i18n-aria-label="help.alarmFormat" aria-label="报警输入格式"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#circle-help"/></svg><span data-i18n="help.alarmFormat">报警输入格式</span></summary><div class="help-note-content"><small data-i18n="agent.formatHint">根据导入内容自动识别</small></div></details>
         </label>
       </div>
 
@@ -126,21 +68,21 @@
           <small data-i18n="agent.advancedHint">版本标识与上下文预算</small>
         </summary>
         <div class="agent-command-grid">
-          <label><span>CODE VERSION</span><input id="agent-code-version" placeholder="commit SHA (optional)"></label>
-          <label><span>RULE VERSION</span><input id="agent-rule-version" placeholder="ruleset (optional)"></label>
+          <label><span data-i18n="agent.codeVersion">代码版本</span><input id="agent-code-version" placeholder="commit SHA (optional)"></label>
+          <label><span data-i18n="agent.ruleVersion">规则版本</span><input id="agent-rule-version" placeholder="ruleset (optional)"></label>
           <label><span data-i18n="agent.contextBudget">单条上下文预算</span>
-            <select id="agent-budget-chars">
-              <option value="12000">12K CHARS</option>
-              <option value="24000">24K CHARS</option>
-              <option value="60000">60K CHARS</option>
-            </select>
+            <span class="select-control"><select id="agent-budget-chars">
+              <option value="12000" data-i18n="agent.budget12000">12,000 字符</option>
+              <option value="24000" data-i18n="agent.budget24000">24,000 字符</option>
+              <option value="60000" data-i18n="agent.budget60000">60,000 字符</option>
+            </select></span>
           </label>
           <label id="agent-maxfindings-field" hidden><span data-i18n="agent.maxFindings">最多处理</span>
-            <select id="agent-max-findings">
+            <span class="select-control"><select id="agent-max-findings">
               <option value="10">10</option>
               <option value="25">25</option>
               <option value="50">50</option>
-            </select>
+            </select></span>
           </label>
         </div>
       </details>
@@ -183,25 +125,25 @@
                       data-i18n-title="agent.clear" title="清空输入" aria-label="清空输入">×</button>
             </div>
           </div>
-          <textarea id="agent-findings-json" spellcheck="false" oninput="refreshExternalInputStatus()"
+          <textarea id="agent-findings-json" spellcheck="false" oninput="onAgentFindingsInput()"
                     data-i18n-ph="agent.dropHint" placeholder="粘贴 JSON，或将文件拖到此处"></textarea>
           <div class="agent-payload-tools">
-            <span id="agent-file-name">INPUT / NOT LOADED</span>
+            <span id="agent-file-name" data-i18n="agent.fileEmpty">尚未选择文件</span>
             <span id="agent-input-status" class="agent-input-status" data-i18n="agent.awaitingInput">等待输入</span>
           </div>
         </div>
 
         <aside class="agent-launch-panel">
-          <div class="agent-readiness-title"><span></span><b data-i18n="agent.readiness">任务准备状态</b></div>
+          <div class="agent-readiness-title"><b data-i18n="agent.readiness">任务准备状态</b></div>
           <ul class="agent-readiness-list">
             <li id="agent-ready-project">
-              <i>1</i><span data-i18n="agent.readyProject">选择目标项目</span><b>WAITING</b>
+              <i>1</i><span data-i18n="agent.readyProject">选择目标项目</span><b data-i18n="agent.waiting">待准备</b>
             </li>
             <li id="agent-ready-vulnerability">
-              <i>2</i><span>选择一条漏洞</span><b>WAITING</b>
+              <i>2</i><span>选择一条漏洞</span><b data-i18n="agent.waiting">待准备</b>
             </li>
             <li id="agent-ready-review">
-              <i>3</i><span data-i18n="agent.readyReview">人工审核结论</span><b>CHECKPOINT</b>
+              <i>3</i><span data-i18n="agent.readyReview">人工审核结论</span><b data-i18n="agent.checkpoint">审核检查点</b>
             </li>
           </ul>
           <button id="agent-run-btn" class="agent-execute-btn" onclick="startSastTriageAgent()" disabled>
@@ -217,9 +159,61 @@
       <div id="agent-command-error" class="agent-command-error" role="alert" aria-live="assertive"></div>
     </details>
 
+    <details id="agent-secondary" class="agent-secondary"><summary data-i18n="agent.secondary">模型设置与其他能力</summary>
+    <section class="agent-capability-strip" aria-label="Agent capabilities">
+      <button class="agent-capability active" type="button" onclick="openAgentCapability('triage')"
+              data-i18n-title="agent.openTriage" title="进入报警研判">
+        <svg class="icon agent-cap-index" aria-hidden="true"><use href="/vendor/lucide/icons.svg#shield-check"/></svg>
+        <div><strong data-i18n="agent.cap.triageTitle">报警研判</strong><small data-i18n="agent.cap.sast">报警定位 → 证据组装 → 研判 → 审核</small></div>
+        <span data-i18n="agent.cap.available">可用</span>
+      </button>
+      <button class="agent-capability available" type="button" onclick="openAgentCapability('architecture')"
+              data-i18n-title="agent.openArchReview" title="进入架构风险评估">
+        <svg class="icon agent-cap-index" aria-hidden="true"><use href="/vendor/lucide/icons.svg#chart-no-axes-combined"/></svg>
+        <div><strong data-i18n="agent.cap.archTitle">架构评审</strong><small data-i18n="agent.cap.arch">架构漂移与变更风险评估</small></div>
+        <span data-i18n="agent.cap.open">进入</span>
+      </button>
+      <button class="agent-capability available" type="button" onclick="openAgentCapability('remediation')"
+              data-i18n-title="agent.openRemediation" title="前往漏洞中心">
+        <svg class="icon agent-cap-index" aria-hidden="true"><use href="/vendor/lucide/icons.svg#activity"/></svg>
+        <div><strong data-i18n="agent.cap.fixTitle">修复跟踪</strong><small data-i18n="agent.cap.fix">修复方案生成与验证闭环</small></div>
+        <span data-i18n="agent.cap.open">进入</span>
+      </button>
+    </section>
+
+    <section id="agent-llm-module" class="agent-llm-module" data-admin-only hidden>
+      <button class="agent-llm-header" type="button" onclick="toggleLlmSettings()"
+              aria-controls="agent-llm-settings-body" aria-expanded="false">
+        <span class="agent-llm-mark">AI</span>
+        <span class="agent-llm-name"><b data-i18n="agent.llm.title">模型辅助复核</b><small data-i18n="agent.llm.desc">统一 Provider · 仅辅助建议 · 不自动修改漏洞状态</small></span>
+        <span id="agent-llm-state" class="agent-llm-state loading"><i></i><b data-i18n="agent.llm.loading">读取中</b><small>—</small></span>
+        <span id="agent-llm-chevron" class="agent-llm-chevron">＋</span>
+      </button>
+      <div id="agent-llm-settings-body" class="agent-llm-settings-body">
+        <div class="agent-llm-policy">
+          <span data-i18n="agent.llm.policyLabel">仅提供辅助建议</span>
+          <p data-i18n="agent.llm.policy">证据发送前执行字符预算和秘密脱敏；模型 citation 会经过白名单校验。</p>
+        </div>
+        <label class="agent-llm-toggle">
+          <input id="agent-llm-enabled" type="checkbox" disabled>
+          <span></span>
+          <b data-i18n="agent.llm.enable">启用 LLM 辅助复核</b>
+        </label>
+        <label><span data-i18n="agent.provider">模型服务</span><input id="agent-llm-provider" readonly></label>
+        <label class="agent-llm-url"><span data-i18n="agent.baseUrl">服务地址</span><input id="agent-llm-base-url" readonly></label>
+        <label><span data-i18n="agent.model">模型</span><input id="agent-llm-model" readonly><datalist id="agent-llm-models"></datalist></label>
+        <div class="agent-llm-actions">
+          <button class="btn btn-primary" onclick="openProviderManagement()">管理模型 Provider</button>
+        </div>
+        <div id="agent-llm-message" class="agent-llm-message"></div>
+      </div>
+    </section>
+
+    </details>
+
     <section id="agent-run-workspace" class="agent-operations" tabindex="-1">
       <aside class="agent-run-rail">
-        <div class="agent-section-label"><span>02</span><b data-i18n="agent.runs">运行记录</b>
+        <div class="agent-section-label"><b data-i18n="agent.runs">运行记录</b>
           <em id="agent-run-count">—</em>
           <button onclick="loadAgentRuns()" data-i18n-title="agent.refresh" title="刷新">↻</button>
         </div>
@@ -228,15 +222,41 @@
         </div>
       </aside>
       <div class="agent-run-detail">
-        <div id="agent-timeline-heading" class="agent-section-label" tabindex="-1"><span>03</span><b data-i18n="agent.timeline">执行时间线</b><em id="agent-run-id">NO RUN SELECTED</em></div>
-        <div id="agent-run-detail" class="agent-detail-empty">
-          <div class="agent-radar"><i></i><i></i><i></i></div>
+        <div class="agent-reading-toolbar">
+          <div id="agent-timeline-heading" class="agent-section-label" tabindex="-1"><b data-i18n="agent.timeline">执行时间线</b><em id="agent-run-id" data-i18n="agent.noRun">尚未选择运行</em></div>
+          <div class="agent-text-size" role="group" data-i18n-aria-label="agent.textSize"
+             aria-label="显示字号">
+          <span data-i18n="agent.textSize">显示字号</span>
+          <button id="agent-text-standard" type="button" onclick="setAgentTextSize('standard')"
+                  data-i18n-title="agent.textStandard" title="标准字号">A</button>
+          <button id="agent-text-large" type="button" onclick="setAgentTextSize('large')"
+                  data-i18n-title="agent.textLarge" title="大字号">A+</button>
+          </div>
+        </div>
+        <div id="agent-run-detail" class="agent-detail-empty empty-state">
+          <svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#activity"/></svg>
           <strong data-i18n="agent.noRun">尚未选择运行</strong>
           <span data-i18n="agent.noRunHint">运行 Agent 后，这里会展示步骤、证据引用、缺失信息与人工审核节点。</span>
         </div>
       </div>
     </section>
   </div>
+  <dialog id="agent-review-dialog" class="agent-review-dialog" aria-labelledby="agent-review-title">
+    <header class="review-dialog-header"><h2 id="agent-review-title" data-i18n="review.title">冻结报告与人工审核</h2>
+      <div><div class="review-text-size" role="group" data-i18n-aria-label="agent.textSize" aria-label="显示字号">
+          <button type="button" class="btn btn-ghost" data-agent-text-size="standard" onclick="setAgentTextSize('standard')" data-i18n-title="agent.textStandard" title="标准字号" aria-pressed="true">A</button>
+          <button type="button" class="btn btn-ghost" data-agent-text-size="large" onclick="setAgentTextSize('large')" data-i18n-title="agent.textLarge" title="大字号" aria-pressed="false">A+</button></div>
+        <button type="button" id="agent-review-refresh" class="btn btn-ghost" onclick="loadAgentReview()" data-i18n="review.refresh">刷新审核状态</button>
+        <button type="button" id="agent-review-close" class="btn btn-ghost" onclick="closeAgentReview()" data-i18n="review.close">关闭</button></div></header>
+    <p id="agent-review-status" role="status" aria-live="polite"></p>
+    <div id="agent-review-content" class="review-dialog-content"></div>
+  </dialog>
 </div>
+<div th:fragment="actions" class="page-actions"><div class="agent-workflow-actions">
+          <button id="agent-prepare-btn" class="btn btn-ghost" type="button" onclick="showAgentPreparation()"
+                  aria-controls="agent-preparation" data-i18n="agent.launch">准备研判</button>
+          <button id="agent-view-runs" class="btn btn-ghost" type="button" onclick="showAgentRuns()"
+                  aria-controls="agent-run-workspace" data-i18n="agent.viewRuns">查看运行</button>
+        </div></div>
 </body>
 </html>

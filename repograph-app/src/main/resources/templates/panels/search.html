@@ -3,10 +3,7 @@
 <body>
 <div th:fragment="panel" id="panel-search" class="panel"
      :class="{ active: $store.repograph.panel === 'search' }">
-  <div class="panel-header">
-    <div class="panel-title" data-i18n="search.title">语义搜索</div>
-    <div class="panel-subtitle" data-i18n="search.subtitle">通过自然语言或代码片段检索代码单元</div>
-  </div>
+
   <div class="panel-body">
     <section class="search-controls" aria-label="搜索条件">
     <div class="search-mode-row">
@@ -14,10 +11,10 @@
         <button class="tab active" aria-pressed="true" onclick="setSearchMode('semantic',this)" data-i18n="tab.semantic">语义</button>
         <button class="tab" aria-pressed="false" onclick="setSearchMode('code',this)" data-i18n="tab.code">代码</button>
       </div>
-      <span style="font-size:12px;color:var(--text-3);font-family:var(--fm)" id="search-mode-hint" data-i18n="hint.semantic">自然语言 → 代码单元</span>
+      <span id="search-mode-hint" data-i18n="hint.semantic">自然语言 → 代码单元</span>
     </div>
 
-    <div class="input-row" style="margin-bottom:6px">
+    <div class="input-row">
       <div class="search-history-wrap">
         <div class="search-wrap">
           <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
@@ -40,21 +37,23 @@
       </button>
     </div>
 
-    <div class="kbd-hints" style="margin-bottom:14px">
+    <details class="help-note search-keyboard-help"><summary data-i18n="help.shortcuts">键盘快捷键</summary><div class="kbd-hints">
       <span><kbd>↵</kbd> <span data-i18n="kbd.search">搜索</span></span>
       <span><kbd>↑</kbd><kbd>↓</kbd> <span data-i18n="kbd.nav">导航结果</span></span>
-      <span><kbd>⌘</kbd><kbd>K</kbd> / <kbd>/</kbd> <span data-i18n="kbd.focus">聚焦搜索</span></span>
+      <span><kbd>/</kbd> <span data-i18n="kbd.focus">聚焦搜索</span></span>
       <span><kbd>1</kbd>–<kbd>9</kbd><kbd>0</kbd> <span data-i18n="kbd.panels">切换面板</span></span>
     </div>
 
-    <details id="search-filter-disclosure" class="search-filter-disclosure" open>
+    </details>
+
+    <details id="search-filter-disclosure" class="search-filter-disclosure">
       <summary>
         <strong data-i18n="search.filters">筛选条件</strong>
         <span id="search-filter-summary"></span>
       </summary>
     <div class="search-filters">
       <div>
-        <div class="filter-label" style="margin-bottom:6px" data-i18n="filter.language">语言</div>
+        <div class="filter-label" data-i18n="filter.language">语言</div>
         <div class="filter-row">
           <button type="button" class="filter-chip active" data-group="lang" data-val="" onclick="toggleChip(this,'lang')" data-i18n="chip.all" aria-pressed="true">全部</button>
           <button type="button" class="filter-chip" data-group="lang" data-val="java" onclick="toggleChip(this,'lang')" aria-pressed="false">Java</button>
@@ -63,7 +62,7 @@
         </div>
       </div>
       <div>
-        <div class="filter-label" style="margin-bottom:6px" data-i18n="filter.kind">类型</div>
+        <div class="filter-label" data-i18n="filter.kind">类型</div>
         <div class="filter-row">
           <button type="button" class="filter-chip active" data-group="kind" data-val="" onclick="toggleChip(this,'kind')" data-i18n="chip.all" aria-pressed="true">全部</button>
           <button type="button" class="filter-chip" data-group="kind" data-val="CLASS" onclick="toggleChip(this,'kind')" data-i18n="chip.class" aria-pressed="false">类</button>
@@ -72,16 +71,16 @@
           <button type="button" class="filter-chip" data-group="kind" data-val="INTERFACE" onclick="toggleChip(this,'kind')" data-i18n="chip.interface" aria-pressed="false">接口</button>
         </div>
       </div>
-      <div style="margin-left:auto;display:flex;align-items:flex-end;gap:8px">
+      <div class="search-limit-filter">
         <div>
-          <div class="filter-label" style="margin-bottom:6px" data-i18n="filter.limit">数量</div>
-          <select id="search-limit" style="width:72px;padding:6px 10px" onchange="changeSearchLimit()"
+          <div class="filter-label" data-i18n="filter.limit">数量</div>
+          <span class="select-control"><select id="search-limit" onchange="changeSearchLimit()"
                   data-i18n-aria-label="filter.limit" aria-label="数量">
             <option value="5">5</option>
             <option value="10" selected>10</option>
             <option value="20">20</option>
             <option value="50">50</option>
-          </select>
+          </select></span>
         </div>
       </div>
     </div>
@@ -92,9 +91,18 @@
       </div>
     </details>
 
-    <div class="search-scope" data-i18n="search.scope">检索范围：全部已索引项目</div>
+    <div class="search-scope">
+      <label for="search-scope-select" data-i18n="search.scopeLabel">检索范围</label>
+      <span class="select-control"><select id="search-scope-select" onchange="changeSearchScope(this.value)">
+        <option value="current" data-i18n="search.scopeCurrent">当前仓库</option>
+        <option value="authorized" data-i18n="search.scopeAuthorized">全部已授权仓库</option>
+      </select></span>
+      <span id="search-scope-message" role="status"></span>
+    </div>
     </section>
+    <div class="task-dependency-notice" data-task-notice="search" hidden><span></span><button type="button" class="btn btn-ghost"></button></div>
 
+    <div class="list-view-options"><button type="button" class="btn btn-ghost" data-list-density-toggle aria-pressed="false" onclick="toggleListDensity()" data-i18n="list.compact">紧凑视图</button></div>
     <div id="search-results" aria-live="polite" aria-busy="false">
       <div class="empty-state">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>

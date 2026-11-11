@@ -214,6 +214,7 @@ test('390px findings and expanded source stay inside the viewport in both langua
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, lang + ' has no page overflow');
     assert.equal(await finding.locator('.vuln-status').isVisible(), true);
     assert.equal(await finding.locator('.vuln-severity').isVisible(), true);
+    assert.match(await finding.locator('.vuln-read').getAttribute('aria-label'),lang==='en'?/^Read details:/:/^阅读详情：/);
   }
 });
 

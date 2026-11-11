@@ -62,17 +62,19 @@ test('distribution bars use the DTO denominator and zero counts never get a nonz
   assert.equal(await framework.locator('.dist-bar').evaluate(el => el.style.width), '75%');
 });
 
-test('kind distribution supports keyboard activation and explains the all-project search scope', async t => {
+test('kind distribution supports keyboard activation within the displayed repository', async t => {
   const { page } = await workspace(t);
   await statsRoute(page, () => snapshot());
   await load(page);
   const methods = page.locator('#stats-content .dist-row[title^="METHOD"]');
   await methods.focus();
-  assert.match(await methods.getAttribute('aria-label'), /across all projects/);
+  assert.match(await methods.getAttribute('aria-label'), /in this repository/);
   await methods.press('Enter');
   await page.waitForFunction(() => document.querySelector('#panel-search.active')
     && state.filters.kind === 'METHOD' && document.activeElement?.id === 'search-input');
   assert.equal(await page.evaluate(() => state.filters.kind), 'METHOD');
+  assert.equal(await page.locator('#global-project').inputValue(),pid);
+  assert.equal(await page.locator('#search-scope-select').inputValue(),'current');
   assert.equal(await page.locator('#search-input').evaluate(el => el === document.activeElement), true);
 });
 
@@ -205,7 +207,7 @@ test('a slow watch action converges after refreshing the same project', async t 
   let started;
   const mutationStarted = new Promise(resolve => { started = resolve; });
   await page.route(`**/api/v1/watch/${pid}`, route => route.fulfill({ json: { watching } }));
-  await page.route('**/api/v1/watch?**', async route => {
+  await page.route(url => url.pathname === '/api/v1/watch', async route => {
     started();
     await completion;
     watching = true;

@@ -71,3 +71,41 @@ Embedding 使用测试替身，该回归不证明外部服务集成通过。
 图事务回滚、清理失败后重建 SQLite 实例重试、同项目串行和可中断等待、监听停止/重新注册/关闭的旧任务失效。
 这些测试包含真实 SQLite 与嵌入式 Neo4j，但 Qdrant 单测使用模拟客户端；真实保留 ID 清理与项目隔离
 须看 `QdrantVectorStoreIT` 的实际执行结果。重建缓存实例模拟持久状态恢复，不等于真实进程崩溃注入。
+
+## 账号、项目隔离与模型 Provider
+
+`EnterpriseDirectoryTest` 验证真实 SQLite 的审核状态、组织/个人归属、撤权与重启持久化；
+`IdentityHttpTest` 验证真实安全链的登录、CSRF、禁用会话与限流；`ProjectAccessHttpTest` 覆盖
+项目列表/查询、持久资源 ID、请求体、项目根路径和混合归属批量导出。外部图/向量边界使用替身。
+`ModelProviderStoreTest` 覆盖加密、凭据编辑、旧配置迁移、选择持久化及事务审计；
+`GenerationGatewayTest` 和 `GenerationGatewayDeadlineTest` 使用本地 HTTP 服务验证三个协议、
+流式分片、认证头、错误脱敏、取消和整次时限，不等于真实厂商服务验收。三个模型适配器及研判服务测试
+保留输出解析、citation/预算约束与降级验证。
+`ModelCatalogTest` 使用本地 HTTP 覆盖草稿发现、四协议值的路径/认证、Anthropic 分页、已保存密钥的地址绑定、
+失败脱敏、禁止重定向、响应上限及慢响应总时限；`ProjectAccessHttpTest` 验证发现端点管理员/CSRF 和草稿不落库。
+研判及评测回归验证未知价格可调用、费用和包含未知项的总费用为 null；已有价格仍执行原成本预算。
+
+`admin-workflow.test.cjs` 覆盖注册待审、管理审核、组织成员和项目归属、普通用户界面隔离、
+Provider 保存/选择/停用/密钥不回显以及保存失败重试。它使用模拟 API，须结合 HTTP 安全链测试解读。
+该浏览器回归还验证模型发现后的选择/手填、失败重试、空列表、连接变化丢弃迟到响应、语言及亮暗/窄屏表单，
+并确认没有价格输入或价格拦截提示。
+MCP 的 `RepographApiAuthenticationTest` 验证 session/CSRF 与过期重认证；真实可执行进程还需单独冒烟。
+
+仓库工作流回归 `repository-workspace.test.cjs` 验证无 hash 首页、五域导航、仓库到检索/Wiki/缺陷的范围、
+历史与刷新、空仓库/读取失败重试、普通用户接入提示以及手机/英文。原 shell/workspace 测试继续覆盖
+统计深链和全局范围、键盘、乱序、删除、模态与各功能。Provider 模板回归在 `admin-workflow.test.cjs`，
+覆盖所有模板不触发请求、不携带旧草稿秘密、企业网关保存及编辑密钥保护。
+`GenerationGatewayTest` 对 OpenAI 原生和兼容两种参数契约分别验证实际 HTTP 请求及 SSE；
+`ModelProviderStoreTest` 覆盖兼容协议的保存/重启/密钥生命周期。
+
+
+视觉收敛回归包括 `design-system.test.cjs` 的亮/暗主题 × 桌面/手机 × 14 面板及登录注册，
+和 `command-palette.test.cjs` 的命令、焦点恢复、权限入口、菜单与图标渲染。预览每个视觉面板使用
+独立文档导航，等待其初始模拟数据完成；通过不等于真实后端连通或完整 WCAG 合规。
+
+`search-scope.test.cjs` 验证显式授权范围、同页历史/刷新、撤权和迟到响应；`repository-tasks.test.cjs`
+验证行内直接进入任务、长名称与列表位置；`capabilities.test.cjs` 验证任务依赖、生成配置分离和只读边界。
+`agent-reading.test.cjs` 覆盖全部 Run 状态、两档字号、按仓库保留准备草稿、运行/漏洞乱序、轮询焦点，
+以及冻结报告读取、人工认领/确认/驳回/退回、失败理由保留、权限变化、非唯一关联、模态焦点和亮暗布局。
+这些浏览器检查仍使用模拟 API；真实安全链/SQLite/审核冻结由 `ProjectAccessHttpTest`、
+`ReviewQueueStoreTest` 和相应控制器测试验证，向量授权集合的实际过滤由 `QdrantVectorStoreIT` 验证。

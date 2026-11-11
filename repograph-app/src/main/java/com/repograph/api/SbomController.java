@@ -1,5 +1,7 @@
 package com.repograph.api;
 
+import com.repograph.identity.ProjectAccess;
+
 import com.repograph.sbom.SbomException;
 import com.repograph.sbom.SbomService;
 import org.springframework.http.MediaType;
@@ -45,6 +47,7 @@ public class SbomController {
      * @return CycloneDX JSON 字符串，失败时返回 400 或 404
      */
     @GetMapping("/sbom/{projectId}")
+    @ProjectAccess(source = ProjectAccess.Source.PATH, verifyProjectRoot = true)
     public ResponseEntity<String> sbom(
             @PathVariable String projectId,
             @RequestParam String projectRoot,

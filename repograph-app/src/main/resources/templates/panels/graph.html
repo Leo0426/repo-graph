@@ -3,13 +3,11 @@
 <body>
 <div th:fragment="panel" id="panel-graph" class="panel"
      :class="{ active: $store.repograph.panel === 'graph' }">
-  <div class="panel-header">
-    <div class="panel-title" data-i18n="graph.title">代码图谱</div>
-    <div class="panel-subtitle" data-i18n="graph.subtitle">探索调用链、影响分析与类型层次结构</div>
-  </div>
+
   <div class="graph-container">
     <!-- Sidebar -->
     <div class="graph-sidebar">
+      <div class="task-dependency-notice" data-task-notice="graph" hidden><span></span><button type="button" class="btn btn-ghost"></button></div>
       <div id="graph-target-wrap">
         <label class="field-label" for="graph-target" data-i18n="graph.target">目标符号</label>
         <input type="text" id="graph-target" placeholder="com.example.Foo#bar(String)" autocomplete="off"
@@ -17,44 +15,32 @@
           oninput="updateGraphClassHint(this.value);debouncedGraphSymbols()">
         <div id="graph-class-hint" class="graph-class-hint" style="display:none"
           data-i18n="graph.classHint">↳ 类级别查询 — 自动展开到所有成员方法</div>
-        <label class="field-label" for="graph-project" style="margin-top:8px" data-i18n="graph.entrypointsProject">项目（可选）</label>
+        <label class="field-label" for="graph-project" data-i18n="graph.entrypointsProject">项目（可选）</label>
         <input type="text" id="graph-project" placeholder="project-name" autocomplete="off"
           list="projects-datalist" data-i18n-ph="ph.projectName">
       </div>
 
       <div>
-        <div class="field-label" data-i18n="graph.queryType">查询类型</div>
-        <div class="tab-row" id="graph-tab-row" style="flex-direction:column;width:100%">
-          <button class="tab active" style="text-align:left" onclick="setGraphMode('callers',this)" data-i18n="graph.callers">
-            ↑ 调用方 — 谁调用了它
-          </button>
-          <button class="tab" style="text-align:left" onclick="setGraphMode('callees',this)" data-i18n="graph.callees">
-            ↓ 被调用 — 它调用了谁
-          </button>
-          <button class="tab" style="text-align:left" onclick="setGraphMode('impact',this)" data-i18n="graph.impact">
-            ◎ 影响面 — 受影响的范围
-          </button>
-          <button class="tab" style="text-align:left" onclick="setGraphMode('subtypes',this)" data-i18n="graph.subtypes">
-            ⬦ 子类型 — 实现类
-          </button>
-          <button class="tab" style="text-align:left" onclick="setGraphMode('entrypoints',this)" data-i18n="graph.entrypoints">
-            ⊙ 入口点 — 框架注解方法
-          </button>
-          <button class="tab" style="text-align:left" onclick="setGraphMode('flow',this)" data-i18n="graph.flow">
-            ⇢ 流分析 — 数据流 / CFG / PDG
-          </button>
-          <button class="tab" style="text-align:left" onclick="setGraphMode('deadcode',this)" data-i18n="graph.deadcode">
-            ✗ 死代码 — 无调用方的方法
-          </button>
-          <button class="tab" style="text-align:left" onclick="setGraphMode('testgap',this)" data-i18n="graph.testgap">
-            △ 测试空白 — 无覆盖路径的方法
-          </button>
+        <div class="field-label" data-i18n="graph.queryType">查询类型</div><output id="graph-current-mode"></output>
+        <div class="tab-row" id="graph-tab-row">
+          <button class="tab active" onclick="setGraphMode('callers',this)"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#arrow-down-left"/></svg><span data-i18n="graph.callers">调用方</span></button>
+          <button class="tab" onclick="setGraphMode('callees',this)"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#arrow-up-right"/></svg><span data-i18n="graph.callees">被调用</span></button>
+          <button class="tab" onclick="setGraphMode('impact',this)"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#scan"/></svg><span data-i18n="graph.impact">影响面</span></button>
+          <details id="graph-more-queries"><summary data-i18n="graph.moreQueries">更多查询</summary>
+            <div class="graph-more-buttons">
+          <button class="tab" onclick="setGraphMode('subtypes',this)"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#git-fork"/></svg><span data-i18n="graph.subtypes">子类型</span></button>
+          <button class="tab" onclick="setGraphMode('entrypoints',this)"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#log-in"/></svg><span data-i18n="graph.entrypoints">入口点</span></button>
+          <button class="tab" onclick="setGraphMode('flow',this)"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#workflow"/></svg><span data-i18n="graph.flow">流分析</span></button>
+          <button class="tab" onclick="setGraphMode('deadcode',this)"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#circle-off"/></svg><span data-i18n="graph.deadcode">疑似死代码</span></button>
+          <button class="tab" onclick="setGraphMode('testgap',this)"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#flask-conical"/></svg><span data-i18n="graph.testgap">测试空白</span></button>
+            </div>
+          </details>
         </div>
       </div>
 
       <div id="depth-wrap">
-        <label class="field-label" for="graph-depth"><span data-i18n="graph.depth">深度</span> <span id="depth-val" style="color:var(--mint)">2</span></label>
-        <input type="range" id="graph-depth" min="1" max="5" value="2" style="width:100%;accent-color:var(--mint)"
+        <label class="field-label" for="graph-depth"><span data-i18n="graph.depth">深度</span> <span id="depth-val">2</span></label>
+        <input type="range" id="graph-depth" min="1" max="5" value="2"
           oninput="document.getElementById('depth-val').textContent=this.value">
       </div>
 
@@ -63,16 +49,16 @@
         <input type="text" id="entrypoints-project" placeholder="project-name" autocomplete="off"
           list="projects-datalist"
           data-i18n-ph="ph.projectName" onkeydown="if(event.key==='Enter')doGraphQuery()">
-        <label class="field-label" for="entrypoints-lang" style="margin-top:8px" data-i18n="graph.entrypointsLang">语言过滤</label>
-        <select id="entrypoints-lang" onchange="doGraphQuery()">
+        <label class="field-label" for="entrypoints-lang" data-i18n="graph.entrypointsLang">语言过滤</label>
+        <span class="select-control"><select id="entrypoints-lang" onchange="doGraphQuery()">
           <option value="" data-i18n="chip.all">全部</option>
           <option value="java">Java</option>
           <option value="c">C</option>
           <option value="python">Python</option>
-        </select>
+        </select></span>
       </div>
 
-      <button id="graph-query-btn" class="btn btn-primary" type="button" style="width:100%" onclick="doGraphQuery()">
+      <button id="graph-query-btn" class="btn btn-primary" type="button" onclick="doGraphQuery()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51 15.42 17.49M15.41 6.51 8.59 10.49"/></svg>
         <span id="graph-query-label" data-i18n="graph.queryAction">查询图谱</span>
       </button>
@@ -81,11 +67,11 @@
 
       <div class="field-label" id="graph-legend-label" data-i18n="graph.legend">图例</div>
       <div class="graph-legend">
-        <div class="legend-item"><div class="legend-dot" style="background:#3EFFA0"></div>CLASS</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#A78BFA"></div>METHOD</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#FBBF24"></div>FUNCTION</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#60A5FA"></div>INTERFACE</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#F87171"></div>ROOT</div>
+        <div class="legend-item"><div class="legend-dot legend-mint"></div><span data-i18n="kind.class"></span></div>
+        <div class="legend-item"><div class="legend-dot legend-purple"></div><span data-i18n="kind.method"></span></div>
+        <div class="legend-item"><div class="legend-dot legend-amber"></div><span data-i18n="kind.function"></span></div>
+        <div class="legend-item"><div class="legend-dot legend-cyan"></div><span data-i18n="kind.interface"></span></div>
+        <div class="legend-item"><div class="legend-dot legend-red"></div><span data-i18n="kind.root"></span></div>
       </div>
       <p id="graph-related-hint" class="graph-related-hint" data-i18n="graph.relatedHint">查询关联视图 · 连线表示与目标的可达关系</p>
 
@@ -93,7 +79,9 @@
         <div class="divider"></div>
         <div class="field-label" data-i18n="graph.selectedNode">已选节点</div>
         <div class="node-detail" id="node-detail-content"></div>
-        <button class="btn btn-ghost" style="width:100%;margin-top:8px;font-size:12px" onclick="pivotToNode()">
+        <button id="graph-source-btn" type="button" class="btn btn-ghost" onclick="openSelectedGraphSource()" data-i18n="graph.readSource">阅读源码</button>
+        <p id="graph-source-status" role="status"></p>
+        <button id="graph-pivot-btn" class="btn btn-ghost" onclick="pivotToNode()">
           <span data-i18n="btn.pivotNode">以此节点为目标查询 →</span>
         </button>
       </div>
@@ -118,8 +106,8 @@
             <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
           </filter>
           <linearGradient id="link-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stop-color="#3EFFA0" stop-opacity="0.6"/>
-            <stop offset="100%" stop-color="#A78BFA" stop-opacity="0.3"/>
+            <stop offset="0%" stop-color="var(--graph-edge)" stop-opacity="0.6"/>
+            <stop offset="100%" stop-color="var(--graph-edge)" stop-opacity="0.3"/>
           </linearGradient>
         </defs>
       </svg>

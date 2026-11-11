@@ -1,5 +1,7 @@
 package com.repograph.api;
 
+import com.repograph.identity.ProjectAccess;
+
 import com.repograph.core.asset.AssetImportService;
 import com.repograph.core.asset.AssetNotReadyException;
 import com.repograph.core.asset.AssetStatus;
@@ -49,6 +51,7 @@ public class AuthorizationEvidenceController {
      * @return 路由证据；资产不存在时返回 404
      */
     @GetMapping("/{assetId}/authorization-evidence")
+    @ProjectAccess(value = "assetId", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.ASSET)
     public ResponseEntity<List<AuthorizationEvidence>> analyze(
             @PathVariable String assetId,
             @RequestParam(defaultValue = "6") int depth) {

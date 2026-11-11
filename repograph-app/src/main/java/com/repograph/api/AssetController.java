@@ -1,5 +1,7 @@
 package com.repograph.api;
 
+import com.repograph.identity.ProjectAccess;
+
 import com.repograph.core.asset.AssetImportService;
 import com.repograph.core.asset.AssetProfileOptions;
 import com.repograph.core.asset.AssetProfileService;
@@ -89,6 +91,7 @@ public class AssetController {
      * @return 资产状态；不存在时 404
      */
     @GetMapping("/{assetId}")
+    @ProjectAccess(value = "assetId", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.ASSET)
     public ResponseEntity<AssetResponse> find(@PathVariable String assetId) {
         return assetImportService.find(assetId)
                 .map(asset -> ResponseEntity.ok(toResponse(asset)))
@@ -104,6 +107,7 @@ public class AssetController {
      * @return 当前资产画像；资产不存在时 404
      */
     @GetMapping("/{assetId}/profile")
+    @ProjectAccess(value = "assetId", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.ASSET)
     public ResponseEntity<ProjectAssetProfile> profile(
             @PathVariable String assetId,
             @RequestParam(required = false) List<String> includeScanner,

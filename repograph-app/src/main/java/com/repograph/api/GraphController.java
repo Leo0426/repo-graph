@@ -1,5 +1,7 @@
 package com.repograph.api;
 
+import com.repograph.identity.ProjectAccess;
+
 import com.repograph.core.graph.GraphDiagnosticsService;
 import com.repograph.core.graph.GraphQueryService;
 import com.repograph.core.model.CodeUnit;
@@ -20,6 +22,7 @@ import java.util.stream.Collectors;
  */
 @RestController
 @RequestMapping("/api/v1/graph")
+@ProjectAccess
 public class GraphController {
 
     private final GraphQueryService graphQueryService;

@@ -1,5 +1,7 @@
 package com.repograph.api;
 
+import com.repograph.identity.ProjectAccess;
+
 import com.repograph.core.graph.GraphQueryService;
 import com.repograph.core.model.CodeUnit;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -37,6 +39,7 @@ public class FrameworkController {
      * @return 框架入口点 {@link CodeUnit} 列表，无结果时返回空列表
      */
     @GetMapping("/frameworks/{projectId}")
+    @ProjectAccess(source = ProjectAccess.Source.PATH)
     public List<CodeUnit> frameworks(@PathVariable String projectId) {
         return graphQueryService.findEntryPoints(projectId);
     }

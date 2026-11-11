@@ -41,7 +41,7 @@ function onMetricsProjectChange() {
 }
 
 function clearMetricsPanel() {
-  document.getElementById('metrics-health').innerHTML = `<div class="metrics-empty"><strong>${metricLabel('metrics.empty')}</strong><p>${metricLabel('metrics.noSelectionHint')}</p></div>`;
+  document.getElementById('metrics-health').innerHTML = emptyState('metrics.empty', 'metrics.noSelectionHint', 'chart-no-axes-combined');
   document.getElementById('metrics-health').setAttribute('aria-busy', 'false');
   setMetricsTabContent('');
   document.getElementById('metrics-tab-content').setAttribute('aria-busy', 'false');
@@ -117,7 +117,8 @@ function renderMetricsHealth(report) {
       ${report.totalUnits === 0 ? `<p>${metricLabel('metrics.noUnits')}</p>` : ''}</div>
     <div class="metrics-health-facts"><h2>${metricLabel('metrics.facts')}</h2><div class="metrics-dimensions">${dimensions.map(([key, value, detail]) => `<div class="metrics-dimension" data-dimension="${key}"><span>${metricLabel('metrics.dim.' + key)}</span><strong>${esc(value)}</strong>${detail ? `<small>${esc(detail)}</small>` : ''}</div>`).join('')}</div></div>
     <div class="metrics-snapshot"><span>${metricLabel('stat.units')} <b>${count(report.totalUnits)}</b></span><span>${metricLabel('stat.files')} <b>${count(report.totalFiles)}</b></span><span>${metricLabel('stat.edges')} <b>${count(report.totalEdges)}</b></span><span>${metricLabel('metrics.productionMethods')} <b>${count(production)}</b></span>${report.generatedAt ? `<time datetime="${esc(report.generatedAt)}" title="${esc(report.generatedAt)}">${metricLabel('metrics.snapshot')} ${esc(relativeTime(report.generatedAt))}</time>` : ''}</div>
-    <div class="metrics-health-notes"><p>${metricLabel('metrics.factHint')}</p>${production === 0 ? `<p class="metrics-no-methods">${metricLabel('metrics.noMethods')}</p>` : ''}<p>${metricLabel('metrics.ratioHint')}</p></div>
+    ${production === 0 ? `<p class="metrics-no-methods">${metricLabel('metrics.noMethods')}</p>` : ''}
+    <details class="help-note metrics-health-notes"><summary>${metricLabel('help.metricsDefinitions')}</summary><div class="help-note-content"><p>${metricLabel('metrics.factHint')}</p><p>${metricLabel('metrics.ratioHint')}</p></div></details>
   </div>`;
 }
 
@@ -323,14 +324,14 @@ function renderArchitectureReview(review) {
           <div><dt>${metricLabel('arch.benefit')}</dt><dd>${esc(candidate.benefit)}</dd></div>
           <div><dt>${metricLabel('arch.costRisk')}</dt><dd>${esc(candidate.cost)} · ${esc(candidate.risk)}</dd></div>
         </dl>
-        <footer><span>${esc(candidate.methodology)}</span><div>${citations}</div></footer>
+        <footer><div>${citations}</div></footer>
       </div>
     </article>`;
   }).join('');
   const missing = (review.missingInfo || []).map(item => `<li>${esc(item)}</li>`).join('');
   result.innerHTML = `<div class="architecture-review-meta">
       <span class="${statusClass}">${metricLabel('arch.' + statusClass)}</span>
-      <code>${esc(review.methodology)}</code><small>${esc(review.model || '—')}</small>
+      <small>${esc(review.model || '—')}</small>
     </div>
     ${observations ? `<ul class="architecture-observations">${observations}</ul>` : ''}
     <div class="architecture-candidates">${candidates || `<div class="architecture-review-empty">${metricLabel('arch.noCandidates')}</div>`}</div>

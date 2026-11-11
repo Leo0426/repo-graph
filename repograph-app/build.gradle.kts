@@ -13,6 +13,10 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-thymeleaf")
 
+    implementation(libs.spring.security.crypto)
+    implementation(libs.spring.security.starter)
+    testImplementation(libs.spring.security.test)
+
     // Storage
     implementation(libs.sqlite.jdbc)
     implementation(libs.neo4j.driver)

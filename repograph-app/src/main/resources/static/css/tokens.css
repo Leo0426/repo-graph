@@ -1,0 +1,87 @@
+/* Shared roles. Keep literal palette values here; workbenches consume these roles. */
+:root {
+  color-scheme: light;
+  --bg: #f7f7f6;
+  --bg-2: #ffffff;
+  --bg-3: #efefed;
+  --accent-soft: #eaf2ed;
+  --accent-soft-hover: #dce9e0;
+  --border: #dddfdc;
+  --border-a: #a8b6ad;
+  --graph-edge: #718077;
+  --text: #262b28;
+  --text-1: var(--text);
+  --text-2: #535d56;
+  --text-3: #606960;
+  --mint: #205b46;
+  --mint-d: #174834;
+  --on-accent: #ffffff;
+  --cyan: #2d637f;
+  --purple: #704f8c;
+  --amber: #875414;
+  --red: #ac3933;
+  --danger-soft: #faecea;
+  --accent-rgb: 32 91 70;
+  --info-rgb: 45 99 127;
+  --warning-rgb: 135 84 20;
+  --danger-rgb: 172 57 51;
+  --purple-rgb: 112 79 140;
+  --ink-rgb: 28 34 30;
+  --code-bg: var(--bg-3);
+  --glass: var(--bg-2);
+  --glass-h: var(--bg-3);
+  --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --ff: var(--ui);
+  --fm: 'JetBrains Mono', ui-monospace, monospace;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-body: 14px;
+  --text-title: 20px;
+  --text-display: 24px;
+  --radius-control: 6px;
+  --surface-radius: 8px;
+  --r: var(--surface-radius);
+  --sidebar: 208px;
+  --control-height: 34px;
+  --surface-padding: 16px;
+  --page-inset: 24px;
+  --shadow-popover: 0 12px 36px rgb(var(--ink-rgb) / .16);
+  --motion-fast: 130ms;
+  --motion-enter: 180ms;
+  --motion-ease: cubic-bezier(.2,.7,.2,1);
+  --ease: var(--motion-ease);
+}
+:root[data-color-scheme="dark"] {
+  color-scheme: dark;
+  --bg: #171b19;
+  --bg-2: #202622;
+  --bg-3: #2a322d;
+  --accent-soft: #263e32;
+  --accent-soft-hover: #304e3f;
+  --border: #3e4942;
+  --border-a: #65786b;
+  --graph-edge: #81958a;
+  --text: #edf1ee;
+  --text-2: #b9c4bc;
+  --text-3: #a1afa5;
+  --mint: #94d5ae;
+  --mint-d: #b4e5c6;
+  --on-accent: #10291c;
+  --cyan: #98c7e1;
+  --purple: #cbb3e2;
+  --amber: #e7bf80;
+  --red: #f0a19a;
+  --danger-soft: #402b2a;
+  --accent-rgb: 148 213 174;
+  --info-rgb: 152 199 225;
+  --warning-rgb: 231 191 128;
+  --danger-rgb: 240 161 154;
+  --purple-rgb: 203 179 226;
+  --ink-rgb: 0 0 0;
+}
+@media (min-width: 1600px) { :root { --page-inset: 32px; } }
+@media (max-width: 1000px) { :root { --sidebar: 190px; } }
+@media (max-width: 760px) {
+  :root { --control-height: 40px; --surface-padding: 14px; --page-inset: 16px; }
+}

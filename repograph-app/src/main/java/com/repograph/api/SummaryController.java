@@ -1,5 +1,7 @@
 package com.repograph.api;
 
+import com.repograph.identity.ProjectAccess;
+
 import com.repograph.core.wiki.SummaryDocument;
 import com.repograph.core.wiki.SummaryTreeNode;
 import com.repograph.wiki.SummaryStore;
@@ -43,6 +45,7 @@ public class SummaryController {
      * @return 202，含 agentRunId 与轮询地址
      */
     @PostMapping("/generate")
+    @ProjectAccess
     public ResponseEntity<Map<String, String>> generate(@RequestParam String projectId) {
         String runId = jobService.submit(projectId);
         return ResponseEntity.accepted().body(Map.of(
@@ -58,6 +61,7 @@ public class SummaryController {
      * @return 摘要文档列表（PROJECT 级在前）
      */
     @GetMapping
+    @ProjectAccess
     public List<SummaryDocument> list(@RequestParam String projectId) {
         return store.listLatest(projectId);
     }
@@ -69,6 +73,7 @@ public class SummaryController {
      * @return 树节点列表
      */
     @GetMapping("/tree")
+    @ProjectAccess
     public List<SummaryTreeNode> tree(@RequestParam String projectId) {
         return store.listLatest(projectId).stream()
                 .map(SummaryTreeNode::from)
@@ -82,6 +87,7 @@ public class SummaryController {
      * @return 摘要文档；不存在时 404
      */
     @GetMapping("/{id}")
+    @ProjectAccess(value = "id", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.SUMMARY)
     public ResponseEntity<SummaryDocument> get(@PathVariable String id) {
         return store.findById(id)
                 .map(ResponseEntity::ok)

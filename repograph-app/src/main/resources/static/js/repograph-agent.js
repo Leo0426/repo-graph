@@ -11,6 +11,13 @@ const agentUi = {
   currentRun: null,
   runListSignature: '',
   runDetailSignature: '',
+  runsRequestVersion: 0,
+  detailRequestVersion: 0,
+  runLoadError: '',
+  vulnRequestVersion: 0,
+  preparationProjectId: null,
+  preparationDrafts: new Map(),
+  fileReadVersion: 0,
   pollingBusy: false,
   expandedDetails: new Set(),
   taintEvidence: new Map(),
@@ -23,12 +30,19 @@ function initAgentWorkbench() {
   if (!panel || panel.dataset.initialized) return;
   panel.dataset.initialized = 'true';
   panel.addEventListener('keydown', event => {
+    if (event.isComposing || event.target.closest('dialog')) return;
     if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
       event.preventDefault();
       if (!document.getElementById('agent-run-btn').disabled) startSastTriageAgent();
     }
   });
   setAgentInputMode(agentUi.inputMode);
+}
+
+function agentCapabilityLabel(capability) {
+  const key = 'agent.step.' + capability;
+  const label = t(key);
+  return label === key ? capability.replaceAll('_', ' ') : label;
 }
 
 function openAgentCapability(capability) {
@@ -59,6 +73,41 @@ function showAgentPreparation() {
   focusAgentWorkflow(document.getElementById('agent-preparation-toggle'));
 }
 
+function renderAgentCurrentTask() {
+  const element = document.getElementById('agent-current-task');
+  if (!element) return;
+  const run = agentUi.currentRun?.id === agentUi.selectedId ? agentUi.currentRun
+    : agentUi.runs.find(item => item.id === agentUi.selectedId);
+  element.dataset.status = run?.status || 'PREPARING';
+  const taskKey = run?.playbook === 'WIKI_SUMMARY' ? 'agent.taskWiki'
+    : run?.playbook === 'SAST_TRIAGE' ? (run.inputReference?.startsWith('vulnerability:') ? 'agent.taskVulnerability' : 'agent.taskSast') : '';
+  document.getElementById('agent-current-heading').textContent = run
+    ? (taskKey ? t(taskKey) : run.playbook || t('agent.currentTask')) : t('agent.launch');
+  document.getElementById('agent-current-status').textContent = run ? agentStatus(run.status).label : t('agent.completeRequired');
+  const project = state.projects.find(project => project.projectId === (run?.projectId || state.activeProjectId));
+  document.getElementById('agent-current-context').textContent = [project ? projectName(project) : '', run?.id || ''].filter(Boolean).join(' · ');
+  const activeStep = run?.steps?.find(step => step.status === 'RUNNING');
+  const note = run?.statusReason
+    || (activeStep ? `${agentCapabilityLabel(activeStep.capability)} · ${activeStep.summary || ''}`
+      : t(run ? `agent.current.${run.status}` : 'agent.current.PREPARING'));
+  document.getElementById('agent-current-note').textContent = agentUi.runLoadError
+    ? `${t('agent.runStateStale')} ${agentUi.runLoadError}` : note;
+  document.getElementById('agent-current-action').textContent = t(!run ? 'agent.launch'
+    : (run.outputReference || '').startsWith('report-snapshot:') ? 'agent.readReviewReport' : 'agent.viewRuns');
+  document.getElementById('agent-current-action').disabled = !!run && agentUi.currentRun?.id !== run.id;
+}
+
+function openCurrentAgentTask() {
+  if (agentUi.selectedId && agentUi.currentRun?.id !== agentUi.selectedId) return;
+  if (!agentUi.currentRun) return showAgentPreparation();
+  if ((agentUi.currentRun.outputReference || '').startsWith('report-snapshot:')) return openAgentReview();
+  showAgentRuns();
+  const output = document.getElementById('agent-output-slot');
+  if ((agentUi.currentRun.outputReference || '').startsWith('report-snapshot:') && output) {
+    focusAgentWorkflow(output);
+  }
+}
+
 function showAgentRuns() {
   if (Alpine.store('repograph').panel !== 'agent') return;
   const preparation = document.getElementById('agent-preparation');
@@ -76,6 +125,35 @@ function renderAgentPreparationSummary() {
     : vulnerability?.title || t('agent.readyVulnerability');
   summary.textContent = project ? `${projectName(project)} · ${input}` : t('agent.completeRequired');
   summary.title = summary.textContent;
+}
+
+const AGENT_DRAFT_FIELDS = {
+  'agent-findings-json': '', 'agent-code-version': '', 'agent-rule-version': '', 'agent-format': 'semgrep',
+  'agent-budget-chars': '12000', 'agent-max-findings': '10', 'agent-vulnerability-filter': 'active',
+  'agent-vulnerability-search': ''
+};
+
+function restoreAgentPreparation(projectId) {
+  if (agentUi.preparationProjectId === projectId) return;
+  if (agentUi.preparationProjectId === null) { agentUi.preparationProjectId = projectId; return; }
+  agentUi.fileReadVersion++;
+  agentUi.preparationDrafts.set(agentUi.preparationProjectId, {
+    fields: Object.fromEntries(Object.keys(AGENT_DRAFT_FIELDS).map(id => [id, document.getElementById(id).value])),
+    mode: agentUi.inputMode, vulnerabilityId: agentUi.selectedVulnerabilityId,
+    advanced: document.querySelector('.agent-advanced-options').open,
+    filename: document.getElementById('agent-file-name').dataset.filename || ''
+  });
+  agentUi.preparationProjectId = projectId;
+  const draft = agentUi.preparationDrafts.get(projectId);
+  for (const [id, fallback] of Object.entries(AGENT_DRAFT_FIELDS)) document.getElementById(id).value = draft?.fields[id] ?? fallback;
+  agentUi.selectedVulnerabilityId = draft?.vulnerabilityId || '';
+  document.querySelector('.agent-advanced-options').open = draft?.advanced || false;
+  const filename = document.getElementById('agent-file-name');
+  filename.dataset.filename = draft?.filename || '';
+  filename.textContent = draft?.filename || t('agent.fileEmpty');
+  if (draft?.filename) delete filename.dataset.i18n;
+  else filename.dataset.i18n = 'agent.fileEmpty';
+  setAgentInputMode(draft?.mode || 'vuln');
 }
 
 /* ── Input mode: vulnerability center picker vs external SAST findings ── */
@@ -102,23 +180,37 @@ function setAgentInputMode(mode) {
 function readAgentFile(input) {
   const file = input.files?.[0];
   if (!file) return;
+  const version = ++agentUi.fileReadVersion;
+  const projectId = agentUi.preparationProjectId;
   const reader = new FileReader();
   reader.onload = () => {
+    if (version !== agentUi.fileReadVersion || projectId !== agentUi.preparationProjectId) return;
     document.getElementById('agent-findings-json').value = String(reader.result || '');
-    document.getElementById('agent-file-name').textContent = `INPUT / ${file.name} / ${file.size} B`;
+    const filename = document.getElementById('agent-file-name');
+    filename.textContent = `${file.name} · ${file.size} B`;
+    filename.dataset.filename = filename.textContent;
+    delete filename.dataset.i18n;
     refreshExternalInputStatus();
   };
-  reader.onerror = () => showAgentError(t('agent.fileError'));
+  reader.onerror = () => {
+    if (version === agentUi.fileReadVersion && projectId === agentUi.preparationProjectId) showAgentError(t('agent.fileError'));
+  };
   reader.readAsText(file);
   input.value = '';
 }
 
 function clearAgentFindingsInput() {
+  agentUi.fileReadVersion++;
   const textarea = document.getElementById('agent-findings-json');
   if (textarea) textarea.value = '';
   const name = document.getElementById('agent-file-name');
-  if (name) name.textContent = 'INPUT / NOT LOADED';
+  if (name) { name.textContent = t('agent.fileEmpty'); name.dataset.i18n = 'agent.fileEmpty'; delete name.dataset.filename; }
   showAgentError('');
+  refreshExternalInputStatus();
+}
+
+function onAgentFindingsInput() {
+  agentUi.fileReadVersion++;
   refreshExternalInputStatus();
 }
 
@@ -170,17 +262,21 @@ function rememberAgentDetail(element) {
 }
 
 function restoreAgentTextSize() {
-  const saved = localStorage.getItem('repograph_agent_text_size');
+  let saved = '';
+  try { saved = localStorage.getItem('repograph_agent_text_size'); } catch (_) {}
   applyAgentTextSize(saved === 'large' ? 'large' : 'standard');
 }
 
 function setAgentTextSize(size) {
   const normalized = size === 'large' ? 'large' : 'standard';
-  localStorage.setItem('repograph_agent_text_size', normalized);
+  try { localStorage.setItem('repograph_agent_text_size', normalized); } catch (_) {}
   applyAgentTextSize(normalized);
 }
 
 function applyAgentTextSize(size) {
+  document.querySelectorAll('[data-agent-text-size]').forEach(button => {
+    button.setAttribute('aria-pressed', String(button.dataset.agentTextSize === size));
+  });
   const panel = document.getElementById('panel-agent');
   if (!panel) return;
   panel.dataset.textSize = size;
@@ -193,18 +289,22 @@ function applyAgentTextSize(size) {
 }
 
 async function loadLlmSettings() {
+  if (typeof sessionReady !== 'undefined') await sessionReady;
+  if (typeof sessionAccount !== 'undefined' && sessionAccount?.role !== 'ADMIN') return;
   const stateElement = document.getElementById('agent-llm-state');
   if (!stateElement) return;
-  setLlmState('loading', 'LOADING', '—');
+  setLlmState('loading', t('agent.llm.loading'), '—');
   try {
     const settings = await api.llmSettings();
     agentUi.llmSettings = settings;
+    agentUi.llmConnection = null;
+    document.getElementById('agent-llm-provider').value = settings.provider;
     document.getElementById('agent-llm-enabled').checked = settings.enabled;
     document.getElementById('agent-llm-base-url').value = settings.baseUrl;
     document.getElementById('agent-llm-model').value = settings.model;
     renderSavedLlmState();
   } catch (error) {
-    setLlmState('error', 'CONFIG ERROR', error.message);
+    setLlmState('error', t('agent.llm.error'), error.message);
   }
 }
 
@@ -215,79 +315,13 @@ function toggleLlmSettings() {
   document.getElementById('agent-llm-chevron').textContent = open ? '−' : '＋';
 }
 
-function llmDraft() {
-  return {
-    enabled: document.getElementById('agent-llm-enabled').checked,
-    baseUrl: document.getElementById('agent-llm-base-url').value.trim(),
-    model: document.getElementById('agent-llm-model').value.trim(),
-  };
-}
-
-function renderLlmDraftState() {
-  const draft = llmDraft();
-  if (!draft.enabled) setLlmState('disabled', 'DISABLED', t('agent.llm.heuristicOnly'));
-  else setLlmState('unverified', 'ENABLED', t('agent.llm.unsaved'));
-}
-
 function renderSavedLlmState() {
   const settings = agentUi.llmSettings;
   if (!settings?.enabled) {
-    setLlmState('disabled', 'DISABLED', t('agent.llm.heuristicOnly'));
+    setLlmState('disabled', t('agent.llm.disabled'), t('agent.llm.heuristicOnly'));
     return;
   }
-  if (agentUi.llmConnection?.reachable && agentUi.llmConnection?.modelAvailable) {
-    setLlmState('ready', 'READY', `${settings.provider} / ${settings.model}`);
-  } else {
-    setLlmState('unverified', 'ENABLED', `${settings.provider} / ${settings.model}`);
-  }
-}
-
-async function testLlmConnection() {
-  const draft = llmDraft();
-  if (!draft.baseUrl || !draft.model) return showLlmMessage(t('agent.llm.required'), 'error');
-  const button = document.getElementById('agent-llm-test-btn');
-  button.disabled = true;
-  showLlmMessage(t('agent.llm.testing'), 'working');
-  setLlmState('loading', 'PROBING', draft.baseUrl);
-  try {
-    const status = await api.testLlmSettings(draft);
-    agentUi.llmConnection = status;
-    document.getElementById('agent-llm-models').innerHTML = (status.models || [])
-      .map(model => `<option value="${esc(model)}"></option>`).join('');
-    if (!status.reachable) {
-      setLlmState('error', 'UNREACHABLE', draft.baseUrl);
-      showLlmMessage(t('agent.llm.unreachable'), 'error');
-    } else if (!status.modelAvailable) {
-      setLlmState('warning', 'MODEL MISSING', draft.model);
-      showLlmMessage(t('agent.llm.modelMissing', draft.model), 'warning');
-    } else {
-      setLlmState('ready', 'READY', `OLLAMA / ${draft.model}`);
-      showLlmMessage(t('agent.llm.connected', draft.model), 'success');
-    }
-  } catch (error) {
-    setLlmState('error', 'TEST FAILED', draft.baseUrl);
-    showLlmMessage(error.message, 'error');
-  } finally {
-    button.disabled = false;
-  }
-}
-
-async function saveLlmSettings() {
-  const draft = llmDraft();
-  if (!draft.baseUrl || !draft.model) return showLlmMessage(t('agent.llm.required'), 'error');
-  const button = document.getElementById('agent-llm-save-btn');
-  button.disabled = true;
-  showLlmMessage(t('agent.llm.saving'), 'working');
-  try {
-    agentUi.llmSettings = await api.updateLlmSettings(draft);
-    renderSavedLlmState();
-    showLlmMessage(t('agent.llm.saved'), 'success');
-    showToast(t('agent.llm.saved'));
-  } catch (error) {
-    showLlmMessage(error.message, 'error');
-  } finally {
-    button.disabled = false;
-  }
+  setLlmState('unverified', t('capability.state.unverified'), `${settings.provider} / ${settings.model}`);
 }
 
 function setLlmState(tone, title, detail) {
@@ -307,19 +341,20 @@ function showLlmMessage(message, tone) {
 function populateAgentProjectSelect(projects = state.projects) {
   const select = document.getElementById('agent-project-select');
   if (!select) return;
-  const previous = select.value || state.activeProjectId;
+  const previous = state.activeProjectId;
   const emptyLabel = projects?.length ? t('ph.selectProject') : t('agent.noIndexedProjects');
   select.innerHTML = `<option value="">${esc(emptyLabel)}</option>`
     + (projects || []).map(project =>
       `<option value="${esc(project.projectId)}">${esc(projectName(project))} · ${project.nodeCount}</option>`
     ).join('');
   if ((projects || []).some(project => project.projectId === previous)) select.value = previous;
-  if (!select.value && projects?.length === 1) select.value = projects[0].projectId;
+  restoreAgentPreparation(select.value);
   renderAgentProjectHint();
   updateAgentLaunchState();
 }
 
 async function loadAgentVulnerabilities() {
+  const requestVersion = ++agentUi.vulnRequestVersion;
   const projectId = document.getElementById('agent-project-select')?.value || '';
   const list = document.getElementById('agent-vulnerability-list');
   const count = document.getElementById('agent-vulnerability-count');
@@ -337,7 +372,10 @@ async function loadAgentVulnerabilities() {
   try {
     agentUi.taintEvidence.clear();
     agentUi.taintEvidenceLoading.clear();
-    agentUi.vulnerabilities = await api.vulnList(projectId, '', '');
+    const vulnerabilities = await api.vulnList(projectId, '', '');
+    if (requestVersion !== agentUi.vulnRequestVersion || document.getElementById('agent-project-select').value !== projectId) return;
+    if (!Array.isArray(vulnerabilities) || vulnerabilities.some(item => item.projectId !== projectId)) throw new Error(t('agent.invalidRuns'));
+    agentUi.vulnerabilities = vulnerabilities;
     if (!agentUi.vulnerabilities.some(item => item.id === agentUi.selectedVulnerabilityId)) {
       const preferred = agentUi.vulnerabilities.find(item => item.status === 'SUSPECTED')
         || agentUi.vulnerabilities.find(item => item.status === 'CONFIRMED');
@@ -346,6 +384,7 @@ async function loadAgentVulnerabilities() {
     renderAgentVulnerabilities();
     showAgentError('');
   } catch (error) {
+    if (requestVersion !== agentUi.vulnRequestVersion || document.getElementById('agent-project-select').value !== projectId) return;
     agentUi.vulnerabilities = [];
     agentUi.selectedVulnerabilityId = '';
     if (count) count.textContent = '—';
@@ -409,7 +448,7 @@ function renderAgentVulnerabilityDetail() {
       <span class="agent-vulnerability-severity ${esc(item.severity.toLowerCase())}">${esc(item.severity)}</span>
       <span>${esc(agentVulnerabilityStatus(item.status))}</span><code>${esc(item.id)}</code></div>
     <h3>${esc(item.title)}</h3>
-    <dl><div><dt>RULE</dt><dd>${esc(item.ruleId)}</dd></div><div><dt>CWE</dt><dd>${esc(item.cwe || '—')}</dd></div>
+    <dl><div><dt>${esc(t('agent.rule'))}</dt><dd>${esc(item.ruleId)}</dd></div><div><dt>CWE</dt><dd>${esc(item.cwe || '—')}</dd></div>
       <div><dt>${esc(t('agent.symbol'))}</dt><dd>${esc(item.qualifiedName || '—')}</dd></div>
       <div><dt>${esc(t('agent.location'))}</dt><dd>${esc(item.filePath)}:${item.startLine}</dd></div></dl>
     <p>${esc(item.detail || t('agent.noVulnerabilityDetail'))}</p>
@@ -425,16 +464,23 @@ async function loadAgentTaintEvidence(vulnerabilityId) {
   if (!vulnerabilityId || agentUi.taintEvidence.has(vulnerabilityId)
       || agentUi.taintEvidenceLoading.has(vulnerabilityId)) return;
   agentUi.taintEvidenceLoading.add(vulnerabilityId);
+  const requestVersion = agentUi.vulnRequestVersion;
+  const projectId = document.getElementById('agent-project-select').value;
+  const current = () => requestVersion === agentUi.vulnRequestVersion && document.getElementById('agent-project-select').value === projectId;
   try {
     const steps = await api.vulnTaintEvidence(vulnerabilityId);
+    if (!current()) return;
     agentUi.taintEvidence.set(vulnerabilityId, { steps, error: '' });
     steps.filter(step => step.role === 'SOURCE' || step.role === 'SINK')
       .forEach(step => agentUi.expandedTaintSteps.add(`${vulnerabilityId}:${step.sequence}`));
   } catch (error) {
+    if (!current()) return;
     agentUi.taintEvidence.set(vulnerabilityId, { steps: [], error: error.message });
   } finally {
-    agentUi.taintEvidenceLoading.delete(vulnerabilityId);
-    if (agentUi.selectedVulnerabilityId === vulnerabilityId) renderAgentVulnerabilityDetail();
+    if (current()) {
+      agentUi.taintEvidenceLoading.delete(vulnerabilityId);
+      if (agentUi.selectedVulnerabilityId === vulnerabilityId) renderAgentVulnerabilityDetail();
+    }
   }
 }
 
@@ -502,12 +548,22 @@ function handleAgentProjectChange() {
 }
 
 function syncAgentProjectSelection() {
+  if (typeof closeAgentReview === 'function') closeAgentReview(false);
+  agentUi.runsRequestVersion++;
+  agentUi.detailRequestVersion++;
+  agentUi.vulnRequestVersion++;
+  agentUi.runLoadError = '';
   renderAgentProjectHint();
-  agentUi.selectedVulnerabilityId = '';
+  stopAgentPolling();
+  restoreAgentPreparation(state.activeProjectId);
+  agentUi.vulnerabilities = [];
+  agentUi.runs = [];
   agentUi.selectedId = '';
   agentUi.currentRun = null;
+  agentUi.runListSignature = '';
   agentUi.runDetailSignature = '';
-  clearAgentFindingsInput();
+  resetAgentRunDetail();
+  renderAgentVulnerabilities();
   updateAgentLaunchState();
   Promise.all([loadAgentVulnerabilities(), loadAgentRuns()]);
 }
@@ -557,7 +613,7 @@ function renderAgentReadiness(id, ready, label) {
   if (!item) return;
   item.classList.toggle('ready', ready);
   item.querySelector('span').textContent = label;
-  item.querySelector('b').textContent = ready ? 'READY' : 'WAITING';
+  item.querySelector('b').textContent = ready ? t('agent.ready') : t('agent.waiting');
 }
 
 async function startSastTriageAgent() {
@@ -590,6 +646,10 @@ async function startSastTriageAgent() {
         Number(document.getElementById('agent-max-findings').value) || 10)
       : await api.agentStartVulnerabilityTriage(
         agentUi.selectedVulnerabilityId, codeVersion, ruleVersion, budgetChars);
+    if (document.getElementById('agent-project-select').value !== projectId) {
+      showToast(t('agent.acceptedElsewhere', run.id), 8000);
+      return;
+    }
     agentUi.selectedId = run.id;
     showToast(t('agent.accepted'));
     await loadAgentRuns();
@@ -603,6 +663,7 @@ async function startSastTriageAgent() {
 }
 
 async function loadAgentRuns(silent = false) {
+  const requestVersion = ++agentUi.runsRequestVersion;
   const select = document.getElementById('agent-project-select');
   const projectId = select?.value || '';
   const list = document.getElementById('agent-run-list');
@@ -612,6 +673,7 @@ async function loadAgentRuns(silent = false) {
     stopAgentPolling();
     agentUi.runs = [];
     agentUi.currentRun = null;
+    agentUi.runLoadError = '';
     agentUi.runListSignature = '';
     agentUi.runDetailSignature = '';
     if (count) count.textContent = '—';
@@ -624,12 +686,14 @@ async function loadAgentRuns(silent = false) {
   }
   try {
     const runs = await api.agentRuns(projectId);
+    if (requestVersion !== agentUi.runsRequestVersion || select.value !== projectId) return;
+    if (!Array.isArray(runs) || runs.some(run => run.projectId !== projectId)) throw new Error(t('agent.invalidRuns'));
     list.classList.remove('stale');
     list.removeAttribute('title');
     const listSignature = JSON.stringify(runs.map(run =>
       [run.id, run.status, run.steps?.length || 0]));
     agentUi.runs = runs;
-    if (count) count.textContent = `${agentUi.runs.length} RUNS`;
+    if (count) count.textContent = `${agentUi.runs.length} ${t('agent.runCount')}`;
     if (listSignature !== agentUi.runListSignature) {
       agentUi.runListSignature = listSignature;
       renderAgentRunList();
@@ -641,12 +705,16 @@ async function loadAgentRuns(silent = false) {
     } else {
       agentUi.selectedId = '';
       agentUi.currentRun = null;
+      agentUi.runLoadError = '';
       agentUi.runDetailSignature = '';
       resetAgentRunDetail();
     }
     if (agentUi.runs.some(run => agentRunActive(run.status))) startAgentPolling();
     else stopAgentPolling();
   } catch (error) {
+    if (requestVersion !== agentUi.runsRequestVersion || select.value !== projectId) return;
+    agentUi.runLoadError = error.message;
+    renderAgentCurrentTask();
     if (silent) {
       list.classList.add('stale');
       list.title = error.message;
@@ -659,12 +727,12 @@ async function loadAgentRuns(silent = false) {
 function resetAgentRunDetail() {
   const detail = document.getElementById('agent-run-detail');
   const runId = document.getElementById('agent-run-id');
-  if (runId) runId.textContent = 'NO RUN SELECTED';
+  if (runId) runId.textContent = t('agent.noRun');
   if (!detail) return;
   delete detail.dataset.runId;
   detail.className = 'agent-detail-empty';
-  detail.innerHTML = `<div class="agent-radar"><i></i><i></i><i></i></div>
-    <strong>${esc(t('agent.noRun'))}</strong><span>${esc(t('agent.noRunHint'))}</span>`;
+  detail.innerHTML = emptyState('agent.noRun', 'agent.noRunHint', 'activity');
+  renderAgentCurrentTask();
 }
 
 function renderAgentRunList() {
@@ -690,8 +758,11 @@ function renderAgentRunList() {
       const existing = existingItems.find(element => element.dataset.runId === run.id);
       const signature = agentRunItemSignature(run);
       if (existing.dataset.signature !== signature) {
+        const focused = document.activeElement === existing;
         existing.insertAdjacentHTML('afterend', renderAgentRunItem(run));
+        const replacement = existing.nextElementSibling;
         existing.remove();
+        if (focused) replacement.focus({ preventScroll: true });
       } else {
         existing.classList.toggle('selected', run.id === agentUi.selectedId);
       }
@@ -709,7 +780,6 @@ function renderAgentRunItem(run) {
     <strong>${esc(run.playbook.replaceAll('_', ' '))}</strong>
     <small>${esc(relativeTime(run.createdAt))}</small>
     <code>${esc(run.id.slice(0, 8))}</code>
-    <i style="--progress:${agentProgress(run)}%"></i>
   </button>`;
 }
 
@@ -731,18 +801,23 @@ function openAgentRun(runId) {
 }
 
 async function selectAgentRun(runId, rerenderList = true, showLoading = true) {
+  const requestVersion = ++agentUi.detailRequestVersion;
+  const projectId = document.getElementById('agent-project-select').value;
   const changedSelection = agentUi.currentRun?.id !== runId;
   agentUi.selectedId = runId;
   if (rerenderList) renderAgentRunList();
   const detail = document.getElementById('agent-run-detail');
   if (showLoading && changedSelection) {
     detail.className = 'agent-detail-empty';
-    detail.innerHTML = `<div class="agent-radar"><i></i><i></i><i></i></div>
-      <strong>${esc(t('agent.loadingRun'))}</strong>`;
+    detail.innerHTML = emptyState('agent.loadingRun', '', 'activity');
   }
   try {
     const run = await api.agentRun(runId);
-    if (agentUi.selectedId !== runId) return;
+    if (agentUi.selectedId !== runId || requestVersion !== agentUi.detailRequestVersion
+      || document.getElementById('agent-project-select').value !== projectId) return;
+    if (run.projectId !== projectId) throw new Error(t('agent.invalidRuns'));
+    const recovered = !!agentUi.runLoadError;
+    agentUi.runLoadError = '';
     detail.classList.remove('stale');
     detail.removeAttribute('title');
     const signature = JSON.stringify(run);
@@ -750,12 +825,15 @@ async function selectAgentRun(runId, rerenderList = true, showLoading = true) {
     if (changedSelection || signature !== agentUi.runDetailSignature) {
       renderAgentRunDetail(run, changedSelection);
       agentUi.runDetailSignature = signature;
-    }
+    } else if (recovered) renderAgentCurrentTask();
     const index = agentUi.runs.findIndex(item => item.id === run.id);
     if (index >= 0) agentUi.runs[index] = run;
     if (rerenderList) renderAgentRunList();
     if (agentRunActive(run.status)) startAgentPolling();
   } catch (error) {
+    if (requestVersion !== agentUi.detailRequestVersion || document.getElementById('agent-project-select').value !== projectId) return;
+    agentUi.runLoadError = error.message;
+    renderAgentCurrentTask();
     if (showLoading) {
       detail.innerHTML = `<strong>${esc(t('agent.loadFailed'))}</strong><span>${esc(error.message)}</span>`;
     } else {
@@ -772,9 +850,9 @@ function renderAgentRunDetail(run, replaceAll = false) {
   const snapshotId = (run.outputReference || '').startsWith('report-snapshot:')
     ? run.outputReference.substring('report-snapshot:'.length) : '';
   const output = snapshotId ? `<div class="agent-output-gate">
-      <div><span>${esc(t('agent.humanGate'))}</span><strong>${esc(t('agent.reviewReady'))}</strong>
+      <div><span>${esc(t('agent.humanGate'))}</span><strong>${esc(t(run.status === 'WAITING_FOR_REVIEW' ? 'agent.reviewReady' : 'agent.readReviewReport'))}</strong>
       <small>${esc(snapshotId)}</small></div>
-      <a target="_blank" href="/api/v1/review-queue/snapshots/${encodeURIComponent(snapshotId)}/export?format=markdown">MARKDOWN ↗</a>
+      <a target="_blank" href="/api/v1/review-queue/snapshots/${encodeURIComponent(snapshotId)}/export?format=markdown">Markdown ↗</a>
       <a target="_blank" href="/api/v1/review-queue/snapshots/${encodeURIComponent(snapshotId)}/export?format=json">JSON ↗</a>
       <a target="_blank"
          href="/api/v1/review-queue/snapshots/${encodeURIComponent(snapshotId)}/export?format=pdf">PDF ↗</a>
@@ -788,7 +866,7 @@ function renderAgentRunDetail(run, replaceAll = false) {
       <div id="agent-live-telemetry"></div>
       <div id="agent-run-failure"></div>
       <div id="agent-timeline" class="agent-timeline"></div>
-      <div id="agent-output-slot"></div>`;
+      <div id="agent-output-slot" tabindex="-1"></div>`;
   }
   detail.dataset.runStatus = run.status.toLowerCase();
   patchAgentRegion('agent-run-summary',
@@ -804,6 +882,7 @@ function renderAgentRunDetail(run, replaceAll = false) {
   updateAgentTimeline(run.steps || []);
   patchAgentRegion('agent-output-slot', snapshotId, output);
   updateAgentLiveDurations();
+  renderAgentCurrentTask();
 }
 
 function patchAgentRegion(id, signature, html) {
@@ -817,10 +896,10 @@ function renderAgentLiveTelemetry(run) {
   if (!agentRunActive(run.status)) return '';
   const activeStep = [...(run.steps || [])].reverse().find(step => step.status === 'RUNNING');
   const detail = activeStep
-    ? `${String(activeStep.sequence).padStart(2, '0')} / ${activeStep.capability.replaceAll('_', ' ')}`
+    ? `${String(activeStep.sequence).padStart(2, '0')} / ${agentCapabilityLabel(activeStep.capability)}`
     : t('agent.awaitingExecutor');
   return `<div class="agent-live-telemetry">
-    <span class="agent-signal-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+    <svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#activity"/></svg>
     <div><b>${esc(t('agent.liveExecution'))}</b><small>${esc(detail)}</small></div>
     <code><i></i>${esc(t('agent.streamingAudit'))}</code>
   </div>`;
@@ -839,9 +918,9 @@ function rerenderAgentCurrentRun() {
 
 function renderAgentRunSummary(run, status) {
   return `<div><span>${esc(t('agent.runStatus'))}</span><strong class="${status.tone}">${status.label}</strong></div>
-    <div><span>PLAYBOOK</span><strong>${esc(run.playbook)}@${esc(run.playbookVersion)}</strong></div>
+    <div><span>${esc(t('agent.playbook'))}</span><strong>${esc(run.playbook)}@${esc(run.playbookVersion)}</strong></div>
     <div><span>${esc(t('agent.started'))}</span><strong>${esc(formatAgentTime(run.createdAt))}</strong></div>
-    <div><span>${esc(t('agent.steps'))}</span><strong>${run.steps?.length || 0} / 5</strong></div>`;
+    <div><span>${esc(t('agent.steps'))}</span><strong>${esc(t('agent.recordedSteps', run.steps?.length || 0))}</strong></div>`;
 }
 
 function renderAgentAuditStrip(run) {
@@ -876,9 +955,21 @@ function updateAgentTimeline(steps) {
     } else if (existing.dataset.signature !== signature) {
       const auditOpen = Boolean(existing.querySelector('details.agent-step-audit[open]'));
       const missingOpen = Boolean(existing.querySelector('details:not(.agent-step-audit)[open]'));
+      const focusedKind = existing.contains(document.activeElement)
+        ? document.activeElement.closest('details')?.dataset.detailKind : '';
+      const previousTop = focusedKind ? document.activeElement.getBoundingClientRect().top : 0;
       existing.insertAdjacentHTML(
         'afterend', renderAgentStep(step, index, signature, auditOpen, missingOpen, false));
+      const replacement = existing.nextElementSibling;
       existing.remove();
+      if (focusedKind) {
+        const target = replacement.querySelector(`[data-detail-kind="${focusedKind}"] > summary`);
+        if (target) {
+          target.focus({ preventScroll: true });
+          const body = document.querySelector('#panel-agent .agent-body');
+          body.scrollTop += target.getBoundingClientRect().top - previousTop;
+        }
+      }
     }
   });
 }
@@ -899,7 +990,7 @@ function renderAgentStep(
       data-signature="${esc(signature)}">
     <div class="agent-step-node"><span>${String(index + 1).padStart(2, '0')}</span></div>
     <div class="agent-step-card">
-      <header><strong>${esc(step.capability.replaceAll('_', ' '))}</strong><span>${status.label}</span>
+      <header><strong>${esc(agentCapabilityLabel(step.capability))}</strong><span>${status.label}</span>
         <time>${esc(formatAgentTime(step.startedAt))} · <b class="agent-live-duration"
           data-started-at="${esc(step.startedAt)}" data-finished-at="${esc(finishedAt)}">
           ${esc(formatAgentDuration(step.startedAt, finishedAt || new Date().toISOString()))}</b></time></header>
@@ -913,10 +1004,10 @@ function renderAgentStep(
       <details class="agent-step-audit" data-detail-kind="audit" ontoggle="rememberAgentDetail(this)"
         ${auditExpanded ? 'open' : ''}>
         <summary>${esc(t('agent.auditDetails'))}</summary>
-        <dl><div><dt>STEP ID</dt><dd>${esc(step.id)}</dd></div>
-          <div><dt>SEQUENCE</dt><dd>${step.sequence}</dd></div>
-          <div><dt>STARTED AT</dt><dd>${esc(step.startedAt || '—')}</dd></div>
-          <div><dt>FINISHED AT</dt><dd>${esc(step.finishedAt || t('agent.inProgress'))}</dd></div></dl>
+        <dl><div><dt>${esc(t('agent.stepId'))}</dt><dd>${esc(step.id)}</dd></div>
+          <div><dt>${esc(t('agent.sequence'))}</dt><dd>${step.sequence}</dd></div>
+          <div><dt>${esc(t('agent.startedAt'))}</dt><dd>${esc(step.startedAt || '—')}</dd></div>
+          <div><dt>${esc(t('agent.finishedAt'))}</dt><dd>${esc(step.finishedAt || t('agent.inProgress'))}</dd></div></dl>
         <small>${esc(t('agent.auditBoundary'))}</small>
       </details>
     </div>
@@ -955,11 +1046,6 @@ function agentStepStatus(status) {
   };
   const value = values[status] || [status, 'queued'];
   return { label: value[0], tone: value[1] };
-}
-
-function agentProgress(run) {
-  if (run.status === 'WAITING_FOR_REVIEW' || run.status === 'COMPLETED') return 100;
-  return Math.min(100, Math.round(((run.steps?.length || 0) / 5) * 100));
 }
 
 function agentRunActive(status) { return status === 'QUEUED' || status === 'RUNNING'; }

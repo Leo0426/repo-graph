@@ -1,5 +1,7 @@
 package com.repograph.api;
 
+import com.repograph.identity.ProjectAccess;
+
 import com.repograph.core.model.CodeUnit;
 import com.repograph.core.vector.VectorStore;
 import org.springframework.http.ResponseEntity;
@@ -17,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/v1")
+@ProjectAccess
 public class SymbolController {
 
     private final VectorStore vectorStore;

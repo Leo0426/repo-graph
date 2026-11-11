@@ -1,0 +1,44 @@
+<!DOCTYPE html><html xmlns:th="http://www.thymeleaf.org"><body>
+<div th:fragment="workspace" id="workspace-navigation" class="workspace-navigation-context">
+  <section class="workspace-row" x-cloak x-show="$store.repograph.workspace === 'repository'">
+    <nav class="workspace-tabs" data-i18n-aria-label="workspace.repository" aria-label="工作域">
+      <button class="workspace-tab" id="repository-start-title" data-panel="tools" :class="{ active: $store.repograph.panel === 'tools' }" :aria-current="$store.repograph.panel === 'tools' ? 'page' : null" @click="$store.repograph.showPanel('tools')" data-i18n="workspace.page.tools"></button>
+      <button class="workspace-tab" data-panel="index" data-admin-only hidden :class="{ active: $store.repograph.panel === 'index' }" :aria-current="$store.repograph.panel === 'index' ? 'page' : null" @click="$store.repograph.showPanel('index')" data-i18n="workspace.page.index"></button>
+      <button class="workspace-tab" data-panel="stats" :class="{ active: $store.repograph.panel === 'stats' }" :aria-current="$store.repograph.panel === 'stats' ? 'page' : null" @click="$store.repograph.showPanel('stats')" data-i18n="workspace.page.stats"></button>
+    </nav>
+    <div class="workspace-actions" x-cloak x-show="$store.repograph.panel === 'tools'"><th:block th:replace="~{panels/tools :: actions}"></th:block></div>
+    <div class="workspace-actions" x-cloak x-show="$store.repograph.panel === 'index'"><th:block th:replace="~{panels/idx :: actions}"></th:block></div>
+  </section>
+  <section class="workspace-row" x-cloak x-show="$store.repograph.workspace === 'understand'">
+    <nav class="workspace-tabs" data-i18n-aria-label="workspace.understand" aria-label="工作域">
+      <button class="workspace-tab" data-panel="search" :class="{ active: $store.repograph.panel === 'search' }" :aria-current="$store.repograph.panel === 'search' ? 'page' : null" @click="$store.repograph.showPanel('search')" data-i18n="workspace.page.search"></button>
+      <button class="workspace-tab" data-panel="symbol" :class="{ active: $store.repograph.panel === 'symbol' }" :aria-current="$store.repograph.panel === 'symbol' ? 'page' : null" @click="$store.repograph.showPanel('symbol')" data-i18n="workspace.page.symbol"></button>
+      <button class="workspace-tab" data-panel="graph" :class="{ active: $store.repograph.panel === 'graph' }" :aria-current="$store.repograph.panel === 'graph' ? 'page' : null" @click="$store.repograph.showPanel('graph')" data-i18n="workspace.page.graph"></button>
+      <button class="workspace-tab" data-panel="wiki" :class="{ active: $store.repograph.panel === 'wiki' }" :aria-current="$store.repograph.panel === 'wiki' ? 'page' : null" @click="$store.repograph.showPanel('wiki')" data-i18n="workspace.page.wiki"></button>
+    </nav>
+    <div class="workspace-actions" x-cloak x-show="$store.repograph.panel === 'wiki'"><th:block th:replace="~{panels/wiki :: actions}"></th:block></div>
+  </section>
+  <section class="workspace-row" x-cloak x-show="$store.repograph.workspace === 'defects'">
+    <nav class="workspace-tabs" data-i18n-aria-label="workspace.defects" aria-label="工作域">
+      <button class="workspace-tab" data-panel="vulns" :class="{ active: $store.repograph.panel === 'vulns' }" :aria-current="$store.repograph.panel === 'vulns' ? 'page' : null" @click="$store.repograph.showPanel('vulns')" data-i18n="workspace.page.vulns"></button>
+      <button class="workspace-tab" data-panel="agent" :class="{ active: $store.repograph.panel === 'agent' }" :aria-current="$store.repograph.panel === 'agent' ? 'page' : null" @click="$store.repograph.showPanel('agent')" data-i18n="workspace.page.agent"></button>
+      <button class="workspace-tab" data-panel="metrics" :class="{ active: $store.repograph.panel === 'metrics' }" :aria-current="$store.repograph.panel === 'metrics' ? 'page' : null" @click="$store.repograph.showPanel('metrics')" data-i18n="workspace.page.metrics"></button>
+      <button class="workspace-tab" data-panel="sbom" :class="{ active: $store.repograph.panel === 'sbom' }" :aria-current="$store.repograph.panel === 'sbom' ? 'page' : null" @click="$store.repograph.showPanel('sbom')" data-i18n="workspace.page.sbom"></button>
+    </nav>
+    <div class="workspace-actions" x-cloak x-show="$store.repograph.panel === 'vulns'"><th:block th:replace="~{panels/vulns :: actions}"></th:block></div>
+    <div class="workspace-actions" x-cloak x-show="$store.repograph.panel === 'agent'"><th:block th:replace="~{panels/agent :: actions}"></th:block></div>
+  </section>
+  <section class="workspace-row" x-cloak x-show="$store.repograph.workspace === 'validation'">
+    <nav class="workspace-tabs" data-i18n-aria-label="workspace.validation" aria-label="工作域">
+      <button class="workspace-tab" data-panel="health" :class="{ active: $store.repograph.panel === 'health' }" :aria-current="$store.repograph.panel === 'health' ? 'page' : null" @click="$store.repograph.showPanel('health')" data-i18n="workspace.page.health"></button>
+      <button class="workspace-tab" data-panel="benchmark" data-admin-only hidden :class="{ active: $store.repograph.panel === 'benchmark' }" :aria-current="$store.repograph.panel === 'benchmark' ? 'page' : null" @click="$store.repograph.showPanel('benchmark')" data-i18n="workspace.page.benchmark"></button>
+    </nav>
+    <div class="workspace-actions" x-cloak x-show="$store.repograph.panel === 'health'"><th:block th:replace="~{panels/health :: actions}"></th:block></div>
+    <div class="workspace-actions" x-cloak x-show="$store.repograph.panel === 'benchmark'"><th:block th:replace="~{panels/benchmark :: actions}"></th:block></div>
+  </section>
+  <section class="workspace-row" x-cloak x-show="$store.repograph.workspace === 'management'">
+    <nav class="workspace-tabs" data-i18n-aria-label="workspace.management" aria-label="工作域">
+      <button class="workspace-tab" data-panel="admin" :class="{ active: $store.repograph.panel === 'admin' }" :aria-current="$store.repograph.panel === 'admin' ? 'page' : null" @click="$store.repograph.showPanel('admin')" data-i18n="workspace.page.admin"></button>
+    </nav>
+  </section>
+</div></body></html>

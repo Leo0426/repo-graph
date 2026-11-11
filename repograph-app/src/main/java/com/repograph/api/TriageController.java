@@ -1,5 +1,8 @@
 package com.repograph.api;
 
+import com.repograph.identity.ProjectAccess;
+import com.repograph.identity.IdentityActors;
+
 import com.repograph.core.finding.ExternalFinding;
 import com.repograph.core.finding.TriageOptions;
 import com.repograph.core.finding.TriageWorkflow;
@@ -80,6 +83,7 @@ public class TriageController {
      * @throws IOException 请求体读取失败
      */
     @PostMapping("/report")
+    @ProjectAccess
     public List<TriageReportResponse> report(
             @RequestParam String format,
             @RequestParam(required = false) String projectId,
@@ -154,12 +158,13 @@ public class TriageController {
      * @return 持久化后的反馈记录
      */
     @PostMapping("/feedback")
+    @ProjectAccess(source = ProjectAccess.Source.BODY)
     public TriageFeedback feedback(@RequestBody FeedbackRequest request) {
         TriageFeedback feedback = new TriageFeedback(
                 request.fingerprint(),
                 request.projectId(),
                 TriageFeedbackStatus.parse(request.status()),
-                request.reviewer(),
+                IdentityActors.currentName(request.reviewer()),
                 request.reason(),
                 request.codeVersion(),
                 request.ruleVersion(),
@@ -176,6 +181,7 @@ public class TriageController {
      * @return 按更新时间降序的反馈列表
      */
     @GetMapping("/feedback")
+    @ProjectAccess
     public List<TriageFeedback> listFeedback(
             @RequestParam String projectId,
             @RequestParam(required = false) String status) {
@@ -191,6 +197,7 @@ public class TriageController {
      * @return 已创建策略
      */
     @PostMapping("/suppressions")
+    @ProjectAccess(source = ProjectAccess.Source.BODY)
     public RuleSuppression createSuppression(@RequestBody SuppressionRequest request) {
         String now = Instant.now().toString();
         RuleSuppression suppression = new RuleSuppression(
@@ -200,7 +207,7 @@ public class TriageController {
                 parseSuppressionScope(request.scope()),
                 request.scopeValue(),
                 request.reason(),
-                request.createdBy(),
+                IdentityActors.currentName(request.createdBy()),
                 now,
                 request.expiresAt(),
                 true);
@@ -216,6 +223,7 @@ public class TriageController {
      * @return 策略列表
      */
     @GetMapping("/suppressions")
+    @ProjectAccess
     public List<RuleSuppression> listSuppressions(
             @RequestParam String projectId,
             @RequestParam(required = false) String ruleId) {
@@ -230,12 +238,13 @@ public class TriageController {
      * @return 撤销结果
      */
     @PostMapping("/suppressions/{suppressionId}/revoke")
+    @ProjectAccess(value = "suppressionId", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.SUPPRESSION)
     public org.springframework.http.ResponseEntity<Map<String, String>> revokeSuppression(
             @PathVariable String suppressionId,
             @RequestBody RevokeSuppressionRequest request) {
         boolean revoked = ruleSuppressionStore.revoke(
                 suppressionId,
-                request.actor(),
+                IdentityActors.currentName(request.actor()),
                 request.reason(),
                 Instant.now().toString());
         if (!revoked) {
@@ -252,6 +261,7 @@ public class TriageController {
      * @return 审计事件
      */
     @GetMapping("/suppressions/{suppressionId}/audit")
+    @ProjectAccess(value = "suppressionId", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.SUPPRESSION)
     public List<RuleSuppressionAuditEvent> suppressionAudit(
             @PathVariable String suppressionId) {
         return ruleSuppressionStore.audit(suppressionId);

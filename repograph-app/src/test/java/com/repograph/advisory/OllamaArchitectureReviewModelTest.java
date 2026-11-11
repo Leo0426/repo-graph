@@ -27,68 +27,52 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
  */
 class OllamaArchitectureReviewModelTest {
 
-    @Test
-    void reviewRequestsThreeToFiveStructuredCandidates() {
-        LlmAdvisorySettingsService settings = mock(LlmAdvisorySettingsService.class);
-        when(settings.current()).thenReturn(new LlmAdvisorySettings(
-                true, "OLLAMA", "http://localhost:11434", "qwen3:8b", "2026-08-10T10:00:00Z"));
-        RestTemplate restTemplate = new RestTemplate();
-        MockRestServiceServer server = MockRestServiceServer.bindTo(restTemplate).build();
-        server.expect(once(), requestTo("http://localhost:11434/api/chat"))
-                .andExpect(jsonPath("$.format.properties.candidates.minItems").value(3))
-                .andExpect(jsonPath("$.messages[0].content").value(
-                        org.hamcrest.Matchers.containsString("must use Simplified Chinese")))
-                .andRespond(withSuccess(responseJson(), MediaType.APPLICATION_JSON));
-        OllamaArchitectureReviewModel model = new OllamaArchitectureReviewModel(
-                settings, restTemplate, new ObjectMapper());
+    @org.junit.jupiter.api.io.TempDir java.nio.file.Path temporary;
 
-        var response = model.review(new ArchitectureReviewInput(
-                "project-a", "/repo", "2026-08-10T10:00:00Z", 70,
-                List.of(new ArchitectureEvidence("ARCH-CC-1", "COMPLEXITY", "Foo.java:10", "CC=14"))));
-
-        assertThat(response.observations()).containsExactly("观察");
-        assertThat(response.candidates()).hasSize(3);
-        assertThat(response.candidates().getFirst().citations()).containsExactly("ARCH-CC-1");
-        assertThat(response.candidates().getFirst().cost()).isEqualTo("低");
-        assertThat(response.candidates().getFirst().methodology()).isEqualTo("方法论映射：U1/U2");
-        assertThat(response.missingInfo()).anyMatch(item -> item.contains("服务端已替换"));
-        server.verify();
-    }
-
-    @Test
-    void reviewStreamingForwardsDeltasAndParsesFinalDocument() throws Exception {
-        LlmAdvisorySettingsService settings = mock(LlmAdvisorySettingsService.class);
-        when(settings.current()).thenReturn(new LlmAdvisorySettings(
-                true, "OLLAMA", "http://localhost:11434", "qwen3:8b", "2026-08-10T10:00:00Z"));
-        RestTemplate restTemplate = new RestTemplate();
-        MockRestServiceServer server = MockRestServiceServer.bindTo(restTemplate).build();
-        String content = reviewContent();
-        int split = content.length() / 2;
-        String ndjson = new ObjectMapper().writeValueAsString(new StreamChunk(
-                new Message("assistant", content.substring(0, split)), false)) + "\n"
-                + new ObjectMapper().writeValueAsString(new StreamChunk(
-                new Message("assistant", content.substring(split)), true)) + "\n";
-        server.expect(once(), requestTo("http://localhost:11434/api/chat"))
-                .andExpect(jsonPath("$.stream").value(true))
-                .andRespond(withSuccess(ndjson, MediaType.parseMediaType("application/x-ndjson")));
-        OllamaArchitectureReviewModel model = new OllamaArchitectureReviewModel(
-                settings, restTemplate, new ObjectMapper());
-        StringBuilder streamed = new StringBuilder();
-
-        var response = model.reviewStreaming(input(), streamed::append);
-
-        assertThat(streamed).hasToString(content);
-        assertThat(response.candidates()).hasSize(3);
-        server.verify();
-    }
-
-    private static String responseJson() {
-        try {
-            return new ObjectMapper().writeValueAsString(new Response(
-                    new Message("assistant", reviewContent())));
-        } catch (Exception e) {
-            throw new IllegalStateException(e);
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"OLLAMA", "OPENAI", "ANTHROPIC"})
+    void reviewRequestsThreeToFiveStructuredCandidates(String protocol) throws Exception {
+        try (var fixture = new com.repograph.modelprovider.ModelHttpFixture(temporary, protocol)) {
+            fixture.text(reviewContent());
+            var model = new OllamaArchitectureReviewModel(fixture.gateway, fixture.json);
+            var response = model.review(input());
+            assertThat(response.observations()).containsExactly("观察");
+            assertThat(response.candidates()).hasSize(3);
+            assertThat(response.candidates().getFirst().citations()).containsExactly("ARCH-CC-1");
+            assertThat(response.candidates().getFirst().cost()).isEqualTo("低");
+            assertThat(response.candidates().getFirst().methodology()).isEqualTo("方法论映射：U1/U2");
+            assertThat(response.missingInfo()).anyMatch(item -> item.contains("服务端已替换"));
+            assertThat(fixture.request().toString()).contains("must use Simplified Chinese", "minItems");
         }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"OLLAMA", "OPENAI", "ANTHROPIC"})
+    void reviewStreamingForwardsDeltasAndParsesFinalDocument(String protocol) throws Exception {
+        try (var fixture = new com.repograph.modelprovider.ModelHttpFixture(temporary, protocol)) {
+            String content = reviewContent();
+            int split = content.length() / 2;
+            String wire = chunk(protocol, content.substring(0, split), false)
+                    + chunk(protocol, content.substring(split), true);
+            fixture.raw(200, wire);
+            var model = new OllamaArchitectureReviewModel(fixture.gateway, fixture.json);
+            StringBuilder streamed = new StringBuilder();
+            var response = model.reviewStreaming(input(), streamed::append);
+            assertThat(streamed).hasToString(content);
+            assertThat(response.candidates()).hasSize(3);
+            assertThat(fixture.request().path("stream").asBoolean()).isTrue();
+        }
+    }
+
+    private String chunk(String protocol, String content, boolean done) throws Exception {
+        String text = new ObjectMapper().writeValueAsString(content);
+        return switch (protocol) {
+            case "OLLAMA" -> "{\"message\":{\"content\":" + text + "},\"done\":" + done + "}\n";
+            case "OPENAI" -> "data: {\"choices\":[{\"delta\":{\"content\":" + text + "}}]}\n\n"
+                    + (done ? "data: [DONE]\n\n" : "");
+            default -> "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\","
+                    + "\"text\":" + text + "}}\n\n" + (done ? "data: {\"type\":\"message_stop\"}\n\n" : "");
+        };
     }
 
     private static String reviewContent() {

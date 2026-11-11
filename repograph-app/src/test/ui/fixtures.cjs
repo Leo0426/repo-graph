@@ -95,6 +95,24 @@ const runData = {
 };
 const llmSettings = { enabled: false, provider: 'ollama', baseUrl: 'http://preview.invalid',
   model: 'demo-model-disabled', updatedAt: at };
+const frozenReport = {
+  finding: { tool: 'demo-scanner', ruleId: 'SQL_INJECTION_TAINT', cwe: 'CWE-89', severity: 'HIGH',
+    message: '[DEMO] 冻结的订单报警', filePath: units[0].filePath, startLine: 42, endLine: 46,
+    symbol: units[0].qualifiedName, trace: [], raw: '' },
+  located: true, locatedQualifiedName: units[0].qualifiedName, verdict: 'NEEDS_REVIEW', confidence: 0.62,
+  developerSummary: '[DEMO] 已定位请求到数据库的候选传播，参数绑定行为仍需人工核对。',
+  reasons: ['[DEMO] 请求入口与服务层来源保存在 [C1]。'], missingInfo: ['[DEMO] 缺少运行时参数绑定验证。'],
+  remediation: '[DEMO] 核查参数化查询与输入约束。', decisionEvidence: [],
+  pack: { query: 'demo order query', taskType: 'security', evidence: [{citationId:'C1',qualifiedName:units[0].qualifiedName,
+    filePath:units[0].filePath,startLine:42,endLine:46,excerpt:units[0].rawSource,truncated:false,
+    kind:'METHOD',language:'java',source:'VECTOR',relation:'SEED',finalScore:0.9,securitySignals:[]}],
+    omittedReasons:[],requestedBudgetChars:12000,usedBudgetChars:1000,seedCount:1,keywordSeedCount:0,callGraphExpanded:1,impactExpanded:0 }
+};
+const frozenSnapshot = {id:'demo-order-review-snapshot',projectId, schemaVersion:'1',toolVersion:'0.5.0-demo',
+  codeVersion:'demo-frozen-code',ruleVersion:'demo-rules',generatedAt:at,reports:[frozenReport]};
+const frozenEntry = {id:'demo-review-entry-1',snapshotId:frozenSnapshot.id,projectId,fingerprint:'demo-fingerprint',
+  ruleId:'SQL_INJECTION_TAINT',cwe:'CWE-89',severity:'HIGH',verdict:'NEEDS_REVIEW',confidence:0.62,
+  status:'PENDING',claimedBy:'',claimedAt:'',updatedAt:at};
 
 function healthHtml() {
   const health = [
@@ -109,6 +127,7 @@ function healthHtml() {
 module.exports = async function installFixtures(page) {
   const vulnerabilities = structuredClone(vulnerabilityData);
   const run = structuredClone(runData);
+  const reviewEntry = structuredClone(frozenEntry);
   const unhandledRequests = [];
   const requested = [];
   const json = (route, body, status = 200) => route.fulfill({ status,
@@ -120,10 +139,16 @@ module.exports = async function installFixtures(page) {
     const method = request.method();
     const pid = url.searchParams.get('projectId');
     requested.push(`${method} ${path}${url.search}`);
+    if (path === '/api/v1/auth/me') return json(route, { id:'demo-admin', username:'admin', displayName:'Demo Administrator', role:'ADMIN', status:'ACTIVE' });
+    if (path === '/api/v1/auth/csrf') return json(route, { headerName:'X-CSRF-TOKEN', token:'demo-csrf' });
+
     if (path === '/api/fragments/health') return route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: healthHtml() });
     if (path === '/api/v1/projects') return json(route, projects);
     if (path.startsWith('/api/v1/sbom/')) return json(route, sbom);
     if (path === '/api/v1/agent-settings/llm') return json(route, llmSettings);
+    if (path === '/api/v1/capabilities/generation') return json(route,
+      { configured: true, enabled: false, name: 'Demo generation', model: llmSettings.model,
+        connectionStatus: 'NOT_CHECKED', generationStatus: 'NOT_VERIFIED' });
     if (path === '/api/v1/agent-settings/llm/test') return json(route,
       { reachable: false, modelAvailable: false, provider: 'ollama', model: llmSettings.model,
         message: 'DEMO: model connection intentionally disabled', models: [] });
@@ -144,12 +169,23 @@ module.exports = async function installFixtures(page) {
     if (path === '/api/v1/agent-runs') return json(route, pid === projectId ? [run] : []);
     if (/^\/api\/v1\/agent-runs\/(sast-triage|vulnerability-triage)$/.test(path)) return json(route, run, 202);
     if (path === `/api/v1/agent-runs/${run.id}`) return json(route, run);
-    if (/^\/api\/v1\/search\/(semantic|code)$/.test(path)) {
+    if (path === `/api/v1/review-queue/snapshots/${frozenSnapshot.id}/review` && method === 'GET')
+      return json(route,{snapshot:frozenSnapshot,items:[{entry:reviewEntry,report:frozenReport,reportMatchCount:1}]});
+    if (path.startsWith(`/api/v1/review-queue/${reviewEntry.id}/`) && method === 'POST') {
+      const action=path.split('/').at(-1), body=route.request().postDataJSON()||{};
+      if (!['claim','confirm','reject','return'].includes(action)) throw new Error('Unexpected review fixture action');
+      if (reviewEntry.status !== (action==='claim'?'PENDING':'IN_REVIEW')) return json(route,{error:'DEMO state changed'},404);
+      if (action!=='claim'&&!body.reason?.trim()) return json(route,{error:'DEMO reason required'},400);
+      reviewEntry.status={claim:'IN_REVIEW',confirm:'CONFIRMED',reject:'REJECTED',return:'PENDING'}[action];
+      reviewEntry.claimedBy=action==='return'?'':'admin';
+      return json(route,{id:reviewEntry.id,status:reviewEntry.status});
+    }
+    if (/^\/api\/v1\/search\/(authorized\/)?(semantic|code)$/.test(path)) {
       const offset = Math.max(0, Number(url.searchParams.get('offset')) || 0);
       const limit = Math.max(1, Number(url.searchParams.get('limit')) || 10);
       const filtered = units.filter(u => (!url.searchParams.get('lang') || u.language === url.searchParams.get('lang'))
         && (!url.searchParams.get('kind') || u.kind === url.searchParams.get('kind')));
-      const results = filtered.slice(offset, offset + limit).map((unit, i) => ({ unit, score: 0.946 - (offset + i) * 0.075 }));
+      const results = filtered.slice(offset, offset + limit).map((unit, i) => ({ unit, projectId: pid || projectId, score: 0.946 - (offset + i) * 0.075 }));
       return json(route, { results, offset, limit, hasMore: offset + results.length < filtered.length });
     }
     if (/^\/api\/v1\/graph\/(callers|callees|impact|subtypes|symbols|entrypoints|deadcode|testgaps)$/.test(path))

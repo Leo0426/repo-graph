@@ -77,12 +77,14 @@ test('accepted launches focus the timeline and leave the preparation draft intac
   assert.equal(await page.locator('#agent-run-btn').isEnabled(), true);
 });
 
-test('desktop run rail stays compact and mobile capabilities use a compact second row', async t => {
+test('desktop run rail stays compact and optional capabilities retain usable mobile targets', async t => {
   const page = await workbench(t);
   const rail = await page.locator('.agent-run-rail').boundingBox();
   const detail = await page.locator('.agent-operations > .agent-run-detail').boundingBox();
   assert.ok(rail.height < detail.height / 2, 'The short run list must not stretch to the timeline height');
   await page.setViewportSize({ width: 390, height: 844 });
+  assert.equal(await page.locator('#agent-secondary').evaluate(el => el.open),false);
+  await page.locator('#agent-secondary > summary').click();
   const strip = await page.locator('.agent-capability-strip').boundingBox();
   assert.ok(strip.height < 190, 'Mobile capabilities should not occupy three full rows');
   assert.equal(await page.locator('.agent-run-rail').evaluate(el => getComputedStyle(el).position), 'static');

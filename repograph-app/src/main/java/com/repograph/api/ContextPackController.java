@@ -1,5 +1,7 @@
 package com.repograph.api;
 
+import com.repograph.identity.ProjectAccess;
+
 import com.repograph.core.retrieval.ContextPack;
 import com.repograph.core.retrieval.ContextPackOptions;
 import com.repograph.core.retrieval.GraphRagOptions;
@@ -16,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/v1/context")
+@ProjectAccess
 public class ContextPackController {
 
     private static final int MAX_SEED_LIMIT = 20;

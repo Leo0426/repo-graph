@@ -24,6 +24,7 @@ function refreshToolsLanguage() {
   renderToolResult('frameworks');
   renderToolResult('sbom');
   renderManagedProjects();
+  renderRepositoryContext();
 }
 
 function renderToolResult(tool) {
@@ -332,7 +333,7 @@ function renderSbomResults() {
 }
 
 /* ── SBOM dependency graph (root → direct dependencies) ── */
-const SBOM_SCOPE_COLORS = { required: '#6ee7b7', optional: '#f5bd66', excluded: '#f87171' };
+const SBOM_SCOPE_COLORS = { required: 'var(--mint)', optional: 'var(--amber)', excluded: 'var(--red)' };
 const SBOM_GRAPH_LARGE_THRESHOLD = 60;
 const SBOM_GRAPH_MAX_NODES = 300;
 let sbomGraphZoomBehavior = null;
@@ -341,7 +342,7 @@ let _currentSbomGraphSim = null;
 let sbomGraphNodes = [];
 let sbomGraphResizeObserver = null;
 
-function sbomScopeColor(scope) { return SBOM_SCOPE_COLORS[scope] || '#94a3b8'; }
+function sbomScopeColor(scope) { return SBOM_SCOPE_COLORS[scope] || 'var(--text-3)'; }
 
 function stopSbomGraph() {
   sbomGraphResizeObserver?.disconnect();
@@ -427,7 +428,7 @@ function renderSbomGraph(rootLabel, components) {
   }
   sbomGraphNodes = nodes;
   const link = group.append('g').attr('class', 'links').selectAll('line').data(links).join('line')
-    .attr('stroke', '#6ee7b7').attr('stroke-width', isLarge ? 1 : 1.5).attr('stroke-opacity', .23);
+    .attr('stroke', 'var(--mint)').attr('stroke-width', isLarge ? 1 : 1.5).attr('stroke-opacity', .23);
   const node = group.append('g').attr('class', 'nodes').selectAll('g').data(nodes).join('g')
     .attr('role', 'button').attr('tabindex', (datum, index) => index === 0 ? 0 : -1)
     .attr('aria-label', datum => datum.isRoot ? `${t('sbom.legend.root')}: ${datum.name}` : `${datum.name || '—'} · ${datum.version || '—'} · ${sbomScopeLabel(datum.scope)}`)
@@ -450,10 +451,10 @@ function renderSbomGraph(rootLabel, components) {
       .on('drag', (event, datum) => { datum.x = datum.fx = event.x; datum.y = datum.fy = event.y; _updateSbomGraphPositions(link, node); }));
   node.append('title').text(datum => datum.name || '—');
   node.append('circle').attr('r', datum => datum.isRoot ? 20 : (isLarge ? 7 : 13))
-    .attr('fill', '#17212d').attr('stroke', datum => datum.isRoot ? '#dce8f0' : sbomScopeColor(datum.scope)).attr('stroke-width', 2);
+    .attr('fill', 'var(--bg-2)').attr('stroke', datum => datum.isRoot ? 'var(--text)' : sbomScopeColor(datum.scope)).attr('stroke-width', 2);
   node.append('text').attr('text-anchor', 'middle').attr('dy', datum => datum.isRoot ? 37 : 29)
-    .attr('fill', '#dce8f0').attr('font-family', 'var(--fm)').attr('font-size', 12)
-    .attr('paint-order', 'stroke').attr('stroke', '#111923').attr('stroke-width', 4).attr('stroke-linejoin', 'round')
+    .attr('fill', 'var(--text)').attr('font-family', 'var(--fm)').attr('font-size', 12)
+    .attr('paint-order', 'stroke').attr('stroke', 'var(--bg-2)').attr('stroke-width', 4).attr('stroke-linejoin', 'round')
     .attr('pointer-events', 'none').text(datum => {
       if (isLarge && !datum.isRoot) return '';
       return (datum.name || '').length > 22 ? datum.name.slice(0, 21) + '…' : datum.name;
@@ -502,21 +503,25 @@ let managedProjects = null;
 let managedProjectsVersion = 0;
 let managedProjectsLoading = false;
 let managedProjectsError = '';
+let managedProjectsPage = 0;
 const managedProjectDeletes = new Set();
 const managedProjectErrors = new Map();
 
 function filterManagedProjects() {
+  managedProjectsPage = 0;
   renderManagedProjects();
 }
 
 function clearManagedProjectsFilter() {
   const input = document.getElementById('tools-project-search');
   input.value = '';
+  managedProjectsPage = 0;
   renderManagedProjects();
   input.focus();
 }
 
 function renderManagedProjects() {
+  renderRepositoryContext();
   const container = document.getElementById('projects-manage-list');
   const status = document.getElementById('tools-project-status');
   if (!container || !status) return;
@@ -537,6 +542,8 @@ function renderManagedProjects() {
     .some(value => String(value || '').toLocaleLowerCase().includes(query)));
   document.getElementById('tools-project-count').textContent = managedProjects === null ? ''
     : `${projects.length.toLocaleString()} / ${managedProjects.length.toLocaleString()} ${t('tools.project.count')}`;
+  managedProjectsPage = renderListPagination('tools-project-pagination', 'projects-manage-list', projects.length, managedProjectsPage,
+    page => { managedProjectsPage = page; renderManagedProjects(); });
   if (managedProjects === null) {
     container.replaceChildren();
     return;
@@ -547,30 +554,37 @@ function renderManagedProjects() {
   if (!projects.length) {
     container.innerHTML = query ? `<div class="tools-empty"><strong>${esc(t('tools.project.noMatch'))}</strong>
       <button type="button" id="tools-clear-filter" class="btn btn-ghost">${esc(t('tools.project.clear'))}</button></div>`
-      : `<div class="tools-empty"><strong>${esc(t('tools.manage.empty'))}</strong><p>${esc(t('tools.project.emptyHint'))}</p>
-        <a href="#index" class="btn btn-primary tools-index-link">${esc(t('tools.project.index'))}</a></div>`;
+      : `<div class="tools-empty"><strong>${esc(t('tools.manage.empty'))}</strong><p>${esc(t(sessionAccount?.role === 'ADMIN' ? 'tools.project.emptyHint' : 'workspace.askAdmin'))}</p>
+        ${sessionAccount?.role === 'ADMIN' ? `<a href="#index" class="btn btn-primary tools-index-link">${esc(t('tools.project.index'))}</a>` : ''}</div>`;
     container.querySelector('#tools-clear-filter')?.addEventListener('click', clearManagedProjectsFilter);
     return;
   }
-  container.innerHTML = projects.map(project => {
+  container.innerHTML = projects.slice(managedProjectsPage * LIST_PAGE_SIZE, (managedProjectsPage + 1) * LIST_PAGE_SIZE).map(project => {
     const pending = managedProjectDeletes.has(project.projectId);
     const error = managedProjectErrors.get(project.projectId);
     const timestamp = Date.parse(project.indexedAt);
     const indexedAt = Number.isFinite(timestamp)
       ? `<time datetime="${esc(project.indexedAt)}" title="${esc(new Date(timestamp).toLocaleString())}">${esc(relativeTime(project.indexedAt))}</time>`
       : esc(t('tools.project.unknownTime'));
-    return `<article class="tools-project" data-project-id="${esc(project.projectId)}">
-      <div class="tools-project-main"><h3>${esc(projectName(project))}</h3><code class="tools-project-id">${esc(project.projectId)}</code>
-        <p class="tools-project-root"><span>${esc(t('tools.project.root'))}</span><code>${esc(project.projectRoot || t('tools.project.unknownRoot'))}</code></p></div>
+    const current = project.projectId === state.activeProjectId;
+    return `<article class="tools-project" data-project-id="${esc(project.projectId)}" data-current="${current}">
+      <div class="tools-project-main"><h3>${esc(projectName(project))}</h3><span class="tools-current-label" ${current ? '' : 'hidden'}>${esc(t('workspace.current'))}</span><code class="tools-project-id">${esc(project.projectId)}</code>
+        <p class="tools-project-root"><span>${esc(t('tools.project.root'))}</span><code>${esc(project.projectRoot || t('tools.project.unknownRoot'))}</code></p>
+        <div class="tools-project-shortcuts">${['search','vulns','wiki'].map(panel => `<button type="button" class="btn btn-ghost" data-tools-action="${panel}" aria-label="${esc(t(`workspace.task.${panel}`, projectName(project)))}">${esc(t(panel === 'search' ? 'workspace.search' : panel === 'vulns' ? 'workspace.findings' : 'workspace.docs'))}</button>`).join('')}</div></div>
       <dl class="tools-project-meta"><div><dt>${esc(t('tools.project.units'))}</dt><dd class="tools-project-units">${Number(project.nodeCount || 0).toLocaleString()}</dd></div>
         <div><dt>${esc(t('tools.project.indexedAt'))}</dt><dd>${indexedAt}</dd></div></dl>
-      <div class="tools-project-actions"><a class="btn btn-ghost tools-overview" data-tools-action="overview" href="#stats=${encodeURIComponent(project.projectId)}">${esc(t('tools.project.overview'))}<span aria-hidden="true">↗</span></a>
-        <button type="button" class="btn btn-ghost tools-delete" data-tools-action="delete" ${pending ? 'disabled' : ''}>${esc(t(pending ? 'tools.project.deleting' : 'btn.delete'))}</button></div>
+      <div class="tools-project-actions"><a class="btn btn-primary tools-overview" data-tools-action="overview" href="#stats=${encodeURIComponent(project.projectId)}" aria-label="${esc(t('workspace.task.stats', projectName(project)))}">${esc(t('workspace.openOverview'))}<span aria-hidden="true">↗</span></a>
+        ${sessionAccount?.role === 'ADMIN' ? `<button type="button" class="btn btn-ghost tools-delete" data-tools-action="delete" ${pending ? 'disabled' : ''}>${esc(t(pending ? 'tools.project.deleting' : 'btn.delete'))}</button>` : ''}</div>
       ${error ? `<p class="tools-project-error" role="alert">${esc(t('delete.failed', error))}</p>` : ''}</article>`;
   }).join('');
   container.querySelectorAll('.tools-project').forEach(card => {
     const project = projects.find(item => item.projectId === card.dataset.projectId);
-    card.querySelector('.tools-delete').addEventListener('click', () => deleteProject(project.projectId, project.projectRoot || ''));
+    ['search','vulns','wiki','overview'].forEach(action => card.querySelector(`[data-tools-action="${action}"]`)
+      .addEventListener('click', event => {
+        event.preventDefault();
+        openRepositoryTask(project.projectId, action === 'overview' ? 'stats' : action);
+      }));
+    card.querySelector('.tools-delete')?.addEventListener('click', () => deleteProject(project.projectId, project.projectRoot || ''));
     if (focusedId === project.projectId && focusedAction) {
       card.querySelector(`[data-tools-action="${focusedAction}"]`)?.focus({ preventScroll: true });
     }
@@ -583,7 +597,7 @@ async function renderProjectsManage() {
   managedProjectsError = '';
   renderManagedProjects();
   try {
-    const projects = await api.projects();
+    const projects = await refreshProjectsList({ throwOnError: true });
     if (version !== managedProjectsVersion) return;
     managedProjects = projects || [];
   } catch (error) {
@@ -591,6 +605,13 @@ async function renderProjectsManage() {
     managedProjectsError = error.message;
   }
   managedProjectsLoading = false;
+  renderManagedProjects();
+}
+
+function onProjectCatalogUpdated(projects) {
+  if (managedProjects === null && !managedProjectsError) return;
+  managedProjects = projects;
+  managedProjectsError = '';
   renderManagedProjects();
 }
 
@@ -791,4 +812,35 @@ function bmMark(hit) {
 
 function pctFmt(rate) {
   return (rate * 100).toFixed(1) + '%';
+}
+
+function renderRepositoryContext() {
+  const name = document.getElementById('repository-current-name');
+  if (!name) return;
+  const project = state.projects.find(item => item.projectId === state.activeProjectId);
+  name.textContent = project ? projectName(project) : '—';
+  document.getElementById('repository-current-hint').textContent = t(project ? 'workspace.selected' : 'workspace.choose');
+  document.querySelectorAll('.tools-project').forEach(card => {
+    const current = card.dataset.projectId === state.activeProjectId;
+    card.dataset.current = String(current);
+    const label = card.querySelector('.tools-current-label');
+    if (label) { label.hidden = !current; label.textContent = t('workspace.current'); }
+  });
+}
+async function openRepositoryTask(projectId, panel) {
+  if (!['stats', 'search', 'vulns', 'wiki', 'graph', 'agent'].includes(panel)) return;
+  if (!state.projects.some(project => project.projectId === projectId)) {
+    showToast(t('search.repositoryUnavailable'), 5000, 'error');
+    return;
+  }
+  setGlobalProject(projectId, { historyMode: 'replace' });
+  if (panel === 'search') changeSearchScope('current', { run: false, historyMode: 'replace' });
+  await switchPanel(panel);
+  document.getElementById('main-content').focus({ preventScroll: true });
+}
+function openCurrentRepositoryPanel(panel) {
+  if (!['search', 'vulns', 'wiki'].includes(panel)) return;
+  const project = state.projects.find(item => item.projectId === state.activeProjectId);
+  if (!project) { renderRepositoryContext(); return; }
+  openRepositoryTask(project.projectId, panel);
 }

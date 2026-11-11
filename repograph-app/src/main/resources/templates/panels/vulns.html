@@ -3,22 +3,14 @@
 <body>
 <div th:fragment="panel" id="panel-vulns" class="panel"
      :class="{ active: $store.repograph.panel === 'vulns' }">
-  <div class="panel-header vuln-heading">
-    <div>
-      <div class="panel-title" data-i18n="vulns.title">代码漏洞</div>
-      <div class="panel-subtitle" data-i18n="vulns.subtitle">静态规则扫描 · 结果需人工确认</div>
-    </div>
-    <button type="button" class="btn btn-ghost" onclick="showVulnReport()" id="vuln-report-btn" disabled>
-      <span data-i18n="btn.vulnReport">生成报告</span>
-    </button>
-  </div>
+
   <div class="panel-body vuln-workbench">
     <section class="vuln-controls" data-i18n-aria-label="vuln.filters" aria-label="筛选发现">
       <div class="vuln-project-row">
         <label class="vuln-project-field"><span data-i18n="vuln.project">扫描项目</span>
-          <select id="vuln-project-select" onchange="onVulnProjectChange()">
+          <span class="select-control"><select id="vuln-project-select" onchange="onVulnProjectChange()">
             <option value="" data-i18n="ph.selectProject">— 选择项目 —</option>
-          </select>
+          </select></span>
         </label>
         <div class="vuln-scan-actions">
           <button type="button" class="btn btn-primary" onclick="triggerVulnScan()" id="vuln-scan-btn" disabled
@@ -31,22 +23,22 @@
       </div>
       <div class="vuln-filter-row">
         <label><span data-i18n="vuln.severity">严重程度</span>
-          <select id="vuln-filter-severity" onchange="loadVulns()">
+          <span class="select-control"><select id="vuln-filter-severity" onchange="loadVulns({resetPage:true})">
             <option value="" data-i18n="vuln.allSeverity">全部严重程度</option>
             <option value="CRITICAL" data-i18n="vuln.critical">CRITICAL</option>
             <option value="HIGH" data-i18n="vuln.high">HIGH</option>
             <option value="MEDIUM" data-i18n="vuln.medium">MEDIUM</option>
             <option value="LOW" data-i18n="vuln.low">LOW</option>
-          </select>
+          </select></span>
         </label>
         <label><span data-i18n="vuln.status">处理状态</span>
-          <select id="vuln-filter-status" onchange="loadVulns()">
+          <span class="select-control"><select id="vuln-filter-status" onchange="loadVulns({resetPage:true})">
             <option value="" data-i18n="vuln.allStatus">全部状态</option>
             <option value="SUSPECTED" data-i18n="vuln.suspected">疑似</option>
             <option value="CONFIRMED" data-i18n="vuln.confirmed">已确认</option>
             <option value="FIXED" data-i18n="vuln.fixed">已修复</option>
             <option value="DISMISSED" data-i18n="vuln.dismissed">已忽略</option>
-          </select>
+          </select></span>
         </label>
         <button type="button" class="btn btn-ghost" id="vuln-refresh-btn" onclick="loadVulns()" disabled
                 data-i18n="vuln.refresh">刷新结果</button>
@@ -58,12 +50,15 @@
       <div class="vuln-result-total"><strong id="vuln-result-count">—</strong>
         <span data-i18n="vuln.currentResults">当前结果</span></div>
       <div><div id="vuln-result-breakdown" class="vuln-result-breakdown"></div>
-        <p data-i18n="vuln.scopeHint">计数仅对应当前项目与筛选条件，发现仍需人工核实。</p></div>
+        <p class="result-footnote" data-i18n="vuln.scopeHint">计数仅对应当前项目与筛选条件，发现仍需人工核实。</p></div>
     </section>
+    <div class="list-view-options"><button type="button" class="btn btn-ghost" data-list-density-toggle aria-pressed="false" onclick="toggleListDensity()" data-i18n="list.compact">紧凑视图</button></div>
     <div id="vuln-list" aria-busy="false">
       <div class="vuln-empty"><strong data-i18n="vuln.noProject">先选择一个项目</strong>
         <p data-i18n="vuln.emptyHint">选择项目查看已有发现，也可按需运行代码、污点或依赖扫描。</p></div>
     </div>
+
+    <div id="vuln-pagination" class="list-pagination" hidden></div>
 
     <dialog id="vuln-report-modal" class="vuln-report-dialog" aria-labelledby="vuln-report-title"
             onclose="onVulnReportClosed()" onclick="if(event.target===this)closeVulnReport()">
@@ -86,5 +81,8 @@
     </dialog>
   </div>
 </div>
+<div th:fragment="actions" class="page-actions"><button type="button" class="btn btn-ghost" onclick="showVulnReport()" id="vuln-report-btn" disabled>
+      <span data-i18n="btn.vulnReport">生成报告</span>
+    </button></div>
 </body>
 </html>

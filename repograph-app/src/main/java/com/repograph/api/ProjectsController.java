@@ -1,5 +1,7 @@
 package com.repograph.api;
 
+import com.repograph.identity.ProjectAccess;
+
 import com.repograph.core.graph.GraphQueryService;
 import com.repograph.core.graph.ProjectInfo;
 import com.repograph.core.graph.ProjectStats;
@@ -40,6 +42,7 @@ public class ProjectsController {
      * @return {@link ProjectInfo} 列表；无项目时返回空数组
      */
     @GetMapping("/projects")
+    @ProjectAccess(mode = ProjectAccess.Mode.AUTHENTICATED)
     public List<ProjectInfo> projects() {
         return graphQueryService.listProjects();
     }
@@ -53,6 +56,7 @@ public class ProjectsController {
      * @return 该项目的聚合统计快照
      */
     @GetMapping("/projects/{projectId}/stats")
+    @ProjectAccess(source = ProjectAccess.Source.PATH)
     public ProjectStats projectStats(@PathVariable String projectId) {
         return graphQueryService.projectStats(projectId);
     }

@@ -1,5 +1,7 @@
 package com.repograph.api;
 
+import com.repograph.identity.ProjectAccess;
+
 import com.repograph.core.advisory.LlmAdvisoryResult;
 import com.repograph.core.advisory.LlmAdvisoryService;
 import com.repograph.core.finding.TriageReport;
@@ -15,6 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/v1/triage")
+@ProjectAccess(mode = ProjectAccess.Mode.AUTHENTICATED)
 public class LlmAdvisoryController {
 
     private final LlmAdvisoryService advisoryService;

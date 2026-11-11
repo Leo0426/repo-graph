@@ -3,7 +3,7 @@
 let _vulnProjectId = '';
 const vulnView = {
   version: 0, phase: 'idle', findings: [], expanded: new Set(), evidence: new Map(),
-  scans: new Map(), updates: new Set(), reportVersion: 0,
+  scans: new Map(), updates: new Set(), reportVersion: 0, page: 0,
 };
 const vulnStatuses = ['SUSPECTED', 'CONFIRMED', 'FIXED', 'DISMISSED'];
 const vulnLabel = key => `<span data-i18n="${key}">${esc(t(key))}</span>`;
@@ -11,6 +11,7 @@ const vulnLabel = key => `<span data-i18n="${key}">${esc(t(key))}</span>`;
 function onVulnProjectChange() {
   const projectId = document.getElementById('vuln-project-select')?.value || '';
   if (projectId !== _vulnProjectId) {
+    vulnView.page = 0;
     vulnView.expanded.clear();
     closeVulnReport();
     const status = document.getElementById('vuln-scan-status');
@@ -81,7 +82,9 @@ async function runVulnScan(kind) {
   }
 }
 
-async function loadVulns() {
+async function loadVulns({ resetPage = false } = {}) {
+  if (resetPage) vulnView.page = 0;
+  if (typeof readerView !== 'undefined' && readerView.source === 'vulns') closeResultReader(false);
   const version = ++vulnView.version;
   const projectId = _vulnProjectId;
   const severity = document.getElementById('vuln-filter-severity')?.value || '';
@@ -91,6 +94,7 @@ async function loadVulns() {
   vulnView.evidence.clear();
   vulnView.findings = [];
   vulnView.phase = projectId ? 'loading' : 'idle';
+  document.getElementById('vuln-pagination').hidden = true;
   renderVulnSummary();
   updateVulnControls();
   list.setAttribute('aria-busy', String(!!projectId));
@@ -120,6 +124,7 @@ async function loadVulns() {
 }
 
 function renderVulnSummary() {
+  if (vulnView.phase === 'ready') renderVulnPagination();
   const count = document.getElementById('vuln-result-count');
   const breakdown = document.getElementById('vuln-result-breakdown');
   if (count) count.textContent = vulnView.phase === 'ready' ? String(vulnView.findings.length) : '—';
@@ -132,18 +137,27 @@ function renderVulnSummary() {
 function resetVulnFilters() {
   document.getElementById('vuln-filter-severity').value = '';
   document.getElementById('vuln-filter-status').value = '';
-  return loadVulns();
+  return loadVulns({ resetPage: true });
+}
+
+function renderVulnPagination() {
+  vulnView.page = renderListPagination('vuln-pagination', 'vuln-list', vulnView.findings.length, vulnView.page, page => {
+    if (typeof readerView !== 'undefined' && readerView.source === 'vulns') closeResultReader(false);
+    vulnView.page = page;
+    renderVulnList(vulnView.findings);
+  });
 }
 
 function renderVulnList(findings) {
   const list = document.getElementById('vuln-list');
   if (!list) return;
+  renderVulnPagination();
   if (!findings.length) {
     const filtered = document.getElementById('vuln-filter-severity').value || document.getElementById('vuln-filter-status').value;
     list.innerHTML = `<div class="vuln-empty"><strong>${vulnLabel('vulns.noFindings')}</strong><p>${vulnLabel('vuln.noMatchesHint')}</p>${filtered ? `<button type="button" id="vuln-reset-filters" class="btn btn-ghost" onclick="resetVulnFilters()">${vulnLabel('vuln.resetFilters')}</button>` : ''}</div>`;
     return;
   }
-  list.innerHTML = findings.map(f => {
+  list.innerHTML = findings.slice(vulnView.page * LIST_PAGE_SIZE, (vulnView.page + 1) * LIST_PAGE_SIZE).map(f => {
     const taint = String(f.ruleId || '').endsWith('_TAINT') || String(f.detail || '').startsWith('污点链：');
     const statusKey = 'vuln.' + String(f.status).toLowerCase();
     const location = `${f.filePath || '—'}${f.startLine ? ':' + f.startLine : ''}`;
@@ -152,14 +166,15 @@ function renderVulnList(findings) {
         <span class="vuln-finding-title">${esc(f.title || f.ruleId)}</span>
         <span class="vuln-status" data-status="${esc(f.status)}">${vulnStatuses.includes(f.status) ? vulnLabel(statusKey) : esc(f.status)}</span>
         <span class="vuln-finding-location">${esc(location)}</span><span class="vuln-disclosure">${vulnLabel('vuln.details')} <span aria-hidden="true">⌄</span></span>
+        <button type="button" class="btn btn-ghost vuln-read" data-reader-finding="${esc(f.id)}" onclick="event.preventDefault();event.stopPropagation();openVulnReader(this.dataset.readerFinding,this)" data-i18n-aria-label="reader.openName" data-i18n-args="${esc(JSON.stringify([f.title || f.ruleId]))}" aria-label="${esc(t('reader.openName', f.title || f.ruleId))}">${vulnLabel('reader.evidence')}</button>
       </summary>
       <div class="vuln-finding-body">
         <dl class="vuln-facts"><div><dt>${vulnLabel('vuln.rule')}</dt><dd><span>${esc(f.ruleId || '—')}</span>${f.cwe ? ` <span class="vuln-cwe">${esc(f.cwe)}</span>` : ''}</dd></div>
           ${f.qualifiedName ? `<div><dt>${vulnLabel('vuln.symbol')}</dt><dd>${esc(f.qualifiedName)}</dd></div>` : ''}</dl>
         ${f.detail ? `<div class="vuln-description"><h3>${vulnLabel('vuln.description')}</h3><p>${esc(f.detail)}</p></div>` : ''}
         ${taint ? '<div class="vuln-evidence"></div>' : ''}
-        <div class="vuln-finding-actions"><label>${vulnLabel('vuln.status')}<select data-finding-id="${esc(f.id)}" onchange="updateVulnStatus(this.dataset.findingId,this.value,this)"${vulnView.updates.has(f.id) ? ' disabled' : ''}>
-          <option value="" data-i18n="vuln.changeStatus">${esc(t('vuln.changeStatus'))}</option>${vulnStatuses.map(status => `<option value="${status}" data-i18n="vuln.${status.toLowerCase()}">${esc(t('vuln.' + status.toLowerCase()))}</option>`).join('')}</select></label>
+        <div class="vuln-finding-actions"><label>${vulnLabel('vuln.status')}<span class="select-control"><select data-finding-id="${esc(f.id)}" onchange="updateVulnStatus(this.dataset.findingId,this.value,this)"${vulnView.updates.has(f.id) ? ' disabled' : ''}>
+          <option value="" data-i18n="vuln.changeStatus">${esc(t('vuln.changeStatus'))}</option>${vulnStatuses.map(status => `<option value="${status}" data-i18n="vuln.${status.toLowerCase()}">${esc(t('vuln.' + status.toLowerCase()))}</option>`).join('')}</select></span></label>
           ${f.qualifiedName ? `<button type="button" class="btn btn-ghost" data-qualified-name="${esc(f.qualifiedName)}" onclick="jumpToImpact(this.dataset.qualifiedName)" data-i18n-title="vuln.viewImpact" title="${esc(t('vuln.viewImpact'))}">${vulnLabel('vuln.impact')} ↗</button>` : ''}</div>
         <p class="vuln-review-hint">${vulnLabel('vuln.reviewHint')}</p>
       </div></details>`;
@@ -167,6 +182,7 @@ function renderVulnList(findings) {
 }
 
 function onVulnFindingToggle(details) {
+  if (!details.isConnected) return;
   const id = details.dataset.findingId;
   if (details.open) {
     vulnView.expanded.add(id);
@@ -250,6 +266,7 @@ async function jumpToImpact(qualifiedName) {
 }
 
 async function showVulnReport() {
+  if (typeof closeResultReader === 'function') closeResultReader(false);
   const projectId = _vulnProjectId;
   const modal = document.getElementById('vuln-report-modal');
   const textarea = document.getElementById('vuln-report-text');

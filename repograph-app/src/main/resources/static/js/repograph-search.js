@@ -15,7 +15,7 @@ function focusResultCard(idx) {
   kbResultIdx = idx;
 }
 
-function onResultKeydown(e, idx, qn) {
+function onResultKeydown(e, idx, qn, projectId) {
   if (e.target !== e.currentTarget) return;
   const cards = getResultCards();
   if (e.key === 'ArrowDown') { e.preventDefault(); focusResultCard(idx + 1); }
@@ -24,7 +24,7 @@ function onResultKeydown(e, idx, qn) {
     if (idx === 0) { document.getElementById('search-input').focus(); kbResultIdx = -1; cards.forEach(c => c.classList.remove('kb-focus')); }
     else focusResultCard(idx - 1);
   }
-  else if (e.key === 'Enter') openSymbol(qn);
+  else if (e.key === 'Enter' && projectId) openSymbol(qn, projectId);
   else if (e.key === 'Escape') { document.getElementById('search-input').focus(); kbResultIdx = -1; cards.forEach(c => c.classList.remove('kb-focus')); }
   else if (e.key === 'c' && (e.metaKey || e.ctrlKey)) {
     if (window.getSelection()?.toString()) return;
@@ -85,6 +85,24 @@ function pickHistory(e, q) {
 }
 
 /* ── Search input helpers ── */
+function renderSearchScope() {
+  const select = document.getElementById('search-scope-select');
+  if (!select) return;
+  select.value = state.searchScope;
+  const project = state.projects.find(item => item.projectId === state.activeProjectId);
+  document.getElementById('search-scope-message').textContent = state.searchScope === 'authorized'
+    ? t('search.scopeAuthorizedHint') : project ? t('search.scopeRepository', projectName(project)) : t('search.chooseRepository');
+}
+
+function changeSearchScope(scope, { run = true, historyMode = 'push' } = {}) {
+  state.searchScope = scope === 'authorized' ? 'authorized' : 'current';
+  invalidateSearch();
+  renderSearchEmpty();
+  renderSearchScope();
+  rememberWorkspaceContext(historyMode);
+  if (run && document.getElementById('search-input').value.trim()) doSearch();
+}
+
 function updateClearBtn() {
   const val = document.getElementById('search-input').value;
   const btn = document.getElementById('search-clear');
@@ -102,13 +120,16 @@ function onSearchInput(input, inputEvent) {
   debouncedSearch();
 }
 
-function renderSearchEmpty() {
+function renderSearchEmpty(titleKey = 'empty.prompt', hintKey = 'empty.example') {
+  searchState.results = [];
   document.getElementById('search-results').innerHTML =
     `<div class="empty-state">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-      <p data-i18n="empty.prompt">${esc(t('empty.prompt'))}</p>
-      <span data-i18n="empty.example">${esc(t('empty.example'))}</span>
-      <div class="search-examples">${['http', 'auth', 'data'].map(key =>
+      <p data-i18n="${titleKey}">${esc(t(titleKey))}</p>
+      <span data-i18n="${hintKey}">${esc(t(hintKey))}</span>
+      <div class="search-examples">${titleKey !== 'empty.prompt'
+        ? `<button type="button" onclick="doSearch()" data-i18n="search.catalogRetry">${esc(t('search.catalogRetry'))}</button>`
+        : ['http', 'auth', 'data'].map(key =>
         `<button type="button" onclick="useSearchExample(this)" data-i18n="search.example.${key}">${esc(t(`search.example.${key}`))}</button>`
       ).join('')}</div>
     </div>`;
@@ -210,6 +231,7 @@ function setSearchBusy(busy) {
 }
 
 function invalidateSearch() {
+  if (typeof readerView !== 'undefined' && readerView.source === 'search') closeResultReader(false);
   clearTimeout(searchDebounceTimer);
   searchRequestVersion++;
   pendingSearchKey = null;
@@ -223,11 +245,18 @@ async function doSearch() {
   clearTimeout(searchDebounceTimer);
   const q = document.getElementById('search-input').value.trim();
   if (!q) return;
+  if (state.searchScope === 'current' && !state.projects.some(project => project.projectId === state.activeProjectId)) {
+    renderSearchScope();
+    return;
+  }
   const limit = parseInt(document.getElementById('search-limit').value, 10);
   const { lang, kind } = state.filters;
   const mode = state.searchMode;
-  const key = JSON.stringify([q, limit, lang, kind, mode]);
+  const projectId = state.searchScope === 'current' ? state.activeProjectId : '';
+  const key = JSON.stringify([q, limit, lang, kind, mode, state.searchScope, projectId]);
   if (pendingSearchKey === key) return;
+  if (typeof readerView !== 'undefined' && readerView.source === 'search') closeResultReader(false);
+  searchState.results = [];
   const version = ++searchRequestVersion;
   pendingSearchKey = key;
   loadingMore = false;
@@ -240,7 +269,7 @@ async function doSearch() {
     <div class="search-skeleton" aria-hidden="true"><i></i><i></i><i></i></div>
     <div class="search-skeleton" aria-hidden="true"><i></i><i></i><i></i></div>
   </div>`;
-  Object.assign(searchState, { q, mode, lang, kind, limit, offset: 0, hasMore: false });
+  Object.assign(searchState, { q, mode, lang, kind, limit, projectId, offset: 0, hasMore: false });
   try {
     const page = mode === 'semantic'
       ? await api.semantic(q, lang, kind, limit, 0)
@@ -282,12 +311,17 @@ async function loadMore() {
     searchState.hasMore = page.hasMore;
     renderResults(page.results, true);
     renderLoadMore(page.hasMore);
+    return true;
   } catch (error) {
     if (version !== searchRequestVersion) return;
     if (btn) { btn.disabled = false; btn.textContent = t('btn.loadMore'); }
     showToast(t('search.requestFailed'), 5000, 'error');
+    return false;
   } finally {
-    if (version === searchRequestVersion) loadingMore = false;
+    if (version === searchRequestVersion) {
+      loadingMore = false;
+      if (typeof refreshReaderNavigation === 'function') refreshReaderNavigation();
+    }
   }
 }
 
@@ -310,6 +344,9 @@ function debouncedSearch() {
 }
 
 function renderResults(results, append = false) {
+  if (!append) searchState.results = [];
+  searchState.results ||= [];
+  searchState.results.push(...(results || []).map(result => ({ ...result, projectId: result.projectId || searchState.projectId || '' })));
   const el = document.getElementById('search-results');
   if (!append && (!results || results.length === 0)) {
     el.innerHTML = `<div class="empty-state"><p data-i18n="search.noResults">${esc(t('search.noResults'))}</p><span data-i18n="search.noResultsHint">${esc(t('search.noResultsHint'))}</span></div>`;
@@ -335,9 +372,12 @@ function renderResults(results, append = false) {
           <span data-i18n="src.toggle">${t('src.toggle')}</span>
         </button>` : '';
     const qnSafe = esc(JSON.stringify(u.qualifiedName || ''));
+    const projectId = r.projectId || searchState.projectId || '';
+    const projectSafe = esc(JSON.stringify(projectId));
+    const project = state.projects.find(item => item.projectId === projectId);
     const absIdx = startIdx + i;
     return `<article class="result-card" tabindex="0" data-result-idx="${absIdx}" style="animation-delay:${Math.min(i, 10) * 40}ms"
-      onkeydown="onResultKeydown(event,${absIdx},${qnSafe})"
+      onkeydown="onResultKeydown(event,${absIdx},${qnSafe},${projectSafe})"
       onfocus="kbResultIdx=${absIdx}"
       onblur="if(kbResultIdx===${absIdx})kbResultIdx=-1"
       >
@@ -350,15 +390,16 @@ function renderResults(results, append = false) {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
         </button>
       </div>
-      <div class="rc-title">${esc(u.simpleName || u.qualifiedName || '')}</div>
+      <button type="button" class="rc-title rc-read" onclick="openResultReader('search',${absIdx},this)" data-i18n-aria-label="reader.openName" data-i18n-args="${esc(JSON.stringify([u.qualifiedName || u.simpleName]))}" aria-label="${esc(t('reader.openName', u.qualifiedName || u.simpleName))}">${esc(u.simpleName || u.qualifiedName || '')}</button>
       <div class="rc-name">${esc(u.qualifiedName || '')}</div>
+      ${state.searchScope === 'authorized' ? `<div class="rc-repository">${esc(project ? projectName(project) : projectId || t('search.unknownRepository'))}</div>` : ''}
       <div class="rc-path">
         ${esc(u.filePath || '')}
         <span style="color:var(--text-3)"> · L${u.startLine}–${u.endLine}</span>
       </div>
       ${sig}${annots}
       <div class="rc-actions">${sourceBtn}
-        <button type="button" class="btn btn-ghost rc-open-graph" onclick="openSymbol(${qnSafe})">
+        <button type="button" class="btn btn-ghost rc-open-graph" onclick="openSymbol(${qnSafe},${projectSafe})" ${projectId ? '' : 'disabled'}>
           <span data-i18n="search.graphAction">${t('search.graphAction')}</span><span aria-hidden="true">↗</span>
         </button>
       </div>
@@ -398,8 +439,18 @@ function copyQn(e, qn) {
     .catch(() => showToast(t('toast.copyFailed'), 5000, 'error'));
 }
 
-async function openSymbol(qn) {
+async function openSymbol(qn, projectId = null) {
   if (!qn) return;
+  if (projectId !== null) {
+    if (!state.projects.some(project => project.projectId === projectId)) {
+      showToast(t('search.repositoryUnavailable'), 5000, 'error');
+      return;
+    }
+    if (state.activeProjectId !== projectId) setGlobalProject(projectId);
+    // A captured source overrides a previous graph-form scope, even if the header already matches.
+    document.getElementById('graph-project').value = projectId;
+    document.getElementById('entrypoints-project').value = projectId;
+  }
   document.getElementById('graph-target').value = qn;
   await switchPanel('graph');
   if (Alpine.store('repograph').panel === 'graph' && document.getElementById('graph-target').value === qn) {
@@ -409,7 +460,7 @@ async function openSymbol(qn) {
 
 /* ── Input listeners (set up after DOM ready) ── */
 document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('search-filter-disclosure').open = !window.matchMedia('(max-width: 760px)').matches;
+  document.getElementById('search-filter-disclosure').open = false;
   renderSearchFilterSummary();
   document.getElementById('search-input').addEventListener('keydown', e => {
     if (e.isComposing || e.keyCode === 229) return;

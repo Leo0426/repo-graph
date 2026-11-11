@@ -1,5 +1,7 @@
 package com.repograph.api;
 
+import com.repograph.identity.ProjectAccess;
+
 import com.repograph.agent.AgentRunStore;
 import com.repograph.agent.SastTriageAgentCommand;
 import com.repograph.agent.SastTriageAgentService;
@@ -54,6 +56,7 @@ public class AgentRunController {
      * @return 已接受的 Agent 运行
      */
     @PostMapping("/sast-triage")
+    @ProjectAccess
     public ResponseEntity<AgentRun> startSastTriage(
             @RequestParam String projectId,
             @RequestParam String format,
@@ -77,6 +80,7 @@ public class AgentRunController {
      * @return 已接受的 Agent 运行
      */
     @PostMapping("/vulnerability-triage")
+    @ProjectAccess(value = "vulnerabilityId", source = ProjectAccess.Source.QUERY, resource = ProjectAccess.Resource.VULNERABILITY)
     public ResponseEntity<AgentRun> startVulnerabilityTriage(
             @RequestParam String vulnerabilityId,
             @RequestParam(required = false) String codeVersion,
@@ -105,6 +109,7 @@ public class AgentRunController {
      * @return 按创建时间倒序的运行列表
      */
     @GetMapping
+    @ProjectAccess
     public List<AgentRun> list(
             @RequestParam String projectId,
             @RequestParam(defaultValue = "20") int limit) {
@@ -118,6 +123,7 @@ public class AgentRunController {
      * @return 运行详情；不存在时返回 404
      */
     @GetMapping("/{runId}")
+    @ProjectAccess(value = "runId", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.AGENT_RUN)
     public ResponseEntity<AgentRun> get(@PathVariable String runId) {
         return runStore.get(runId)
                 .map(ResponseEntity::ok)

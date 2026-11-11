@@ -25,8 +25,8 @@
       </svg>
     </div>
     <div class="health-info">
-      <div class="health-name">Ollama</div>
-      <div class="health-desc" data-i18n="health.ollama.desc">模型服务 · 基础连接检查</div>
+      <div class="health-name">Embedding Ollama</div>
+      <div class="health-desc" data-i18n="health.ollama.desc">检索向量生成 · 基础连接检查</div>
     </div>
     <div class="health-status" th:text="${ollama}">unknown</div>
   </div>
@@ -53,7 +53,7 @@
   </div>
   <div class="badge" id="hb-ollama" hx-swap-oob="outerHTML" th:attr="data-health=${ollamaDot}">
     <div id="hd-ollama" th:class="'badge-dot ' + ${ollamaDot}" aria-hidden="true"></div>
-    <span>Ollama</span>
+    <span>Embedding Ollama</span>
     <span class="badge-state" th:text="${ollama}">检查中</span>
   </div>
   <div class="badge" id="hb-neo4j" hx-swap-oob="outerHTML" th:attr="data-health=${neo4jDot}">

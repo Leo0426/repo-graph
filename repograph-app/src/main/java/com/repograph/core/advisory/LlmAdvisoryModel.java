@@ -7,6 +7,9 @@ package com.repograph.core.advisory;
  */
 public interface LlmAdvisoryModel {
 
+    /** Captures stable configuration for estimation, execution, retries and audit of one review. */
+    default LlmAdvisoryModel forRequest() { return this; }
+
     /**
      * 返回模型当前是否可用。
      *
@@ -33,9 +36,17 @@ public interface LlmAdvisoryModel {
      *
      * @param inputChars    输入字符数
      * @param maxOutputChars 最大输出字符数
-     * @return 估算美元成本
+     * @return 估算美元成本；未知价格返回 NaN，允许在输入/输出及超时限制内调用
      */
     double estimateCostUsd(int inputChars, int maxOutputChars);
+
+    /** Estimates a prepared request; implementations may include serialized metadata and protocol overhead. */
+    default double estimateCostUsd(LlmAdvisoryRequest request) {
+        int characters = request.findingSummary().length()
+                + request.evidence().stream().mapToInt(evidence -> evidence.excerpt().length()).sum()
+                + request.missingInfo().stream().mapToInt(String::length).sum();
+        return estimateCostUsd(characters, request.maxOutputChars());
+    }
 
     /**
      * 执行结构化辅助复核。

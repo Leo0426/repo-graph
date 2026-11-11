@@ -1,5 +1,7 @@
 package com.repograph.api;
 
+import com.repograph.identity.ProjectAccess;
+
 import com.repograph.core.architecture.ArchitectureReviewResult;
 import com.repograph.core.architecture.ArchitectureReviewService;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -23,6 +25,7 @@ import java.util.concurrent.ExecutorService;
  */
 @RestController
 @RequestMapping("/api/v1/architecture")
+@ProjectAccess
 public class ArchitectureReviewController {
 
     private final ArchitectureReviewService reviewService;

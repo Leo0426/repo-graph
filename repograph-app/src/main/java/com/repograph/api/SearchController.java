@@ -1,5 +1,7 @@
 package com.repograph.api;
 
+import com.repograph.identity.ProjectAccess;
+
 import com.repograph.core.model.CodeUnitKind;
 import com.repograph.core.retrieval.KeywordSearchOptions;
 import com.repograph.core.retrieval.KeywordSearchResult;
@@ -27,6 +29,7 @@ import com.repograph.core.vector.SearchPage;
  */
 @RestController
 @RequestMapping("/api/v1/search")
+@ProjectAccess
 public class SearchController {
 
     private final VectorStore vectorStore;

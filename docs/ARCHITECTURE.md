@@ -12,6 +12,7 @@ app 内包位于 `repograph-app/src/main/java/com/repograph/`：
 
 | 改动 | 放置及边界 |
 |------|------------|
+| 账号、组织与项目归属 | `core/identity` 为公开事实模型，`identity` 持有 SQLite 目录、审核审计和登录安全链；归属独立于 CodeUnit |
 | 领域模型、服务接口 | `core`；只依赖 JDK 和 core，不引入第三方或实现包依赖 |
 | 语言解析 | `parser`；产出 CodeUnit/RelationEdge，框架标注由 `framework` 增强 |
 | 图查询/存储 | `graph`；不依赖 `vector` |
@@ -21,8 +22,10 @@ app 内包位于 `repograph-app/src/main/java/com/repograph/`：
 | 分层摘要与结构卡 | `wiki`；消费 graph/metrics 事实源输出确定性文档，不改启发式事实；LLM 摘要（S2）沿用 advisory 通道约束 |
 | 外部报警与人工审核 | `finding`；持有导入、研判、反馈、抑制、快照和审核事实 |
 | 内置扫描与漏洞状态 | `vuln`；持有 VulnFinding 与漏洞证据 |
+| 生成模型 Provider | `core/modelprovider` 为不含密钥的配置事实；`modelprovider` 持有 SQLite 配置、加密密钥与三协议 HTTP 通道；各业务适配器保留提示词/结果校验 |
 | 模型建议 | `advisory`；提供独立辅助结果，不改启发式报告或漏洞状态 |
 | 工作流与步骤台账 | `agent`；通过稳定引用组合已有领域结果 |
+| 管理审计 | `persistence/ManagementAuditJournal` 统一事件序列；账号和 Provider 模块在各自状态变更事务中追加，不跨事务补写 |
 | SQLite 文件目录准备 | `persistence`；共享文件系统前置检查，各存储在打开数据库前调用，不依赖 Bean 初始化顺序 |
 | 不可信源码及工具进程 | `asset` 接入归档，`scanner` 适配外部扫描器 |
 | 配置核查与威胁检测 | `securityreview`；规则即数据（classpath JSON），输入文件进报告出，不持久化 |

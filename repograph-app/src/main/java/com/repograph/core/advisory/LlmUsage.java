@@ -5,10 +5,10 @@ package com.repograph.core.advisory;
  *
  * @param inputTokens     输入 token 数
  * @param outputTokens    输出 token 数
- * @param estimatedCostUsd 估算美元成本
+ * @param estimatedCostUsd 估算美元成本；缺少单价时为 null，不能视为免费
  * @author leolu
  */
-public record LlmUsage(int inputTokens, int outputTokens, double estimatedCostUsd) {
+public record LlmUsage(int inputTokens, int outputTokens, Double estimatedCostUsd) {
 
     /** 无模型调用时的零消耗。 */
     public static final LlmUsage NONE = new LlmUsage(0, 0, 0.0d);
@@ -17,7 +17,8 @@ public record LlmUsage(int inputTokens, int outputTokens, double estimatedCostUs
      * 创建资源消耗摘要。
      */
     public LlmUsage {
-        if (inputTokens < 0 || outputTokens < 0 || estimatedCostUsd < 0.0d) {
+        if (inputTokens < 0 || outputTokens < 0 || (estimatedCostUsd != null
+                && (!Double.isFinite(estimatedCostUsd) || estimatedCostUsd < 0.0d))) {
             throw new IllegalArgumentException("LLM usage values must not be negative");
         }
     }

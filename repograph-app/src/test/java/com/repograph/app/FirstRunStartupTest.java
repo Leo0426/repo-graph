@@ -64,10 +64,12 @@ class FirstRunStartupTest {
         // Override Spring's property only; never change the test JVM's real user.home.
         assertThat(temporaryDirectory.resolve("new-user")).doesNotExist();
         properties.add("user.home", () -> temporaryDirectory.resolve("new-user").toString());
+        properties.add("repograph.security.bootstrap-admin-password", () -> "Startup-admin-password-2026");
     }
 
     @Test
     void startsWithMissingHomeAndCompletesFirstIndex() throws Exception {
+        authenticateAdministrator();
         Path database = temporaryDirectory.resolve("new-user/.repograph/index.db");
         assertThat(database).isRegularFile();
         Path project = Files.createDirectory(temporaryDirectory.resolve("project"));
@@ -102,4 +104,26 @@ class FirstRunStartupTest {
         assertThat(unchanged.parsedFiles()).isZero();
         assertThat(unchanged.skippedFiles()).isEqualTo(1);
     }
+    private void authenticateAdministrator() {
+        var cookies = new java.net.CookieManager(null, java.net.CookiePolicy.ACCEPT_ALL);
+        var csrf = new java.util.concurrent.atomic.AtomicReference<JsonNode>();
+        http.getRestTemplate().getInterceptors().add((request, body, execution) -> {
+            cookies.get(request.getURI(), java.util.Map.of()).forEach((name, values) ->
+                    request.getHeaders().put(name, values));
+            if (csrf.get() != null && request.getMethod() != org.springframework.http.HttpMethod.GET) {
+                request.getHeaders().set(csrf.get().path("headerName").asText(), csrf.get().path("token").asText());
+            }
+            var response = execution.execute(request, body);
+            cookies.put(request.getURI(), response.getHeaders());
+            return response;
+        });
+        csrf.set(http.getForObject("/api/v1/auth/csrf", JsonNode.class));
+        var credentials = new org.springframework.util.LinkedMultiValueMap<String, String>();
+        credentials.add("username", "admin");
+        credentials.add("password", "Startup-admin-password-2026");
+        var response = http.postForEntity("/api/v1/auth/login", credentials, JsonNode.class);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        csrf.set(http.getForObject("/api/v1/auth/csrf", JsonNode.class));
+    }
+
 }

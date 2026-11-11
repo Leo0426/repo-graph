@@ -1,0 +1,12 @@
+<!DOCTYPE html><html xmlns:th="http://www.thymeleaf.org"><body>
+<dialog th:fragment="commands" id="command-palette" aria-labelledby="command-title">
+  <div class="command-heading"><h2 id="command-title" data-i18n="command.title">命令面板</h2>
+    <button class="command-close" type="button" onclick="closeCommandPalette()" data-i18n-aria-label="command.close" aria-label="关闭命令面板"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#x"/></svg></button>
+  </div>
+  <label class="sr-only" for="command-query" data-i18n="command.prompt">查找页面、仓库或最近查询</label>
+  <input id="command-query" type="search" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="command-results" data-i18n-ph="command.prompt" placeholder="查找页面、仓库或最近查询">
+  <div id="command-results" role="listbox" data-i18n-aria-label="command.results" aria-label="可用命令"></div>
+  <p id="command-status" class="sr-only" role="status" aria-live="polite"></p>
+  <div class="command-footer"><span><kbd>↑</kbd> <kbd>↓</kbd> <span data-i18n="command.navigate">选择</span></span><span><kbd>↵</kbd> <span data-i18n="command.run">打开</span></span><span><kbd>Esc</kbd> <span data-i18n="command.close">关闭</span></span></div>
+</dialog>
+</body></html>

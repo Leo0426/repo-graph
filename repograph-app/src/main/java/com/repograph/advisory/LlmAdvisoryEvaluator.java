@@ -35,7 +35,9 @@ public class LlmAdvisoryEvaluator {
                 .mapToLong(sample -> sample.advisoryResult().latencyMs())
                 .average()
                 .orElse(0.0d);
-        double totalCost = available.stream()
+        boolean unknownCost = available.stream()
+                .anyMatch(sample -> sample.advisoryResult().usage().estimatedCostUsd() == null);
+        Double totalCost = unknownCost ? null : available.stream()
                 .mapToDouble(sample -> sample.advisoryResult().usage().estimatedCostUsd())
                 .sum();
         return new LlmAdvisoryEvaluation(

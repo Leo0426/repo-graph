@@ -3,31 +3,26 @@
 <body>
 <div th:fragment="panel" id="panel-tools" class="panel"
      :class="{ active: $store.repograph.panel === 'tools' }">
-  <div class="panel-header">
-    <div class="panel-title" data-i18n="tools.title">项目工具</div>
-    <div class="panel-subtitle" data-i18n="tools.subtitle">管理已索引项目，检查框架入口并导出依赖清单。</div>
-  </div>
+
   <div class="panel-body">
-    <section class="tools-projects card" aria-labelledby="tools-projects-heading">
-      <div class="tools-section-heading">
-        <div><h2 id="tools-projects-heading" data-i18n="tools.manage.title">已索引项目</h2>
-          <p data-i18n="tools.manage.hint">查看项目索引与最近更新时间，进入概览继续分析。</p></div>
-        <div class="tools-heading-actions">
-          <button type="button" id="tools-refresh-projects" class="btn btn-ghost" onclick="renderProjectsManage()" data-i18n="btn.refresh">刷新</button>
-          <a href="#index" class="btn btn-primary tools-index-link" data-i18n="tools.project.index">索引项目</a>
-        </div>
-      </div>
+    <section class="tools-projects card" aria-label="仓库列表" data-i18n-aria-label="workspace.page.tools">
+
       <div class="tools-project-filter">
         <label for="tools-project-search" data-i18n="tools.project.filter">筛选项目</label>
         <input type="search" id="tools-project-search" autocomplete="off" placeholder="按名称、项目 ID 或根路径筛选"
                data-i18n-ph="tools.project.filterPh" oninput="filterManagedProjects()" aria-controls="projects-manage-list">
         <span id="tools-project-count" role="status" aria-live="polite"></span>
+        <button type="button" class="btn btn-ghost" data-list-density-toggle aria-pressed="false" onclick="toggleListDensity()" data-i18n="list.compact">紧凑视图</button>
       </div>
       <div id="tools-project-status" aria-live="polite"></div>
       <div id="projects-manage-list" aria-busy="false"></div>
+      <div id="tools-project-pagination" class="list-pagination" hidden></div>
     </section>
 
-    <div class="tools-utilities">
+    <section class="repository-context" aria-label="当前仓库" data-i18n-aria-label="workspace.scope">
+      <div><span data-i18n="workspace.scope">当前仓库</span><strong id="repository-current-name"></strong><p id="repository-current-hint" role="status"></p></div>
+    </section>
+    <details class="repository-utilities"><summary data-i18n="workspace.utilities">框架与依赖工具</summary><div class="tools-utilities">
       <section class="card tools-utility" aria-labelledby="tools-frameworks-heading">
         <div class="tools-utility-heading"><span class="tools-utility-icon" aria-hidden="true">↳</span>
           <div><h2 id="tools-frameworks-heading" data-i18n="tools.frameworks.title">框架入口点</h2>
@@ -57,8 +52,13 @@
         </form>
         <div id="sbom-result" aria-live="polite" aria-busy="false"></div>
       </section>
-    </div>
+    </div></details>
   </div>
 </div>
+<div th:fragment="actions" class="page-actions"><div class="tools-heading-actions">
+          <a href="#wiki" class="btn btn-ghost" data-i18n="wiki.title">项目文档</a>
+          <button type="button" id="tools-refresh-projects" class="btn btn-ghost" onclick="renderProjectsManage()" data-i18n="btn.refresh">刷新</button>
+          <a href="#index" data-admin-only hidden class="btn btn-primary tools-index-link" data-i18n="tools.project.index">索引项目</a>
+        </div></div>
 </body>
 </html>

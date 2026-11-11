@@ -34,7 +34,11 @@ async function workspace(t) {
 }
 
 async function panel(page, name) {
-  await page.locator(`.nav-btn[data-panel="${name}"]`).click();
+  const group = {tools:'tools',index:'tools',stats:'tools',search:'search',symbol:'search',graph:'search',wiki:'search',vulns:'vulns',agent:'vulns',metrics:'vulns',sbom:'vulns',health:'health',benchmark:'health',admin:'admin'}[name];
+  const tab = page.locator(`.workspace-tab[data-panel="${name}"]`);
+  if (!await tab.isVisible()) await page.locator(`.nav-btn[data-panel="${group}"]`).click();
+  await tab.click();
+  if (name === 'tools') await page.locator('.repository-utilities > summary').click();
   await page.waitForFunction(name => document.querySelector('.panel.active')?.id === `panel-${name}`, name);
 }
 
@@ -103,6 +107,8 @@ test('project selection survives first panel entry, Agent changes, and clearing 
 
 test('statistics kind drill-down leaves code mode and keeps the requested semantic kind', async t => {
   const { page, fixture } = await workspace(t);
+  await page.locator('#global-project').selectOption(projectA);
+  await page.locator('#search-filter-disclosure > summary').click();
   await page.locator('[data-group="kind"][data-val="METHOD"]').click();
   await page.locator('#search-input').fill('demo orders');
   await page.locator('#search-input').press('Enter');
@@ -122,8 +128,8 @@ test('statistics kind drill-down leaves code mode and keeps the requested semant
     return url.pathname === '/api/v1/search/semantic' && url.searchParams.get('kind') === 'METHOD';
   }));
   assert(fixture.requested.filter(request => request.includes('/api/v1/search/')).every(request =>
-    !new URL(request.slice('GET '.length), baseUrl).searchParams.has('projectId')),
-  'Search APIs keep their existing all-project contract');
+    new URL(request.slice('GET '.length), baseUrl).searchParams.get('projectId') === projectA),
+  'Search and the statistics drill-down retain the chosen repository');
 });
 
 test('late metrics from project A cannot overwrite the displayed health and rows for project B', async t => {
@@ -236,7 +242,7 @@ test('project deletion sends its root and invalidates a project list requested b
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(projects) });
   });
   let deletion;
-  await page.route('**/api/v1/index/project?*', async route => {
+  await page.route(url => url.pathname === '/api/v1/index/project', async route => {
     deletion = { method: route.request().method(), url: new URL(route.request().url()) };
     await route.fulfill({ status: 200, contentType: 'application/json',
       body: JSON.stringify({ status: 'deleted', projectId: projectA }) });
@@ -287,9 +293,10 @@ test('project refresh responses arriving out of order preserve the latest list a
   assert.deepEqual(await page.evaluate(() => state.projects), latest);
   assert.deepEqual(await page.locator('#global-project option').evaluateAll(options => options.map(option => option.value)),
     ['', projectB]);
-  assert.match(await page.locator('#global-project').textContent(), /Demo Inventory Refreshed.*777/);
+  assert.match(await page.locator('#global-project').textContent(), /Demo Inventory Refreshed/);
   assert.deepEqual(await page.locator('#projects-datalist option').evaluateAll(options => options.map(option => option.value)),
-    ['Demo Inventory Refreshed']);
+    [projectB]);
+  assert.match(await page.locator('#projects-datalist option').getAttribute('label'), /Demo Inventory Refreshed/);
 });
 
 test('deleting the selected project from statistics clears global scope and the old index result', async t => {
@@ -302,7 +309,7 @@ test('deleting the selected project from statistics clears global scope and the 
   await page.route('**/api/v1/index/project/status?*', route => route.fulfill({ status: 200,
     contentType: 'application/json', body: JSON.stringify({ status: 'done', totalFiles: 12,
       parsedFiles: 12, totalUnits: 321, totalEdges: 456, durationMs: 1200, errors: [] }) }));
-  await page.route('**/api/v1/index/project?*', route => {
+  await page.route(url => url.pathname === '/api/v1/index/project', route => {
     deletion = { method: route.request().method(), url: new URL(route.request().url()) };
     deleted = true;
     return route.fulfill({ status: 200, contentType: 'application/json',
@@ -410,7 +417,7 @@ for (const inspectedProject of [projectA, projectB]) {
       contentType: 'application/json', body: JSON.stringify({ ...fixture.sbom,
         metadata: { ...fixture.sbom.metadata, component: { ...fixture.sbom.metadata.component, name: inspectedLabel } } }) }));
     let deletions = 0;
-    await page.route('**/api/v1/index/project?*', route => {
+    await page.route(url => url.pathname === '/api/v1/index/project', route => {
       assert.equal(route.request().method(), 'DELETE');
       assert.equal(new URL(route.request().url()).searchParams.get('projectRoot'), deletedProject.projectRoot);
       deletions++;

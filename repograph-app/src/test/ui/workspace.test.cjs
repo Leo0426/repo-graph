@@ -59,7 +59,8 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 test('navigation survives history, reload, stats deep links and global search shortcuts', async t => {
   const { page } = await workspace(t);
-  await page.locator('.nav-btn').filter({ has: page.locator('[data-i18n="nav.stats"]') }).click();
+  await page.locator('.nav-btn[data-workspace="repository"]').click();
+  await page.locator('.workspace-tab[data-panel="stats"]').click();
   await panel(page, 'stats');
   // Entering Overview now loads the selected project and writes its canonical deep link.
   await page.waitForFunction(() => location.hash === '#stats=d3e000000001');
@@ -73,11 +74,15 @@ test('navigation survives history, reload, stats deep links and global search sh
   await page.reload({ waitUntil: 'networkidle' });
   await panel(page, 'graph');
   await page.keyboard.press('Control+k');
+  await focused(page, 'command-query');
+  await page.locator('#command-query').fill('代码检索');
+  await page.keyboard.press('Enter');
   await panel(page, 'search');
   await focused(page, 'search-input');
   await page.goto(new URL('#stats=d3e000000002', baseUrl).href);
   await panel(page, 'stats');
   await page.waitForFunction(() => document.querySelector('#stats-content').textContent.includes('386'));
+  assert.equal(await page.locator('#global-project').inputValue(), 'd3e000000002');
 });
 
 test('mobile drawer traps keyboard navigation, closes on Escape and preserves project selection', async t => {
@@ -95,9 +100,10 @@ test('mobile drawer traps keyboard navigation, closes on Escape and preserves pr
   await focused(page, 'nav-toggle');
   assert.equal(await page.locator('#nav-toggle').getAttribute('aria-expanded'), 'false');
   await page.locator('#nav-toggle').click();
-  await page.locator('.nav-btn').filter({ has: page.locator('[data-i18n="nav.agent"]') }).click();
-  await panel(page, 'agent');
+  await page.locator('.nav-btn[data-workspace="defects"]').click();
   await focused(page, 'main-content');
+  await page.locator('.workspace-tab[data-panel="agent"]').click();
+  await panel(page, 'agent');
   assert.equal(await page.locator('#nav-toggle').getAttribute('aria-expanded'), 'false');
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await page.evaluate(() => showToast('DEMO ' + 'LongErrorMessage'.repeat(12), 5000, 'error'));
@@ -152,7 +158,7 @@ test('delete dialog traps focus, blocks background shortcuts and restores focus 
   await page.evaluate(() => { showDeleteModal('demo', '/demo/order').then(value => window.dialogResult = value); });
   await page.locator('#delete-modal-confirm').click();
   assert.equal(await page.evaluate(() => window.dialogResult), true);
-  await page.route('**/api/v1/index/project?*', route => route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"DEMO delete failed"}' }));
+  await page.route(url => url.pathname === '/api/v1/index/project', route => route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"DEMO delete failed"}' }));
   assert.equal(await page.evaluate(() => api.deleteProject('demo').then(() => 'success', error => error.message)), 'DEMO delete failed');
 });
 
@@ -253,6 +259,7 @@ test('result controls work from the keyboard and clipboard failure is reported t
   await page.waitForFunction(() => document.querySelector('#toast').dataset.tone === 'error'
     && document.querySelector('#toast').textContent === t('toast.copyFailed'));
   await panel(page, 'search');
+  await page.locator('#search-filter-disclosure > summary').click();
   await page.locator('[data-group="lang"][data-val="java"]').click();
   assert.equal(await page.locator('[data-group="lang"][data-val="java"]').getAttribute('aria-pressed'), 'true');
 });
@@ -267,6 +274,7 @@ test('agent remains readable at desktop, tablet and phone widths, with persisten
   assert.equal(await page.locator('#agent-format-field').isVisible(), true);
   await page.evaluate(() => setAgentInputMode('vuln'));
   assert.equal(await page.locator('#agent-format-field').isVisible(), false);
+  await page.locator('#agent-secondary > summary').click();
   await page.locator('.agent-llm-header').click();
   assert.equal(await page.locator('.agent-llm-header').getAttribute('aria-expanded'), 'true');
   await page.locator('.agent-llm-header').click();

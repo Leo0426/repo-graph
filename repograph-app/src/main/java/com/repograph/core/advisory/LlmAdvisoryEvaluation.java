@@ -10,7 +10,7 @@ package com.repograph.core.advisory;
  * @param advisoryCorrect         模型建议正确数
  * @param advisoryAccuracy        模型建议准确率
  * @param averageLatencyMs        可用模型建议平均延迟
- * @param totalEstimatedCostUsd   总估算美元成本
+ * @param totalEstimatedCostUsd   总估算美元成本；任一可用建议费用未知时为 null
  * @author leolu
  */
 public record LlmAdvisoryEvaluation(
@@ -21,5 +21,5 @@ public record LlmAdvisoryEvaluation(
         int advisoryCorrect,
         double advisoryAccuracy,
         double averageLatencyMs,
-        double totalEstimatedCostUsd
+        Double totalEstimatedCostUsd
 ) {}

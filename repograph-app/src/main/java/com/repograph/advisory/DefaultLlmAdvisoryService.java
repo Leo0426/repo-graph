@@ -140,6 +140,7 @@ public class DefaultLlmAdvisoryService implements LlmAdvisoryService {
     @Override
     public LlmAdvisoryResult review(TriageReport heuristicReport) {
         TriageReport report = Objects.requireNonNull(heuristicReport, "heuristicReport");
+        LlmAdvisoryModel model = this.model.forRequest();
         if (!settingsService.current().enabled() || !model.available()) {
             return LlmAdvisoryResult.disabled(report);
         }
@@ -147,11 +148,11 @@ public class DefaultLlmAdvisoryService implements LlmAdvisoryService {
         String requestId = UUID.randomUUID().toString();
         long startedNanos = System.nanoTime();
         PreparedRequest prepared = prepareRequest(requestId, report);
-        double estimatedCost = model.estimateCostUsd(
-                prepared.inputChars(),
-                properties.maxOutputChars());
-        if (estimatedCost > properties.maxEstimatedCostUsd()) {
-            LlmAdvisoryResult result = failureResult(
+        double estimatedCost = model.estimateCostUsd(prepared.request());
+        // NaN means that this provider has no known price; token/input/time limits still apply.
+        if (!Double.isNaN(estimatedCost)
+                && (estimatedCost < 0 || estimatedCost > properties.maxEstimatedCostUsd())) {
+            LlmAdvisoryResult result = failureResult(model,
                     report,
                     LlmAdvisoryStatus.BUDGET_EXCEEDED,
                     "模型调用的预估成本超过单次预算",
@@ -168,7 +169,7 @@ public class DefaultLlmAdvisoryService implements LlmAdvisoryService {
             Future<LlmModelResponse> future = executor.submit(() -> model.review(prepared.request()));
             try {
                 LlmModelResponse response = future.get(properties.timeoutMillis(), TimeUnit.MILLISECONDS);
-                LlmAdvisoryResult result = validateResponse(
+                LlmAdvisoryResult result = validateResponse(model,
                         report,
                         response,
                         prepared,
@@ -179,7 +180,7 @@ public class DefaultLlmAdvisoryService implements LlmAdvisoryService {
             } catch (TimeoutException timeout) {
                 future.cancel(true);
                 if (attempts > properties.maxRetries()) {
-                    LlmAdvisoryResult result = failureResult(
+                    LlmAdvisoryResult result = failureResult(model,
                             report,
                             LlmAdvisoryStatus.TIMED_OUT,
                             "模型辅助复核超时，已保留启发式结论",
@@ -192,7 +193,7 @@ public class DefaultLlmAdvisoryService implements LlmAdvisoryService {
             } catch (InterruptedException interrupted) {
                 future.cancel(true);
                 Thread.currentThread().interrupt();
-                LlmAdvisoryResult result = failureResult(
+                LlmAdvisoryResult result = failureResult(model,
                         report,
                         LlmAdvisoryStatus.FAILED,
                         "模型辅助复核被中断，已保留启发式结论",
@@ -207,7 +208,7 @@ public class DefaultLlmAdvisoryService implements LlmAdvisoryService {
                 boolean retryable = cause instanceof LlmModelException modelException
                         && modelException.retryable();
                 if (!retryable || attempts > properties.maxRetries()) {
-                    LlmAdvisoryResult result = failureResult(
+                    LlmAdvisoryResult result = failureResult(model,
                             report,
                             LlmAdvisoryStatus.FAILED,
                             "模型辅助复核失败，已保留启发式结论",
@@ -276,6 +277,7 @@ public class DefaultLlmAdvisoryService implements LlmAdvisoryService {
     }
 
     private LlmAdvisoryResult validateResponse(
+            LlmAdvisoryModel model,
             TriageReport report,
             LlmModelResponse response,
             PreparedRequest prepared,
@@ -321,6 +323,7 @@ public class DefaultLlmAdvisoryService implements LlmAdvisoryService {
     }
 
     private LlmAdvisoryResult failureResult(
+            LlmAdvisoryModel model,
             TriageReport report,
             LlmAdvisoryStatus status,
             String reason,
@@ -386,8 +389,8 @@ public class DefaultLlmAdvisoryService implements LlmAdvisoryService {
         auditSink.record(new LlmAdvisoryAuditEvent(
                 requestId,
                 report.finding().fingerprint(),
-                model.provider(),
-                model.model(),
+                result.provider(),
+                result.model(),
                 result.status(),
                 result.attempts(),
                 result.latencyMs(),

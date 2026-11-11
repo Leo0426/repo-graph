@@ -3,10 +3,7 @@
 <body>
 <div th:fragment="panel" id="panel-health" class="panel"
      :class="{ active: $store.repograph.panel === 'health' }">
-  <div class="panel-header">
-    <div class="panel-title" data-i18n="health.title">系统健康</div>
-    <div class="panel-subtitle" data-i18n="health.subtitle">基础连接检查 · 每 5 秒尝试更新</div>
-  </div>
+
   <div class="panel-body health-workbench">
     <section id="health-summary" class="health-summary" data-state="checking" aria-labelledby="health-summary-title">
       <div class="health-summary-copy">
@@ -15,8 +12,7 @@
         <p id="health-summary-note"></p>
       </div>
       <div class="health-check-actions">
-        <button type="button" id="health-refresh" class="btn btn-primary" onclick="refreshHealthStatus()"
-                data-i18n="health.refresh">立即检查</button>
+
         <span id="health-check-progress" role="status" aria-live="polite"></span>
       </div>
       <div class="health-freshness"><span data-i18n="health.receivedAt">最近收到检查结果</span>
@@ -41,7 +37,16 @@
           <p data-i18n="health.connectionError.note">无法取得新的有效结果，服务当前状态未知。恢复应用连接后重试。</p></article>
       </div>
     </section>
+    <section class="health-capabilities" aria-labelledby="capability-title">
+      <h2 id="capability-title" data-i18n="capability.title">这些状态会影响哪些任务</h2>
+      <p id="capability-project"></p>
+      <div id="capability-grid" class="capability-grid"></div>
+      <div class="capability-config-status"><span id="capability-generation-freshness" role="status"></span>
+        <button type="button" id="capability-generation-refresh" class="btn btn-ghost" onclick="loadGenerationCapability()" data-i18n="capability.refreshConfig">刷新生成配置</button></div>
+    </section>
   </div>
 </div>
+<div th:fragment="actions" class="page-actions"><button type="button" id="health-refresh" class="btn btn-primary" onclick="refreshHealthStatus()"
+                data-i18n="health.refresh">立即检查</button></div>
 </body>
 </html>

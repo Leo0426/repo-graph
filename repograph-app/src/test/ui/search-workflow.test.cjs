@@ -29,6 +29,8 @@ async function workspace(t, viewport = { width: 1440, height: 1000 }) {
   await page.goto(new URL('#search', baseUrl).href, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => window.Alpine
     && document.querySelector('.panel.active')?.id === 'panel-search');
+  await page.waitForFunction(() => document.querySelector('#global-project').options.length === 3);
+  await page.locator('#global-project').selectOption('d3e000000001');
   return { page, fixture };
 }
 

@@ -147,6 +147,7 @@ test('flow views replace the previous diagram and an empty PDG remains recoverab
     },
     programDependenceGraph: { nodes: [], edges: [] },
   } }));
+  await page.locator('#graph-more-queries > summary').click();
   await page.locator('[data-i18n="graph.flow"]').click();
   await query(page, 'demo.Controller#read()');
   await page.waitForFunction(() => document.querySelectorAll('#graph-svg .zoom-g rect').length === 2);

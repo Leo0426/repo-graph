@@ -1,5 +1,9 @@
 package com.repograph.api;
 
+import com.repograph.identity.ProjectAccess;
+
+import com.repograph.identity.IdentityActors;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.repograph.core.finding.TriageOptions;
 import com.repograph.core.finding.TriageWorkflow;
@@ -98,6 +102,7 @@ public class ReviewQueueController {
      * @throws IOException 请求体读取失败
      */
     @PostMapping("/snapshots")
+    @ProjectAccess
     public SubmitSnapshotResponse submitSnapshot(
             @RequestParam String format,
             @RequestParam String projectId,
@@ -138,6 +143,7 @@ public class ReviewQueueController {
      * @return 按更新时间降序的条目列表
      */
     @GetMapping
+    @ProjectAccess
     public ReviewQueueListResponse list(
             @RequestParam String projectId,
             @RequestParam(required = false) String severity,
@@ -175,9 +181,10 @@ public class ReviewQueueController {
      * @return 认领结果
      */
     @PostMapping("/{entryId}/claim")
+    @ProjectAccess(value = "entryId", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.REVIEW_ENTRY)
     public ResponseEntity<Map<String, String>> claim(
             @PathVariable String entryId, @RequestBody ClaimRequest request) {
-        boolean claimed = reviewQueueStore.claim(entryId, request.actor(), Instant.now().toString());
+        boolean claimed = reviewQueueStore.claim(entryId, IdentityActors.currentName(request.actor()), Instant.now().toString());
         return respondTransition(entryId, claimed, "IN_REVIEW");
     }
 
@@ -189,10 +196,11 @@ public class ReviewQueueController {
      * @return 退回结果
      */
     @PostMapping("/{entryId}/return")
+    @ProjectAccess(value = "entryId", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.REVIEW_ENTRY)
     public ResponseEntity<Map<String, String>> returnToQueue(
             @PathVariable String entryId, @RequestBody ActionRequest request) {
         boolean returned = reviewQueueStore.returnToQueue(
-                entryId, request.actor(), request.reason(), Instant.now().toString());
+                entryId, IdentityActors.currentName(request.actor()), request.reason(), Instant.now().toString());
         return respondTransition(entryId, returned, "PENDING");
     }
 
@@ -204,10 +212,11 @@ public class ReviewQueueController {
      * @return 确认结果
      */
     @PostMapping("/{entryId}/confirm")
+    @ProjectAccess(value = "entryId", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.REVIEW_ENTRY)
     public ResponseEntity<Map<String, String>> confirm(
             @PathVariable String entryId, @RequestBody ActionRequest request) {
         boolean confirmed = reviewQueueStore.confirm(
-                entryId, request.actor(), request.reason(), Instant.now().toString());
+                entryId, IdentityActors.currentName(request.actor()), request.reason(), Instant.now().toString());
         return respondTransition(entryId, confirmed, "CONFIRMED");
     }
 
@@ -219,10 +228,11 @@ public class ReviewQueueController {
      * @return 驳回结果
      */
     @PostMapping("/{entryId}/reject")
+    @ProjectAccess(value = "entryId", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.REVIEW_ENTRY)
     public ResponseEntity<Map<String, String>> reject(
             @PathVariable String entryId, @RequestBody ActionRequest request) {
         boolean rejected = reviewQueueStore.reject(
-                entryId, request.actor(), request.reason(), Instant.now().toString());
+                entryId, IdentityActors.currentName(request.actor()), request.reason(), Instant.now().toString());
         return respondTransition(entryId, rejected, "REJECTED");
     }
 
@@ -233,9 +243,30 @@ public class ReviewQueueController {
      * @return 审计事件列表
      */
     @GetMapping("/{entryId}/audit")
+    @ProjectAccess(value = "entryId", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.REVIEW_ENTRY)
     public List<ReviewQueueAuditEvent> audit(@PathVariable String entryId) {
         return reviewQueueStore.audit(entryId);
     }
+
+    /** Reads frozen report facts alongside current human-review states, matched by the persisted finding fingerprint. */
+    @GetMapping("/snapshots/{snapshotId}/review")
+    @ProjectAccess(value = "snapshotId", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.SNAPSHOT)
+    public SnapshotReview review(@PathVariable String snapshotId) {
+        ReportSnapshot snapshot = reviewQueueStore.getSnapshot(snapshotId)
+                .orElseThrow(() -> new ReviewQueueEntryNotFoundException("Report snapshot not found: " + snapshotId));
+        List<SnapshotReviewItem> items = reviewQueueStore.entriesForSnapshot(snapshotId).stream().map(entry -> {
+            var matches = snapshot.reports().stream()
+                    .filter(report -> report.finding().fingerprint().equals(entry.fingerprint())).toList();
+            return new SnapshotReviewItem(entry, matches.size() == 1 ? matches.getFirst() : null, matches.size());
+        }).toList();
+        return new SnapshotReview(snapshot, items);
+    }
+
+    /** An HTTP reading view; the immutable report remains separate from current queue state. */
+    public record SnapshotReview(ReportSnapshot snapshot, List<SnapshotReviewItem> items) {}
+
+    /** A unique report match is required for in-page review actions; ambiguous matches are explicitly counted. */
+    public record SnapshotReviewItem(ReviewQueueEntry entry, TriageReport report, int reportMatchCount) {}
 
     /**
      * 导出一份报告快照。三种格式派生自同一份快照，保证 finding 数、结论与 citation 一致。
@@ -245,6 +276,7 @@ public class ReviewQueueController {
      * @return 渲染结果
      */
     @GetMapping("/snapshots/{snapshotId}/export")
+    @ProjectAccess(value = "snapshotId", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.SNAPSHOT)
     public ResponseEntity<byte[]> export(
             @PathVariable String snapshotId,
             @RequestParam String format) {
@@ -276,6 +308,7 @@ public class ReviewQueueController {
      * @return ZIP 字节流（manifest.json + 各快照导出文件）
      */
     @PostMapping("/snapshots/export-batch")
+    @ProjectAccess(value = "snapshotIds", source = ProjectAccess.Source.BODY, resource = ProjectAccess.Resource.SNAPSHOT)
     public ResponseEntity<byte[]> exportBatch(@RequestBody BatchExportRequest request) {
         List<String> snapshotIds = request.snapshotIds() == null
                 ? List.of()

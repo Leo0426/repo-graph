@@ -1,5 +1,7 @@
 package com.repograph.api;
 
+import com.repograph.identity.ProjectAccess;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -10,6 +12,7 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1")
+@ProjectAccess(mode = ProjectAccess.Mode.AUTHENTICATED)
 public class HealthController {
 
     private final HealthService healthService;

@@ -28,6 +28,19 @@ import java.util.regex.Pattern;
 @Service
 public class RuleSuppressionStore {
 
+    /** Returns an entry by stable ID for ownership checks, without modifying state. */
+    public Optional<RuleSuppression> findById(String id) {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + dbPath);
+             PreparedStatement query = connection.prepareStatement("SELECT * FROM rule_suppressions WHERE id = ?")) {
+            query.setString(1, id);
+            try (ResultSet row = query.executeQuery()) {
+                return row.next() ? Optional.of(fromRow(row)) : Optional.empty();
+            }
+        } catch (SQLException failure) {
+            throw new IllegalStateException("Cannot read resource ownership", failure);
+        }
+    }
+
     private final String dbPath;
 
     /**

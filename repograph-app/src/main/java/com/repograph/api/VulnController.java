@@ -1,5 +1,7 @@
 package com.repograph.api;
 
+import com.repograph.identity.ProjectAccess;
+
 import com.repograph.core.graph.GraphQueryService;
 import com.repograph.core.model.CodeUnit;
 import com.repograph.vuln.CodeVulnScanner;
@@ -65,6 +67,7 @@ public class VulnController {
      * 触发代码漏洞扫描，对项目所有方法/函数/构造器运行内置规则。
      */
     @PostMapping("/scan/code")
+    @ProjectAccess
     public ResponseEntity<Map<String, Object>> scanCode(@RequestParam String projectId) {
         if (projectId == null || projectId.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("error", "projectId is required"));
@@ -82,6 +85,7 @@ public class VulnController {
      * 比代码扫描慢（秒~分钟级），但能检测跨方法的多跳漏洞。
      */
     @PostMapping("/scan/taint")
+    @ProjectAccess
     public ResponseEntity<Map<String, Object>> scanTaint(@RequestParam String projectId) {
         if (projectId == null || projectId.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("error", "projectId is required"));
@@ -102,6 +106,7 @@ public class VulnController {
      * @param projectRoot 项目根目录绝对路径（含 pom.xml）
      */
     @PostMapping("/scan/deps")
+    @ProjectAccess(verifyProjectRoot = true)
     public ResponseEntity<Map<String, Object>> scanDeps(
             @RequestParam String projectId,
             @RequestParam String projectRoot) {
@@ -123,6 +128,7 @@ public class VulnController {
      * 列出指定项目的漏洞发现，可按严重程度和状态过滤。
      */
     @GetMapping
+    @ProjectAccess
     public List<VulnFinding> list(
             @RequestParam String projectId,
             @RequestParam(required = false) String severity,
@@ -136,6 +142,7 @@ public class VulnController {
      * @return 200 OK；400 status 非法；404 id 不存在
      */
     @PutMapping("/{id}/status")
+    @ProjectAccess(value = "id", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.VULNERABILITY)
     public ResponseEntity<Map<String, String>> updateStatus(
             @PathVariable String id,
             @RequestParam String status) {
@@ -156,6 +163,7 @@ public class VulnController {
      * @return 按路径顺序排列的 SOURCE / PROPAGATION / SINK 证据；404 若漏洞不存在
      */
     @GetMapping("/{id}/taint-evidence")
+    @ProjectAccess(value = "id", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.VULNERABILITY)
     public ResponseEntity<List<TaintEvidenceStep>> taintEvidence(@PathVariable String id) {
         if (vulnStore.findById(id).isEmpty()) {
             return ResponseEntity.notFound().build();
@@ -173,6 +181,7 @@ public class VulnController {
      * @return 影响面 CodeUnit 列表；404 若发现不存在
      */
     @GetMapping("/{id}/impact")
+    @ProjectAccess(value = "id", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.VULNERABILITY)
     public ResponseEntity<List<CodeUnit>> impact(@PathVariable String id) {
         return vulnStore.findById(id)
                 .map(f -> {
@@ -190,6 +199,7 @@ public class VulnController {
      * @return 结构化漏洞报告
      */
     @GetMapping("/report/{projectId}")
+    @ProjectAccess(source = ProjectAccess.Source.PATH)
     public VulnReport report(@PathVariable String projectId) {
         List<VulnFinding> all       = vulnStore.list(projectId, null, null);
         List<VulnFinding> confirmed = vulnStore.list(projectId, null, VulnFinding.CONFIRMED);

@@ -1,35 +1,21 @@
 package com.repograph.advisory;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.repograph.core.advisory.LlmAdvisorySettings;
-import com.repograph.core.advisory.LlmAdvisorySettingsService;
 import com.repograph.core.advisory.LlmModelException;
 import com.repograph.core.architecture.ArchitectureModelResponse;
 import com.repograph.core.architecture.ArchitectureReviewCandidate;
 import com.repograph.core.architecture.ArchitectureReviewInput;
 import com.repograph.core.architecture.ArchitectureReviewModel;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestClientResponseException;
-import org.springframework.web.client.RestTemplate;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * 使用 Ollama 执行 ForgeFlow 方法论架构评审的模型适配器。
+ * 使用当前 Provider 执行 ForgeFlow 方法论架构评审（保留历史类名）。
  *
  * @author leolu
  */
@@ -77,131 +63,45 @@ public class OllamaArchitectureReviewModel implements ArchitectureReviewModel {
             "required", List.of("observations", "candidates", "missingInfo"),
             "additionalProperties", false);
 
-    private final LlmAdvisorySettingsService settingsService;
-    private final RestTemplate restTemplate;
+    private final com.repograph.modelprovider.GenerationGateway gateway;
     private final ObjectMapper objectMapper;
 
-    /**
-     * 创建 Ollama 架构评审适配器。
-     *
-     * @param settingsService 运行时 LLM 设置
-     * @param restTemplate    有超时边界的 HTTP 客户端
-     * @param objectMapper    JSON mapper
-     */
+    /** Creates an architecture adapter using the shared selected provider. */
     public OllamaArchitectureReviewModel(
-            LlmAdvisorySettingsService settingsService,
-            @Qualifier("llmAdvisoryRestTemplate") RestTemplate restTemplate,
-            ObjectMapper objectMapper) {
-        this.settingsService = settingsService;
-        this.restTemplate = restTemplate;
+            com.repograph.modelprovider.GenerationGateway gateway, ObjectMapper objectMapper) {
+        this.gateway = gateway;
         this.objectMapper = objectMapper;
     }
 
     @Override
-    public boolean available() {
-        LlmAdvisorySettings settings = settingsService.current();
-        return settings.enabled()
-                && "OLLAMA".equals(settings.provider())
-                && !settings.baseUrl().isBlank()
-                && !settings.model().isBlank();
-    }
+    public boolean available() { return gateway.current().enabled(); }
 
     @Override
     public String modelId() {
-        LlmAdvisorySettings settings = settingsService.current();
-        return settings.provider() + " / " + settings.model();
+        var provider = gateway.current();
+        return provider.protocol().name() + " / " + provider.model();
     }
 
     @Override
     public ArchitectureModelResponse review(ArchitectureReviewInput input) {
-        LlmAdvisorySettings settings = settingsService.current();
-        if (!settings.enabled()) {
-            throw new LlmModelException("Ollama advisory is disabled", false);
-        }
-        try {
-            ChatRequest request = chatRequest(settings, input, false);
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            ChatResponse response = restTemplate.postForObject(
-                    settings.baseUrl() + "/api/chat",
-                    new HttpEntity<>(request, headers),
-                    ChatResponse.class);
-            if (response == null || response.message() == null || response.message().content() == null) {
-                throw new LlmModelException("Ollama returned an empty architecture review", true);
-            }
-            return parseModelResponse(response.message().content());
-        } catch (RestClientResponseException e) {
-            throw rejectedRequest(e);
-        } catch (RestClientException e) {
-            throw new LlmModelException("Ollama architecture review endpoint is unavailable", true, e);
-        } catch (JsonProcessingException | IllegalArgumentException e) {
-            throw new LlmModelException("Ollama returned an invalid architecture review", false, e);
-        }
+        return generate(input, null);
     }
 
     @Override
     public ArchitectureModelResponse reviewStreaming(
             ArchitectureReviewInput input, Consumer<String> deltaConsumer) {
-        LlmAdvisorySettings settings = settingsService.current();
-        if (!settings.enabled()) {
-            throw new LlmModelException("Ollama advisory is disabled", false);
-        }
-        try {
-            ChatRequest request = chatRequest(settings, input, true);
-            String content = restTemplate.execute(
-                    settings.baseUrl() + "/api/chat",
-                    HttpMethod.POST,
-                    httpRequest -> {
-                        httpRequest.getHeaders().setContentType(MediaType.APPLICATION_JSON);
-                        objectMapper.writeValue(httpRequest.getBody(), request);
-                    },
-                    response -> {
-                        StringBuilder accumulated = new StringBuilder();
-                        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
-                                response.getBody(), StandardCharsets.UTF_8))) {
-                            String line;
-                            while ((line = reader.readLine()) != null) {
-                                if (line.isBlank()) {
-                                    continue;
-                                }
-                                ChatStreamChunk chunk = objectMapper.readValue(line, ChatStreamChunk.class);
-                                if (chunk.error() != null && !chunk.error().isBlank()) {
-                                    throw new LlmModelException("Ollama streaming error: " + chunk.error(), true);
-                                }
-                                String delta = chunk.message() == null ? null : chunk.message().content();
-                                if (delta != null && !delta.isEmpty()) {
-                                    accumulated.append(delta);
-                                    deltaConsumer.accept(delta);
-                                }
-                            }
-                        }
-                        return accumulated.toString();
-                    });
-            if (content == null || content.isBlank()) {
-                throw new LlmModelException("Ollama returned an empty streaming architecture review", true);
-            }
-            return parseModelResponse(content);
-        } catch (RestClientResponseException e) {
-            throw rejectedRequest(e);
-        } catch (RestClientException e) {
-            throw new LlmModelException("Ollama architecture review endpoint is unavailable", true, e);
-        } catch (JsonProcessingException | IllegalArgumentException e) {
-            throw new LlmModelException("Ollama returned an invalid architecture review", false, e);
-        }
+        return generate(input, deltaConsumer);
     }
 
-    private ChatRequest chatRequest(
-            LlmAdvisorySettings settings, ArchitectureReviewInput input, boolean stream)
-            throws JsonProcessingException {
-        String payload = objectMapper.writeValueAsString(input);
-        return new ChatRequest(
-                settings.model(),
-                List.of(
-                        new Message("system", SYSTEM_PROMPT),
-                        new Message("user", "Review this architecture evidence JSON:\n" + payload)),
-                stream,
-                REVIEW_SCHEMA,
-                Map.of("temperature", 0));
+    private ArchitectureModelResponse generate(ArchitectureReviewInput input, Consumer<String> deltaConsumer) {
+        try {
+            String payload = objectMapper.writeValueAsString(input);
+            var response = gateway.complete(SYSTEM_PROMPT, "Review this architecture evidence JSON:\n" + payload,
+                    REVIEW_SCHEMA, deltaConsumer);
+            return parseModelResponse(response.text());
+        } catch (JsonProcessingException | IllegalArgumentException error) {
+            throw new LlmModelException("Model returned an invalid architecture review", false);
+        }
     }
 
     private ArchitectureModelResponse parseModelResponse(String content) throws JsonProcessingException {
@@ -210,12 +110,6 @@ public class OllamaArchitectureReviewModel implements ArchitectureReviewModel {
                 safeList(result.observations()),
                 safeList(result.candidates()),
                 safeList(result.missingInfo())));
-    }
-
-    private static LlmModelException rejectedRequest(RestClientResponseException error) {
-        return new LlmModelException(
-                "Ollama rejected the architecture review (HTTP " + error.getStatusCode().value() + ")",
-                error.getStatusCode().is5xxServerError(), error);
     }
 
     private static String extractJson(String value) {
@@ -300,29 +194,6 @@ public class OllamaArchitectureReviewModel implements ArchitectureReviewModel {
 
     private static String safeText(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
-    }
-
-    private record Message(String role, String content) {
-    }
-
-    private record ChatRequest(
-            String model,
-            List<Message> messages,
-            boolean stream,
-            Map<String, Object> format,
-            Map<String, Integer> options) {
-    }
-
-    private record ChatResponse(
-            Message message,
-            @JsonProperty("prompt_eval_count") int promptEvalCount,
-            @JsonProperty("eval_count") int evalCount) {
-    }
-
-    private record ChatStreamChunk(
-            Message message,
-            boolean done,
-            String error) {
     }
 
     private record ReviewJson(

@@ -3,10 +3,7 @@
 <body>
 <div th:fragment="panel" id="panel-stats" class="panel"
      :class="{ active: $store.repograph.panel === 'stats' }">
-  <div class="panel-header">
-    <div class="panel-title" data-i18n="stats.title">项目概览</div>
-    <div class="panel-subtitle" data-i18n="stats.subtitle">所选项目的节点 / 文件 / 边类型聚合统计</div>
-  </div>
+
   <div class="panel-body">
     <div class="stats-toolbar">
       <label for="stats-project-input" data-i18n="stats.projectLabel">项目</label>

@@ -3,10 +3,7 @@
 <body>
 <div th:fragment="panel" id="panel-symbol" class="panel"
      :class="{ active: $store.repograph.panel === 'symbol' }">
-  <div class="panel-header">
-    <div class="panel-title" data-i18n="symbol.title">符号查询</div>
-    <div class="panel-subtitle" data-i18n="symbol.subtitle">按全限定名精确查找符号，或按文件行号定位</div>
-  </div>
+
   <div class="panel-body symbol-workbench">
     <section class="symbol-query-card">
       <div class="symbol-query-heading">
@@ -16,7 +13,7 @@
         </div>
         <div class="symbol-scope"><span data-i18n="symbol.scope">查询范围</span><strong id="symbol-scope-name"></strong></div>
       </div>
-      <p class="symbol-scope-hint" data-i18n="symbol.scopeHint">跟随页头当前项目；全部项目模式下同名符号可能来自不同仓库。</p>
+      <details class="help-note"><summary data-i18n-aria-label="help.symbolScope" aria-label="符号查询范围"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#circle-help"/></svg><span data-i18n="help.symbolScope">符号查询范围</span></summary><div class="help-note-content"><p class="symbol-scope-hint" data-i18n="symbol.scopeHint">跟随页头当前项目；全部项目模式下同名符号可能来自不同仓库。</p></div></details>
 
       <div id="symbol-lookup-section">
         <form class="symbol-query-form" novalidate onsubmit="submitSymbolQuery(event,'lookup')"
@@ -26,7 +23,7 @@
                    data-i18n-ph="ph.symbolQn" oninput="invalidateSymbolQuery()" aria-describedby="symbol-query-hint symbol-validation"></label>
           <button type="submit" class="btn btn-primary" id="symbol-lookup-btn" data-i18n="btn.lookup">查找</button>
         </form>
-        <p id="symbol-query-hint" class="symbol-input-hint" data-i18n="symbol.queryHint">使用索引中的完整名称，例如 Java 方法的 类名#方法名(参数类型)。</p>
+        <details class="help-note"><summary data-i18n-aria-label="help.symbolName" aria-label="完整符号名称格式"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#circle-help"/></svg><span data-i18n="help.symbolName">完整符号名称格式</span></summary><div class="help-note-content"><p id="symbol-query-hint" class="symbol-input-hint" data-i18n="symbol.queryHint">使用索引中的完整名称，例如 Java 方法的 类名#方法名(参数类型)。</p></div></details>
         <p id="symbol-validation" class="symbol-validation" role="alert" hidden></p>
       </div>
       <div id="symbol-locate-section" hidden>
@@ -40,7 +37,7 @@
                    data-i18n-ph="ph.locateLine" oninput="invalidateSymbolQuery()" aria-describedby="locate-validation"></label>
           <button type="submit" class="btn btn-primary" id="symbol-locate-btn" data-i18n="btn.locate">定位</button>
         </form>
-        <p id="symbol-locate-hint" class="symbol-input-hint" data-i18n="symbol.locateHint">输入相对于项目根目录的文件路径，定位包含该行的符号。</p>
+        <details class="help-note"><summary data-i18n-aria-label="help.fileLocation" aria-label="文件路径与行号格式"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#circle-help"/></svg><span data-i18n="help.fileLocation">文件路径与行号格式</span></summary><div class="help-note-content"><p id="symbol-locate-hint" class="symbol-input-hint" data-i18n="symbol.locateHint">输入相对于项目根目录的文件路径，定位包含该行的符号。</p></div></details>
         <p id="locate-validation" class="symbol-validation" role="alert" hidden></p>
       </div>
     </section>

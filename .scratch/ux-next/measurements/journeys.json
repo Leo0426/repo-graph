@@ -1,0 +1,243 @@
+{
+  "source": "real templates, baseline resource snapshot and fictional API fixtures; these are observed scripted paths, not usability-study error rates",
+  "results": [
+    {
+      "version": "before",
+      "task": "repository-source",
+      "steps": [
+        {
+          "type": "edit",
+          "selector": "#tools-project-search",
+          "value": "Service"
+        },
+        {
+          "type": "activation",
+          "action": "click",
+          "selector": "[data-project-id=\"d3e000000001\"] [data-tools-action=select]"
+        },
+        {
+          "type": "activation",
+          "action": "click",
+          "selector": "[data-repository-action=search]"
+        },
+        {
+          "type": "edit",
+          "selector": "#search-input",
+          "value": "HTTP handlers"
+        },
+        {
+          "type": "activation",
+          "action": "Enter",
+          "selector": "#search-input"
+        },
+        {
+          "type": "activation",
+          "action": "click",
+          "selector": ".result-card:first-child .rc-source-toggle"
+        },
+        {
+          "type": "activation",
+          "action": "click",
+          "selector": ".result-card:first-child .rc-source-toggle"
+        },
+        {
+          "type": "activation",
+          "action": "click",
+          "selector": "#main-navigation [data-workspace=repository]"
+        }
+      ],
+      "activations": 6,
+      "edits": 2,
+      "observations": {
+        "finished": true,
+        "initialProject": "journey-0",
+        "targetProject": "d3e000000001",
+        "activeProject": "d3e000000001",
+        "filter": "Service",
+        "scrollBefore": 3611,
+        "scrollAfter": 3611,
+        "scrollPreserved": true,
+        "anchorBefore": -577.0625,
+        "anchorAfter": -577.0625,
+        "readingPositionPreserved": true
+      },
+      "mutations": []
+    },
+    {
+      "version": "before",
+      "task": "finding-review",
+      "steps": [
+        {
+          "type": "activation",
+          "action": "click",
+          "selector": ".vuln-finding:first-child > summary"
+        },
+        {
+          "type": "activation",
+          "action": "click",
+          "selector": ".workspace-tab[data-panel=agent]"
+        },
+        {
+          "type": "activation",
+          "action": "click",
+          "selector": ".agent-vulnerability-item >> nth=0"
+        },
+        {
+          "type": "activation",
+          "action": "click",
+          "selector": "#agent-run-btn"
+        }
+      ],
+      "activations": 4,
+      "edits": 0,
+      "observations": {
+        "finished": false,
+        "reason": "Baseline provides snapshot exports but has no in-page frozen report and manual review entry.",
+        "exportFormats": [
+          "Markdown ↗",
+          "JSON ↗",
+          "PDF ↗"
+        ]
+      },
+      "mutations": []
+    },
+    {
+      "version": "before",
+      "task": "dependency-recovery",
+      "steps": [
+        {
+          "type": "activation",
+          "action": "click",
+          "selector": ".service-indicator"
+        }
+      ],
+      "activations": 1,
+      "edits": 0,
+      "observations": {
+        "finished": false,
+        "reason": "Baseline shows service details but has no task impact, retained reading capability or task recovery controls.",
+        "serviceDetail": "Ollama模型服务 · 基础连接检查不可用"
+      },
+      "mutations": []
+    },
+    {
+      "version": "after",
+      "task": "repository-source",
+      "steps": [
+        {
+          "type": "edit",
+          "selector": "#tools-project-search",
+          "value": "Service"
+        },
+        {
+          "type": "activation",
+          "action": "click",
+          "selector": "[data-project-id=\"d3e000000001\"] [data-tools-action=search]"
+        },
+        {
+          "type": "edit",
+          "selector": "#search-input",
+          "value": "HTTP handlers"
+        },
+        {
+          "type": "activation",
+          "action": "Enter",
+          "selector": "#search-input"
+        },
+        {
+          "type": "activation",
+          "action": "click",
+          "selector": ".rc-read >> nth=0"
+        },
+        {
+          "type": "activation",
+          "action": "click",
+          "selector": "#reader-close"
+        },
+        {
+          "type": "activation",
+          "action": "click",
+          "selector": "#main-navigation [data-workspace=repository]"
+        }
+      ],
+      "activations": 5,
+      "edits": 2,
+      "observations": {
+        "finished": true,
+        "initialProject": "journey-0",
+        "targetProject": "d3e000000001",
+        "activeProject": "d3e000000001",
+        "filter": "Service",
+        "scrollBefore": 3541,
+        "scrollAfter": 3519,
+        "scrollPreserved": false,
+        "anchorBefore": 436.9375,
+        "anchorAfter": 436.9375,
+        "readingPositionPreserved": true
+      },
+      "mutations": []
+    },
+    {
+      "version": "after",
+      "task": "finding-review",
+      "steps": [
+        {
+          "type": "activation",
+          "action": "click",
+          "selector": ".vuln-read >> nth=0"
+        },
+        {
+          "type": "activation",
+          "action": "click",
+          "selector": "#reader-triage"
+        },
+        {
+          "type": "activation",
+          "action": "click",
+          "selector": "#agent-run-btn"
+        },
+        {
+          "type": "activation",
+          "action": "click",
+          "selector": "#agent-current-action"
+        }
+      ],
+      "activations": 4,
+      "edits": 0,
+      "observations": {
+        "finished": true,
+        "review": "冻结报告与人工审核",
+        "draft": "\n      HIGH\n      疑似d3e0000000000001\n    [DEMO] 订单查询存在待核实的输入传播路径\n    规则SQL_INJECTION_TAINTCWECWE-89\n      符号demo.orders.OrderController#findOrders(String)\n      位置src/main/java/demo/orders/OrderController.java:42\n    虚构示例：请求参数传入订单查询。需要人工核实实际调用位置及参数绑定；不是对真实项目的漏洞结论。\n    \n    污染链源码证据3 个审计步骤\n    \n    1\n    \n      污染源demo.orders.OrderController#findOrders(String)\n      HTTP_REQUEST → param:0\n      \n        源代码src/main/java/demo/orders/OrderController.java:42-44\n        42// DEMO: fictional request entry43@GetMapping(\"/demo/orders\")44public List<Order> findOrders(String customerId) {\n      \n    2\n    \n      传播demo.orders.OrderService#findOrders(String)\n      param:0 → argument:0\n      \n        源代码src/main/java/demo/orders/OrderService.java:68-70\n        68// DEMO: fictional service layer69public List<Order> findOrders(String customerId) {70    return orderRepository.findByCustomerId(customerId);\n      \n    3\n    \n      危险汇聚点demo.orders.OrderRepository#findByCustomerId(String)\n      argument:0 → SQL_PARAMETER\n      \n        源代码src/main/java/demo/orders/OrderRepository.java:97-99\n        97// DEMO: binding behavior still requires review98return jdbc.query(\"SELECT * FROM demo_orders WHERE customer_id = ?\",99        mapper, customerId);\n      \n  "
+      },
+      "mutations": [
+        "POST /api/v1/agent-runs/vulnerability-triage?vulnerabilityId=d3e0000000000001&budgetChars=12000"
+      ]
+    },
+    {
+      "version": "after",
+      "task": "dependency-recovery",
+      "steps": [
+        {
+          "type": "activation",
+          "action": "click",
+          "selector": ".service-indicator"
+        },
+        {
+          "type": "activation",
+          "action": "click",
+          "selector": "[data-capability=search] [data-capability-recover]"
+        }
+      ],
+      "activations": 2,
+      "edits": 0,
+      "observations": {
+        "finished": true,
+        "searchImpact": "\n      语义与代码检索依赖检查异常Embedding Ollama 未通过基础检查。检查对应服务与应用连接配置后重试；仍可主动尝试任务。\n      进入检索\n      检查受影响服务",
+        "factReading": "read",
+        "reviewReading": "read",
+        "recoveryService": "ollama"
+      },
+      "mutations": []
+    }
+  ]
+}

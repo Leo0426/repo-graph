@@ -150,6 +150,26 @@ class QdrantVectorStoreIT {
     // ── 语义检索 ──────────────────────────────────────────────────────────────
 
     @Test
+    void authorizedProjectsAreFilteredBeforeRankingAndPaginationIncludingDuplicateSymbolNames() {
+        var first = buildUnit("shared.Service#run", "first/Service.java", 1, 5);
+        var second = buildUnit("shared.Service#run", "second/Service.java", 1, 5);
+        var privateUnit = buildUnit("shared.Service#run", "private/Service.java", 1, 5);
+        store.upsert(List.of(new EmbeddedUnit(first, copyVec(VEC_A), copyVec(VEC_A))), "allowed-first");
+        store.upsert(List.of(new EmbeddedUnit(second, copyVec(VEC_B), copyVec(VEC_B))), "allowed-second");
+        store.upsert(List.of(new EmbeddedUnit(privateUnit, copyVec(VEC_A), copyVec(VEC_A))), "not-allowed");
+        var allowed = Set.of("allowed-first", "allowed-second");
+        var pageOne = store.semanticSearch("shared", new SearchOptions(1, 0, null, null, null, false, false, allowed));
+        var pageTwo = store.codeSearch("shared", new SearchOptions(1, 1, null, null, null, false, false, allowed));
+        assertThat(pageOne.results()).extracting(result -> result.unit().filePath()).containsExactly("first/Service.java");
+        assertThat(pageOne.results()).extracting(result -> result.projectId()).containsExactly("allowed-first");
+        assertThat(pageTwo.results()).extracting(result -> result.projectId()).containsExactly("allowed-second");
+        assertThat(store.semanticSearch("shared", new SearchOptions(10, 0, null, null, null,
+                false, false, Set.of())).results()).isEmpty();
+        assertThat(store.semanticSearch("shared", new SearchOptions(10, 0, null, null, "not-allowed",
+                false, false, allowed)).results()).isEmpty();
+    }
+
+    @Test
     void semanticSearch_afterUpsert_returnsMatchingUnit() {
         CodeUnit unit = buildUnit("com.example.Foo#run", "src/Foo.java", 1, 10);
         store.upsert(List.of(new EmbeddedUnit(unit, copyVec(VEC_A), copyVec(VEC_A))), PROJECT_ID);

@@ -1,5 +1,7 @@
 package com.repograph.api;
 
+import com.repograph.identity.ProjectAccess;
+
 import com.repograph.core.asset.AssetImportService;
 import com.repograph.core.asset.AssetProfileOptions;
 import com.repograph.core.asset.AssetProfileService;
@@ -75,6 +77,7 @@ public class ScannerController {
      * @return 扫描器能力与当前可用性
      */
     @GetMapping("/scanners/capabilities")
+    @ProjectAccess(mode = ProjectAccess.Mode.AUTHENTICATED)
     public List<ScannerAvailability> capabilities() {
         return externalScanService.capabilities();
     }
@@ -89,6 +92,7 @@ public class ScannerController {
      * @return 批次执行结果；资产不存在时 404
      */
     @PostMapping("/assets/{assetId}/scans")
+    @ProjectAccess(value = "assetId", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.ASSET)
     public ResponseEntity<ExternalScanBatchResult> scan(
             @PathVariable String assetId,
             @RequestBody(required = false) StartScanRequest request) {
@@ -116,6 +120,7 @@ public class ScannerController {
      * @return 任务标识与初始状态；资产不存在时 404
      */
     @PostMapping("/assets/{assetId}/scan-tasks")
+    @ProjectAccess(value = "assetId", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.ASSET)
     public ResponseEntity<SubmitScanTaskResponse> submitScanTask(
             @PathVariable String assetId,
             @RequestBody(required = false) StartScanRequest request) {
@@ -141,6 +146,7 @@ public class ScannerController {
      * @return 任务状态；不存在时 404
      */
     @GetMapping("/scan-tasks/{taskId}")
+    @ProjectAccess(value = "taskId", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.SCAN_TASK)
     public ResponseEntity<ScanTaskStatusResponse> scanTaskStatus(@PathVariable String taskId) {
         Optional<ScanTask> found = scanTaskService.find(taskId);
         if (found.isEmpty()) {
@@ -167,6 +173,7 @@ public class ScannerController {
      * @return 一页报警；任务不存在时 404
      */
     @GetMapping("/scan-tasks/{taskId}/findings")
+    @ProjectAccess(value = "taskId", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.SCAN_TASK)
     public ResponseEntity<ScanTaskFindingsPage> scanTaskFindings(
             @PathVariable String taskId,
             @RequestParam(defaultValue = "0") int page,
@@ -186,6 +193,7 @@ public class ScannerController {
      * @return 取消后的任务标识与状态；任务不存在时 404
      */
     @PostMapping("/scan-tasks/{taskId}/cancel")
+    @ProjectAccess(value = "taskId", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.SCAN_TASK)
     public ResponseEntity<SubmitScanTaskResponse> cancelScanTask(@PathVariable String taskId) {
         ScanTask task = scanTaskService.cancel(taskId);
         return ResponseEntity.ok(new SubmitScanTaskResponse(task.id(), task.status().name()));
@@ -199,6 +207,7 @@ public class ScannerController {
      * @return 重新入队的任务标识与状态；任务不存在时 404，状态不可重试时 400
      */
     @PostMapping("/scan-tasks/{taskId}/retry")
+    @ProjectAccess(value = "taskId", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.SCAN_TASK)
     public ResponseEntity<SubmitScanTaskResponse> retryScanTask(@PathVariable String taskId) {
         ScanTask task = scanTaskService.retry(taskId);
         return ResponseEntity.ok(new SubmitScanTaskResponse(task.id(), task.status().name()));
@@ -211,6 +220,7 @@ public class ScannerController {
      * @return 扫描历史；资产不存在时 404
      */
     @GetMapping("/assets/{assetId}/scans")
+    @ProjectAccess(value = "assetId", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.ASSET)
     public ResponseEntity<List<ScannerRunResult>> listRuns(@PathVariable String assetId) {
         return assetImportService.find(assetId)
                 .map(asset -> ResponseEntity.ok(externalScanService.listRuns(asset.projectId())))
@@ -224,6 +234,7 @@ public class ScannerController {
      * @return 扫描运行；不存在时 404
      */
     @GetMapping("/scans/{scanId}")
+    @ProjectAccess(value = "scanId", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.SCAN_RUN)
     public ResponseEntity<ScannerRunResult> findRun(@PathVariable String scanId) {
         return externalScanService.findRun(scanId)
                 .map(ResponseEntity::ok)
@@ -237,6 +248,7 @@ public class ScannerController {
      * @return 外部报警；资产不存在时 404
      */
     @GetMapping("/assets/{assetId}/external-findings")
+    @ProjectAccess(value = "assetId", source = ProjectAccess.Source.PATH, resource = ProjectAccess.Resource.ASSET)
     public ResponseEntity<List<ExternalFinding>> listFindings(@PathVariable String assetId) {
         return assetImportService.find(assetId)
                 .map(asset -> ResponseEntity.ok(externalScanService.listFindings(asset.projectId())))

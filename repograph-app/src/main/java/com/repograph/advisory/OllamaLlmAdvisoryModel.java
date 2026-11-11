@@ -1,24 +1,18 @@
 package com.repograph.advisory;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.repograph.core.advisory.LlmAdvisoryModel;
 import com.repograph.core.advisory.LlmAdvisoryRequest;
-import com.repograph.core.advisory.LlmAdvisorySettings;
-import com.repograph.core.advisory.LlmAdvisorySettingsService;
+import com.repograph.modelprovider.GenerationGateway;
 import com.repograph.core.advisory.LlmModelException;
 import com.repograph.core.advisory.LlmModelResponse;
 import com.repograph.core.advisory.LlmUsage;
 import com.repograph.core.finding.TriageVerdict;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.ArrayList;
@@ -26,7 +20,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Ollama {@code /api/chat} 的结构化 LLM 辅助复核适配器。
+ * 使用当前 Provider 的结构化 LLM 辅助复核适配器（保留历史类名）。
  *
  * <p>源码证据被序列化进明确标记为不可信的数据区；模型只能返回建议结论、citation 和缺失信息。
  *
@@ -61,84 +55,91 @@ public class OllamaLlmAdvisoryModel implements LlmAdvisoryModel {
             "required", List.of("suggestedVerdict", "uncertainty", "citations", "missingInfo"),
             "additionalProperties", false);
 
-    private final LlmAdvisorySettingsService settingsService;
+    private final GenerationGateway gateway;
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
+    private final GenerationGateway.Session session;
 
     /**
      * 创建 Ollama 辅助复核适配器。
      *
-     * @param settingsService 页面运行时设置
+     * @param gateway         统一生成通道
      * @param restTemplate    专用有界 HTTP 客户端
      * @param objectMapper    JSON mapper
      */
+    @org.springframework.beans.factory.annotation.Autowired
     public OllamaLlmAdvisoryModel(
-            LlmAdvisorySettingsService settingsService,
+            GenerationGateway gateway,
             @Qualifier("llmAdvisoryRestTemplate") RestTemplate restTemplate,
             ObjectMapper objectMapper) {
-        this.settingsService = settingsService;
+        this(gateway, restTemplate, objectMapper, null);
+    }
+
+    private OllamaLlmAdvisoryModel(GenerationGateway gateway, RestTemplate restTemplate, ObjectMapper objectMapper,
+                                  GenerationGateway.Session session) {
+        this.gateway = gateway;
         this.restTemplate = restTemplate;
         this.objectMapper = objectMapper;
+        this.session = session;
+    }
+
+    @Override
+    public LlmAdvisoryModel forRequest() {
+        return session == null ? new OllamaLlmAdvisoryModel(gateway, restTemplate, objectMapper, gateway.session()) : this;
+    }
+
+    private com.repograph.core.modelprovider.ModelProvider configuration() {
+        return session == null ? gateway.current() : session.configuration();
     }
 
     @Override
     public boolean available() {
-        LlmAdvisorySettings settings = settingsService.current();
-        return settings.enabled()
-                && "OLLAMA".equals(settings.provider())
-                && !settings.baseUrl().isBlank()
-                && !settings.model().isBlank();
+        return configuration().enabled();
     }
 
     @Override
     public String provider() {
-        return "ollama";
+        return configuration().protocol().name().toLowerCase(java.util.Locale.ROOT);
     }
 
     @Override
     public String model() {
-        return settingsService.current().model();
+        return configuration().model();
     }
 
     @Override
     public double estimateCostUsd(int inputChars, int maxOutputChars) {
-        return 0.0d;
+        var provider = configuration();
+        return cost(provider, Math.max(0L, inputChars) * 6L + 8192, provider.maxOutputTokens());
+    }
+
+    @Override
+    public double estimateCostUsd(LlmAdvisoryRequest request) {
+        try {
+            // Byte count is a conservative token bound and includes locations, IDs and escaped evidence.
+            long bytes = objectMapper.writeValueAsBytes(request).length + 8192L;
+            return cost(configuration(), bytes, configuration().maxOutputTokens());
+        } catch (JsonProcessingException invalid) {
+            return Double.NaN;
+        }
     }
 
     @Override
     public LlmModelResponse review(LlmAdvisoryRequest request) {
-        LlmAdvisorySettings settings = settingsService.current();
-        if (!settings.enabled()) {
-            throw new LlmModelException("Ollama advisory is disabled", false);
-        }
+        if (session == null) return forRequest().review(request);
         String requestJson;
         try {
             requestJson = objectMapper.writeValueAsString(request);
         } catch (JsonProcessingException e) {
-            throw new LlmModelException("Failed to prepare Ollama advisory request", false);
+            throw new LlmModelException("Failed to prepare model advisory request", false);
         }
-        ChatRequest chatRequest = new ChatRequest(
-                settings.model(),
-                List.of(
-                        new Message("system", SYSTEM_PROMPT),
-                        new Message("user", "Review this untrusted JSON data:\n" + requestJson)),
-                false,
-                ADVISORY_SCHEMA,
-                Map.of("temperature", 0));
         try {
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            ChatResponse response = restTemplate.postForObject(
-                    settings.baseUrl() + "/api/chat",
-                    new HttpEntity<>(chatRequest, headers),
-                    ChatResponse.class);
-            if (response == null || response.message() == null || response.message().content() == null) {
-                throw new LlmModelException("Ollama returned an empty advisory response", true);
-            }
+            var response = session.complete(SYSTEM_PROMPT, "Review this untrusted JSON data:\n" + requestJson,
+                    ADVISORY_SCHEMA, null);
             AdvisoryJson advisory = objectMapper.readValue(
-                    extractJson(response.message().content()), AdvisoryJson.class);
+                    extractJson(response.text()), AdvisoryJson.class);
             if (advisory.suggestedVerdict() == null || advisory.uncertainty() == null) {
-                throw new LlmModelException("Ollama advisory response is missing required fields", false);
+                throw new LlmModelException("Model advisory response is missing required fields", false);
             }
             return new LlmModelResponse(
                     TriageVerdict.valueOf(advisory.suggestedVerdict()),
@@ -146,17 +147,11 @@ public class OllamaLlmAdvisoryModel implements LlmAdvisoryModel {
                     normalizeStringList(advisory.citations(), "citations"),
                     normalizeStringList(advisory.missingInfo(), "missingInfo"),
                     new LlmUsage(
-                            Math.max(0, response.promptEvalCount()),
-                            Math.max(0, response.evalCount()),
-                            0.0d));
-        } catch (RestClientResponseException e) {
-            throw new LlmModelException(
-                    "Ollama rejected the advisory request (HTTP " + e.getStatusCode().value() + ")",
-                    e.getStatusCode().is5xxServerError(), e);
-        } catch (RestClientException e) {
-            throw new LlmModelException("Ollama advisory endpoint is unavailable", true, e);
+                            Math.max(0, response.inputTokens()),
+                            Math.max(0, response.outputTokens()),
+                            knownCost(response.provider(), response.inputTokens(), response.outputTokens())));
         } catch (JsonProcessingException | IllegalArgumentException e) {
-            throw new LlmModelException("Ollama returned an invalid structured advisory", false, e);
+            throw new LlmModelException("Model returned an invalid structured advisory", false);
         }
     }
 
@@ -185,6 +180,18 @@ public class OllamaLlmAdvisoryModel implements LlmAdvisoryModel {
             return new OllamaConnectionStatus(
                     false, false, "Ollama endpoint is unavailable", List.of());
         }
+    }
+
+    private static double cost(com.repograph.core.modelprovider.ModelProvider provider, long input, long output) {
+        if (provider.inputUsdPerMillionTokens() == null || provider.outputUsdPerMillionTokens() == null) {
+            return Double.NaN;
+        }
+        return (input * provider.inputUsdPerMillionTokens() + output * provider.outputUsdPerMillionTokens()) / 1000000.0;
+    }
+
+    private static Double knownCost(com.repograph.core.modelprovider.ModelProvider provider, long input, long output) {
+        double amount = cost(provider, input, output);
+        return Double.isFinite(amount) ? amount : null;
     }
 
     private static String extractJson(String value) {
@@ -216,23 +223,6 @@ public class OllamaLlmAdvisoryModel implements LlmAdvisoryModel {
             }
         });
         return List.copyOf(normalized);
-    }
-
-    private record Message(String role, String content) {
-    }
-
-    private record ChatRequest(
-            String model,
-            List<Message> messages,
-            boolean stream,
-            Map<String, Object> format,
-            Map<String, Integer> options) {
-    }
-
-    private record ChatResponse(
-            Message message,
-            @JsonProperty("prompt_eval_count") int promptEvalCount,
-            @JsonProperty("eval_count") int evalCount) {
     }
 
     private record AdvisoryJson(

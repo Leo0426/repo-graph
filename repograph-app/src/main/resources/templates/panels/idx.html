@@ -3,17 +3,14 @@
 <body>
 <div th:fragment="panel" id="panel-index" class="panel"
      :class="{ active: $store.repograph.panel === 'index' }">
-  <div class="panel-header index-heading">
-    <div><div class="panel-title" data-i18n="index.title">索引项目</div>
-      <div class="panel-subtitle" data-i18n="index.subtitle">触发并监控索引管道执行过程</div></div>
-    <button type="button" class="btn btn-ghost" onclick="focusIndexExecution()" data-i18n="index.viewExecution">查看执行</button>
-  </div>
+
   <div class="panel-body index-workbench">
+    <div class="task-dependency-notice" data-task-notice="index" hidden><span></span><button type="button" class="btn btn-ghost"></button></div>
     <div class="index-layout">
       <details class="index-configuration" id="index-configuration" open>
         <summary><span data-i18n="index.configuration">索引配置</span><span aria-hidden="true">⌄</span></summary>
         <div class="index-configuration-body">
-          <p class="index-helper" data-i18n="index.configurationHint">先选择目录和解析方式，再启动后台索引。</p>
+          <details class="help-note"><summary data-i18n-aria-label="help.indexSetup" aria-label="索引配置"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#circle-help"/></svg><span data-i18n="help.indexSetup">索引配置</span></summary><div class="help-note-content"><p class="index-helper" data-i18n="index.configurationHint">先选择目录和解析方式，再启动后台索引。</p></div></details>
           <label class="index-field"><span data-i18n="index.root">项目根目录</span>
             <input type="text" id="index-root" placeholder="/path/to/project" autocomplete="off" spellcheck="false"
                    data-i18n-ph="ph.root" oninput="onIndexRootChange()" aria-describedby="index-validation"></label>
@@ -24,14 +21,14 @@
               <label class="check-item"><input type="checkbox" value="c" id="lang-c"> C</label>
               <label class="check-item"><input type="checkbox" value="python" id="lang-py"> Python</label>
             </div>
-            <p class="index-helper" data-i18n="index.noLanguagesHint">未选中语言时使用全部支持的语言。</p>
+            <details class="help-note"><summary data-i18n-aria-label="help.indexLanguages" aria-label="索引语言范围"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#circle-help"/></svg><span data-i18n="help.indexLanguages">索引语言范围</span></summary><div class="help-note-content"><p class="index-helper" data-i18n="index.noLanguagesHint">未选中语言时使用全部支持的语言。</p></div></details>
           </fieldset>
           <label class="index-field"><span data-i18n="index.strategy">解析策略</span>
-            <select id="index-strategy">
+            <span class="select-control"><select id="index-strategy">
               <option value="auto" data-i18n="strategy.auto">自动（精确 → 启发式降级）</option>
               <option value="precise" data-i18n="strategy.precise">仅精确解析</option>
               <option value="heuristic" data-i18n="strategy.heuristic">仅启发式解析</option>
-            </select></label>
+            </select></span></label>
           <label class="index-rebuild"><input type="checkbox" id="no-incremental">
             <span><strong data-i18n="index.forceReindex">强制重建索引</strong>
               <small data-i18n="index.skipCache">忽略 MD5 缓存</small></span></label>
@@ -73,7 +70,7 @@
         </details>
         <details class="index-log-panel" open>
           <summary data-i18n="index.logTitle">执行日志</summary>
-          <div class="index-log-toolbar"><p data-i18n="index.logHint">最近100条状态变化；查阅旧日志时保留滚动位置。</p>
+          <div class="index-log-toolbar"><details class="help-note"><summary data-i18n-aria-label="help.indexLog" aria-label="索引日志保留范围"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#circle-help"/></svg><span data-i18n="help.indexLog">索引日志保留范围</span></summary><div class="help-note-content"><p data-i18n="index.logHint">最近100条状态变化；查阅旧日志时保留滚动位置。</p></div></details>
             <button type="button" class="btn btn-ghost" onclick="clearIndexLog()" data-i18n="index.clearLog">清空日志</button></div>
           <div class="index-log" id="index-log" tabindex="0" role="log" aria-live="polite" aria-relevant="additions" data-i18n-aria-label="index.logTitle" aria-label="执行日志"></div>
         </details>
@@ -81,5 +78,6 @@
     </div>
   </div>
 </div>
+<div th:fragment="actions" class="page-actions"><button type="button" class="btn btn-ghost" id="index-view-execution" onclick="focusIndexExecution()" data-i18n="index.viewExecution">查看执行</button></div>
 </body>
 </html>

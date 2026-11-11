@@ -5,6 +5,7 @@ const state = {
   filters: { lang: '', kind: '' },
   selectedNode: null,
   activeProjectId: '',
+  searchScope: 'current',
   flowResult: null,
   flowView: 'cfg',
   indexPolling: null,
@@ -14,6 +15,12 @@ const state = {
 /* ── Utils ── */
 function esc(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Shared empty-state presentation; callers supply translation keys, never HTML.
+function emptyState(title, hint = '', icon = 'folder-git-2') {
+  return `<div class="empty-state"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide/icons.svg#${icon}"/></svg>
+    <p>${esc(t(title))}</p>${hint ? `<span>${esc(t(hint))}</span>` : ''}</div>`;
 }
 
 function debounce(fn, ms) {
@@ -40,32 +47,74 @@ function relativeTime(iso) {
 
 let _toastTimer = null;
 let _toastFrame = null;
+let _toastRemaining = 0;
+let _toastStarted = 0;
+let _toastPreviousFocus = null;
+function pauseToast() {
+  if (!_toastTimer) return;
+  clearTimeout(_toastTimer);
+  _toastTimer = null;
+  _toastRemaining = Math.max(0, _toastRemaining - (performance.now() - _toastStarted));
+}
+function resumeToast() {
+  const el = document.getElementById('toast');
+  if (!el.classList.contains('show') || el.matches(':hover') || el.contains(document.activeElement) || document.hidden) return;
+  clearTimeout(_toastTimer);
+  _toastStarted = performance.now();
+  _toastTimer = setTimeout(dismissToast, _toastRemaining);
+}
+function dismissToast() {
+  const el = document.getElementById('toast');
+  clearTimeout(_toastTimer);
+  cancelAnimationFrame(_toastFrame);
+  _toastTimer = null;
+  if (el.contains(document.activeElement)) {
+    const previous = _toastPreviousFocus;
+    if (previous?.isConnected && !previous.disabled && previous.getClientRects().length) previous.focus({ preventScroll: true });
+    else document.getElementById('main-content')?.focus({ preventScroll: true });
+  }
+  el.classList.remove('show');
+  el.inert = true;
+}
 function showToast(msg, ms = 3200, tone = 'info') {
   const el = document.getElementById('toast');
+  const message = document.getElementById('toast-message');
   cancelAnimationFrame(_toastFrame);
-  el.textContent = '';
-  el.dataset.tone = tone;
-  el.classList.add('show');
-  _toastFrame = requestAnimationFrame(() => { el.textContent = msg; });
   clearTimeout(_toastTimer);
-  _toastTimer = setTimeout(() => el.classList.remove('show'), ms);
+  _toastTimer = null;
+  if (!el.contains(document.activeElement)) _toastPreviousFocus = document.activeElement;
+  message.textContent = '';
+  el.dataset.tone = tone;
+  el.inert = false;
+  el.classList.add('show');
+  _toastFrame = requestAnimationFrame(() => { message.textContent = msg; });
+  _toastRemaining = tone === 'error' ? Math.max(ms, 8000) : ms;
+  resumeToast();
 }
+const toastElement = document.getElementById('toast');
+toastElement.addEventListener('pointerenter', pauseToast);
+toastElement.addEventListener('pointerleave', resumeToast);
+toastElement.addEventListener('focusin', pauseToast);
+toastElement.addEventListener('focusout', () => queueMicrotask(resumeToast));
+document.addEventListener('visibilitychange', () => document.hidden ? pauseToast() : resumeToast());
 
 /* ── API ── */
 const api = {
   semantic: (q, lang, kind, limit, offset = 0) => {
     const p = new URLSearchParams({ q, limit, offset });
+    if (state.searchScope === 'current' && state.activeProjectId) p.set('projectId', state.activeProjectId);
     if (lang) p.set('lang', lang);
     if (kind) p.set('kind', kind);
-    return fetch(`/api/v1/search/semantic?${p}`).then(async response => {
+    return fetch(`/api/v1/search/${state.searchScope === 'authorized' ? 'authorized/' : ''}semantic?${p}`).then(async response => {
       if (!response.ok) throw new Error(await apiError(response));
       return response.json();
     });
   },
   code: (snippet, lang, limit, offset = 0) => {
     const p = new URLSearchParams({ snippet, limit, offset });
+    if (state.searchScope === 'current' && state.activeProjectId) p.set('projectId', state.activeProjectId);
     if (lang) p.set('lang', lang);
-    return fetch(`/api/v1/search/code?${p}`).then(async response => {
+    return fetch(`/api/v1/search/${state.searchScope === 'authorized' ? 'authorized/' : ''}code?${p}`).then(async response => {
       if (!response.ok) throw new Error(await apiError(response));
       return response.json();
     });
@@ -287,26 +336,34 @@ async function focusGlobalSearch() {
   document.getElementById('search-input')?.focus();
 }
 
-function handlePanelSwitch(id) {
+async function handlePanelSwitch(id) {
+  if (typeof closeResultReader === 'function') closeResultReader(false);
+  if (id !== 'agent' && typeof closeAgentReview === 'function') closeAgentReview(false);
+  if (typeof sessionReady !== 'undefined') await sessionReady;
+  if (id === 'admin') return loadAdmin();
+  if (id === 'health') return Promise.all([refreshProjectsList(), loadGenerationCapability()]);
+  if (['index', 'benchmark'].includes(id) && sessionAccount?.role !== 'ADMIN') return switchPanel('admin');
+  if (id === 'wiki') { refreshProjectsList(); return loadWiki(); }
   if (id === 'agent') {
     initAgentWorkbench();
-    refreshProjectsList().then(populateAgentProjectSelect)
+    const loading = refreshProjectsList().then(populateAgentProjectSelect)
       .then(() => Promise.all([loadAgentVulnerabilities(), loadAgentRuns()]));
     loadLlmSettings();
-    return;
+    loadGenerationCapability();
+    return loading;
   }
   if (id === 'graph') setTimeout(initGraphCanvas, 50);
-  if (id === 'tools') renderProjectsManage();
+  if (id === 'tools') return renderProjectsManage();
   if (id === 'benchmark') { loadBenchmark(); return; }
   if (id === 'vulns') { refreshProjectsList().then(populateVulnProjectSelect); return; }
   if (id === 'metrics') { refreshProjectsList().then(populateMetricsProjectSelect); return; }
-  if (id === 'graph' || id === 'tools' || id === 'stats' || id === 'sbom') {
+  if (id === 'graph' || id === 'stats' || id === 'sbom') {
     const refreshed = refreshProjectsList();
     if (id === 'stats') refreshed.then(maybeAutoLoadStats);
     if (id === 'sbom') refreshed.then(projects => {
       const input = document.getElementById('sbom-view-input');
       if (input && !input.value.trim() && Array.isArray(projects) && projects.length === 1)
-        input.value = projectName(projects[0]);
+        input.value = projects[0].projectId;
     });
     return refreshed;
   }
@@ -319,48 +376,89 @@ function maybeAutoLoadStats(projects) {
     const project = projects?.find(item => item.projectId === state.activeProjectId)
       || (projects?.length === 1 ? projects[0] : null);
     if (!project) return;
-    input.value = projectName(project);
+    input.value = project.projectId;
   }
   loadProjectStats();
 }
 
 let projectsRequestVersion = 0;
-async function refreshProjectsList() {
+let latestProjectsRead = null;
+async function refreshProjectsList({ throwOnError = false } = {}) {
   const version = ++projectsRequestVersion;
-  try {
-    const projects = await api.projects();
-    if (version !== projectsRequestVersion) return state.projects;
-    if (!Array.isArray(projects)) throw new Error('Invalid project list');
-    state.projects = projects;
-    const dl = document.getElementById('projects-datalist');
-    dl.innerHTML = projects.map(p => {
-      const name = projectName(p);
-      const label = `${p.projectId.slice(0, 8)}… · ${p.nodeCount} units`;
-      return `<option value="${esc(name)}" label="${esc(label)}"></option>`;
-    }).join('');
-    const global = document.getElementById('global-project');
-    const selected = state.activeProjectId;
-    global.innerHTML = `<option value="">${esc(t('header.allProjects'))}</option>` + projects.map(p =>
-      `<option value="${esc(p.projectId)}">${esc(projectName(p))} · ${p.nodeCount}</option>`
-    ).join('');
-    global.value = selected;
-    return projects;
-  } catch (e) {
+  const pending = readProjectsSnapshot(version);
+  latestProjectsRead = { version, pending };
+  try { return await pending; }
+  catch (error) {
+    if (throwOnError) throw error;
     return state.projects;
   }
 }
 
-function setGlobalProject(projectId) {
+function newerProjectsSnapshot(version) {
+  // Deletion can invalidate a read without starting a replacement; never await that same read.
+  return latestProjectsRead?.version > version ? latestProjectsRead.pending : state.projects;
+}
+
+async function readProjectsSnapshot(version) {
+  try {
+    const projects = await api.projects();
+    if (version !== projectsRequestVersion) return newerProjectsSnapshot(version);
+    if (!Array.isArray(projects)) throw new Error('Invalid project list');
+    const previousIds = new Set((state.projects || []).map(project => project.projectId));
+    const nextIds = new Set(projects.map(project => project.projectId));
+    const accessChanged = previousIds.size !== nextIds.size || [...previousIds].some(id => !nextIds.has(id));
+    state.projects = projects;
+    const dl = document.getElementById('projects-datalist');
+    dl.innerHTML = projects.map(p => {
+      const name = projectName(p);
+      const label = `${name} · ${p.nodeCount} units`;
+      return `<option value="${esc(p.projectId)}" label="${esc(label)}"></option>`;
+    }).join('');
+    const global = document.getElementById('global-project');
+    const selected = state.activeProjectId;
+    global.innerHTML = `<option value="">${esc(t('header.allProjects'))}</option>` + projects.map(p =>
+      `<option value="${esc(p.projectId)}">${esc(projectName(p))}</option>`
+    ).join('');
+    global.value = selected;
+    if (selected && !projects.some(project => project.projectId === selected)) {
+      setGlobalProject('', { historyMode: 'replace' });
+    }
+    if (accessChanged && state.searchScope === 'authorized') {
+      invalidateSearch();
+      if (document.getElementById('search-input').value.trim())
+        renderSearchEmpty('search.catalogChanged', 'search.catalogChangedHint');
+      else renderSearchEmpty();
+    }
+    renderSearchScope();
+    rememberWorkspaceContext('replace');
+    if (typeof renderRepositoryContext === 'function') renderRepositoryContext();
+    if (typeof renderTaskCapabilities === 'function') renderTaskCapabilities();
+    if (typeof onProjectCatalogUpdated === 'function') onProjectCatalogUpdated(projects);
+    return projects;
+  } catch (e) {
+    if (version !== projectsRequestVersion) return newerProjectsSnapshot(version);
+    throw e;
+  }
+}
+
+function setGlobalProject(projectId, { reloadStats = true, historyMode = 'push', preserveStats = false } = {}) {
+  if (typeof closeResultReader === 'function') closeResultReader(false);
   state.activeProjectId = projectId || '';
+  if (typeof renderRepositoryContext === 'function') renderRepositoryContext();
+  if (typeof invalidateSearch === 'function') { invalidateSearch(); renderSearchEmpty(); }
   try { localStorage.setItem('repograph_active_project', state.activeProjectId); } catch (_) {}
   document.getElementById('global-project').value = state.activeProjectId;
+  renderSearchScope();
+  rememberWorkspaceContext(historyMode);
+  if (typeof renderTaskCapabilities === 'function') renderTaskCapabilities();
   const project = (state.projects || []).find(p => p.projectId === state.activeProjectId);
-  const value = project ? projectName(project) : '';
+  const value = project?.projectId || '';
   ['graph-project','entrypoints-project','stats-project-input',
    'frameworks-project-input','sbom-project-input','sbom-view-input'].forEach(id => {
     const input = document.getElementById(id);
     if (input) input.value = value;
   });
+  if (typeof resetWikiProject === 'function') resetWikiProject();
   if (typeof invalidateToolsInputs === 'function') invalidateToolsInputs();
   if (typeof invalidateSbomView === 'function') invalidateSbomView();
   if (typeof invalidateSymbolQuery === 'function') invalidateSymbolQuery();
@@ -381,7 +479,8 @@ function setGlobalProject(projectId) {
   }
   invalidateGraphQuery();
   const active = document.querySelector('.panel.active');
-  if (active?.id === 'panel-stats') loadProjectStats();
+  if (preserveStats) return;
+  if (active?.id === 'panel-stats' && reloadStats) loadProjectStats();
   else if (typeof invalidateStatsInput === 'function') invalidateStatsInput();
 }
 
@@ -394,63 +493,95 @@ function projectName(p) {
 
 function resolveProjectId(nameOrId) {
   if (!nameOrId) return nameOrId;
-  const projects = state.projects || [];
-  const byName = projects.find(p => projectName(p) === nameOrId);
-  if (byName) return byName.projectId;
-  const byId = projects.find(p => p.projectId === nameOrId || p.projectId.startsWith(nameOrId));
-  if (byId) return byId.projectId;
-  return nameOrId;
+  return resolveProject(nameOrId)?.projectId || nameOrId;
 }
 
 function resolveProject(nameOrId) {
   if (!nameOrId) return null;
   const projects = state.projects || [];
-  return projects.find(p => projectName(p) === nameOrId)
-      || projects.find(p => p.projectId === nameOrId || p.projectId.startsWith(nameOrId))
-      || null;
+  const exact = projects.find(project => project.projectId === nameOrId);
+  if (exact) return exact;
+  const named = projects.filter(project => projectName(project) === nameOrId);
+  if (named.length === 1) return named[0];
+  const prefixed = projects.filter(project => project.projectId.startsWith(nameOrId));
+  return prefixed.length === 1 ? prefixed[0] : null;
 }
 
 /* ── I18N application ── */
+function localizedText(key, ...args) {
+  return `<span data-i18n="${esc(key)}" data-i18n-args="${esc(JSON.stringify(args))}">${esc(t(key, ...args))}</span>`;
+}
+
+function setLocalizedText(element, key, ...args) {
+  if (typeof element === 'string') element = document.getElementById(element);
+  element.dataset.i18n = key;
+  element.dataset.i18nArgs = JSON.stringify(args);
+  element.textContent = t(key, ...args);
+}
+
+function clearLocalizedText(element, value = '') {
+  delete element.dataset.i18n;
+  delete element.dataset.i18nArgs;
+  element.textContent = value;
+}
+
+function translateElement(element, key) {
+  let args = [];
+  try { const saved = JSON.parse(element.dataset.i18nArgs || '[]'); if (Array.isArray(saved)) args = saved; } catch (_) {}
+  return t(key, ...args);
+}
+
 function applyLang() {
   document.querySelectorAll('[data-i18n]').forEach(el => {
-    const val = t(el.dataset.i18n);
+    const val = translateElement(el, el.dataset.i18n);
     if (typeof val === 'string') el.textContent = val;
   });
   document.querySelectorAll('[data-i18n-ph]').forEach(el => {
-    const val = t(el.dataset.i18nPh);
+    const val = translateElement(el, el.dataset.i18nPh);
     if (val) el.placeholder = val;
   });
   document.querySelectorAll('[data-i18n-title]').forEach(el => {
-    const val = t(el.dataset.i18nTitle);
+    const val = translateElement(el, el.dataset.i18nTitle);
     if (val) el.title = val;
   });
   document.querySelectorAll('[data-i18n-aria-label]').forEach(el => {
-    const val = t(el.dataset.i18nAriaLabel);
+    const val = translateElement(el, el.dataset.i18nAriaLabel);
     if (val) el.setAttribute('aria-label', val);
   });
   document.querySelectorAll('select option[data-i18n]').forEach(el => {
-    const val = t(el.dataset.i18n);
+    const val = translateElement(el, el.dataset.i18n);
     if (val) el.textContent = val;
   });
   const hint = document.getElementById('graph-hint');
   if (hint && hint.dataset.i18n) hint.textContent = t(hint.dataset.i18n);
   const modeHint = document.getElementById('search-mode-hint');
   if (modeHint) modeHint.textContent = t(state.searchMode === 'semantic' ? 'hint.semantic' : 'hint.code');
+  if (typeof commandDialog !== 'undefined' && commandDialog.open) renderCommands();
   if (typeof renderSearchFilterSummary === 'function') renderSearchFilterSummary();
+  if (typeof renderSearchScope === 'function') renderSearchScope();
   if (typeof updateSearchResultCount === 'function') updateSearchResultCount();
   if (typeof refreshStatsLanguage === 'function') refreshStatsLanguage();
   if (typeof renderVulnSummary === 'function') renderVulnSummary();
   if (typeof refreshIndexLanguage === 'function') refreshIndexLanguage();
   if (typeof refreshToolsLanguage === 'function') refreshToolsLanguage();
+  if (typeof applyListDensity === 'function') applyListDensity();
   if (typeof refreshSbomLanguage === 'function') refreshSbomLanguage();
+  if (typeof renderWiki === 'function') renderWiki();
+  if (typeof renderProviderPresetHint === 'function') renderProviderPresetHint();
+  if (typeof renderAccountDescription === 'function') renderAccountDescription();
   if (typeof refreshSymbolLanguage === 'function') refreshSymbolLanguage();
   if (typeof refreshMetricsLanguage === 'function') refreshMetricsLanguage();
   if (typeof refreshBenchmarkLanguage === 'function') refreshBenchmarkLanguage();
   renderServiceHealth();
+  if (typeof renderSavedLlmState === 'function' && agentUi.llmSettings) renderSavedLlmState();
   if (typeof renderAgentProjectHint === 'function') renderAgentProjectHint();
   if (typeof renderAgentVulnerabilities === 'function') renderAgentVulnerabilities();
   if (typeof renderAgentRunList === 'function') renderAgentRunList();
   if (typeof rerenderAgentCurrentRun === 'function') rerenderAgentCurrentRun();
+  if (typeof renderAgentCurrentTask === 'function') renderAgentCurrentTask();
+  if (typeof refreshAgentReviewLanguage === 'function') refreshAgentReviewLanguage();
+  if (typeof refreshReaderLanguage === 'function') refreshReaderLanguage();
+  if (typeof renderGraphModeLabel === 'function') renderGraphModeLabel();
   if (typeof refreshExternalInputStatus === 'function' && agentUi?.inputMode === 'external') {
     refreshExternalInputStatus();
   } else if (typeof updateAgentLaunchState === 'function') {
@@ -460,7 +591,7 @@ function applyLang() {
 
 function onLangChange(lang) {
   currentLang = lang;
-  localStorage.setItem('repograph_lang', lang);
+  try { localStorage.setItem('repograph_lang', lang); } catch (_) {}
   document.documentElement.lang = lang;
   applyLang();
   refreshProjectsList();
@@ -468,15 +599,15 @@ function onLangChange(lang) {
 
 /* ── Kind colors ── */
 const KIND_COLORS = {
-  CLASS: '#3EFFA0', INTERFACE: '#60A5FA', ENUM: '#34D399', ANNOTATION: '#6EE7B7',
-  METHOD: '#A78BFA', CONSTRUCTOR: '#C084FC', FUNCTION: '#FBBF24',
-  FIELD: '#94A3B8', STRUCT: '#FB923C', MACRO: '#F97316', LOCAL_VAR: '#64748B',
+  CLASS: '--mint', INTERFACE: '--cyan', ENUM: '--mint', ANNOTATION: '--mint',
+  METHOD: '--purple', CONSTRUCTOR: '--purple', FUNCTION: '--amber',
+  FIELD: '--text-3', STRUCT: '--amber', MACRO: '--amber', LOCAL_VAR: '--text-3',
 };
 
-function kindColor(k) { return KIND_COLORS[k] || '#64748B'; }
+function kindColor(k) { return `var(${KIND_COLORS[k] || '--text-3'})`; }
 function kindStyle(k) {
   const c = kindColor(k);
-  return `background:${c}22;color:${c};border:1px solid ${c}44`;
+  return `background:color-mix(in srgb, ${c} 10%, var(--bg-2));color:${c};border:1px solid color-mix(in srgb, ${c} 25%, var(--border))`;
 }
 
 /* ── Keyboard shortcuts ── */
@@ -501,14 +632,15 @@ document.addEventListener('keydown', e => {
     }
     return;
   }
-  if (document.querySelector('dialog[open]') || e.defaultPrevented || e.isComposing) return;
+  if (document.querySelector('dialog:modal') || e.defaultPrevented || e.isComposing) return;
   const activeElement = document.activeElement;
   const inInput = ['INPUT','TEXTAREA','SELECT'].includes(activeElement?.tagName)
     || activeElement?.isContentEditable;
 
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
     e.preventDefault();
-    focusGlobalSearch();
+    e.stopPropagation();
+    openCommandPalette();
     return;
   }
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -607,10 +739,11 @@ function showTooltip(e, text) {
 function hideTooltip() { document.getElementById('tooltip').style.display = 'none'; }
 
 /* ── Stats drill-down ── */
-async function drillToKind(kind) {
+async function drillToKind(kind, projectId = state.activeProjectId) {
   const chip = document.querySelector(`.filter-chip[data-group="kind"][data-val="${kind}"]`);
   if (!chip) return;
-  // Both search APIs span all indexed projects. Only preset their supported kind filter.
+  if (projectId) setGlobalProject(projectId);
+  changeSearchScope('current', { run: false });
   await switchPanel('search');
   if (state.searchMode !== 'semantic') {
     state.filters.kind = kind;
@@ -639,6 +772,10 @@ const invalidHealthResponses = new WeakSet();
 
 function renderServiceHealth() {
   const status = document.getElementById('sb-health');
+  const dot = document.getElementById('service-dot');
+  if (dot) dot.dataset.state = _serviceHealth;
+  const indicator = document.querySelector('.service-indicator');
+  if (indicator) indicator.title = t(`shell.status.${_serviceHealth}`);
   if (status) {
     status.dataset.state = _serviceHealth;
     status.dataset.i18n = `shell.status.${_serviceHealth}`;
@@ -647,10 +784,12 @@ function renderServiceHealth() {
   HEALTH_SERVICES.forEach(service => {
     const health = serviceHealthView.states[service];
     const label = t(`shell.service.${health}`);
-    const name = service === 'qdrant' ? 'Qdrant' : service === 'neo4j' ? 'Neo4j' : 'Ollama';
+    const name = service === 'qdrant' ? 'Qdrant' : service === 'neo4j' ? 'Neo4j' : 'Embedding Ollama';
     const badge = document.getElementById(`hb-${service}`);
     if (badge) {
       badge.dataset.health = health;
+      const nameLabel = badge.querySelector('span:not(.badge-state)');
+      if (nameLabel) nameLabel.textContent = name;
       const stateLabel = badge.querySelector('.badge-state');
       if (stateLabel) stateLabel.textContent = label;
       badge.setAttribute('aria-label', `${name}: ${label}`);
@@ -661,6 +800,8 @@ function renderServiceHealth() {
     const card = document.querySelector(`#health-grid [data-service="${service}"]`)
       || document.querySelectorAll('#health-grid .health-card')[HEALTH_SERVICES.indexOf(service)];
     if (card) {
+      const nameLabel = card.querySelector('.health-name');
+      if (nameLabel) nameLabel.textContent = name;
       card.classList.remove('h-ok', 'h-err', 'h-unknown');
       card.classList.add(health === 'ok' ? 'h-ok' : health === 'error' ? 'h-err' : 'h-unknown');
       card.dataset.state = health;
@@ -696,6 +837,7 @@ function renderServiceHealth() {
   const error = document.getElementById('health-check-error');
   error.hidden = !serviceHealthView.errorKey;
   setText('health-check-error', serviceHealthView.errorKey ? t(serviceHealthView.errorKey) : '');
+  if (typeof renderTaskCapabilities === 'function') renderTaskCapabilities();
 }
 
 function refreshHealthStatus() {
@@ -778,24 +920,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   applyLang();
 
   // Restore index root
-  const savedRoot = localStorage.getItem('repograph_index_root');
+  let savedRoot = '';
+  try { savedRoot = localStorage.getItem('repograph_index_root'); } catch (_) {}
   if (savedRoot) {
     const el = document.getElementById('index-root');
     if (el) el.value = savedRoot;
   }
 
-  state.activeProjectId = localStorage.getItem('repograph_active_project') || '';
+  try { state.activeProjectId = localStorage.getItem('repograph_active_project') || ''; } catch (_) {}
+  const context = history.state?.repograph;
+  if (context) {
+    state.activeProjectId = typeof context.projectId === 'string' ? context.projectId : '';
+    state.searchScope = context.searchScope === 'authorized' ? 'authorized' : 'current';
+  }
+  renderSearchScope();
 
   initGraphCanvas();
-  refreshProjectsList();
-
-  // Status bar clock
-  const sbClock = document.getElementById('sb-clock');
-  if (sbClock) {
-    const tick = () => { sbClock.textContent = new Date().toTimeString().slice(0, 8); };
-    tick();
-    setInterval(tick, 1000);
-  }
+  await refreshProjectsList();
 
   await Alpine.store('repograph').restorePanel();
 });

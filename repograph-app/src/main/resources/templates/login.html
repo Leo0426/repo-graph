@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="zh" class="auth-document">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>登录 · RepoGraph</title>
+  <link rel="icon" type="image/svg+xml" sizes="any" th:href="@{/img/repograph-mark.svg}">
+  <script th:src="@{/js/repograph-theme.js}"></script>
+  <link rel="stylesheet" th:href="@{/css/tokens.css}">
+  <link rel="stylesheet" th:href="@{/css/base.css}">
+  <link rel="stylesheet" th:href="@{/vendor/fonts/fonts.css}">
+  <link rel="stylesheet" th:href="@{/css/auth-studio.css}">
+</head>
+<body class="auth-page">
+<main class="auth-shell">
+  <section class="auth-card" aria-labelledby="auth-heading">
+  <div class="auth-brand"><img th:src="@{/img/repograph-mark.svg}" alt="" width="36" height="36">RepoGraph</div>
+  <div class="auth-language" role="group" data-i18n-aria-label="auth.language" aria-label="语言">
+    <button type="button" id="auth-lang-zh" onclick="changeAuthLanguage('zh')" aria-pressed="true">中文</button>
+    <button type="button" id="auth-lang-en" onclick="changeAuthLanguage('en')" aria-pressed="false">English</button>
+  </div>
+  <h1 id="auth-heading">登录工作台</h1>
+  <p id="auth-hint" data-i18n="auth.hint">使用已审核通过的账号登录。首次使用请注册并等待管理员审核。</p>
+  <form id="auth-form">
+    <label for="username" data-i18n="auth.username">用户名</label><input id="username" name="username" autocomplete="username" required minlength="3" maxlength="64" pattern="[a-zA-Z0-9][a-zA-Z0-9_.-]{2,63}">
+    <div id="registration-fields" hidden>
+      <label for="display-name" data-i18n="auth.displayName">姓名</label><input id="display-name" autocomplete="name" maxlength="100">
+      <label for="email" data-i18n="auth.email">邮箱</label><input id="email" type="email" autocomplete="email" maxlength="254">
+    </div>
+    <label for="password" data-i18n="auth.password">密码</label><input id="password" name="password" type="password" autocomplete="current-password" required minlength="12">
+    <button class="btn btn-primary" id="auth-submit" type="submit">登录</button>
+    <button class="btn btn-ghost" id="auth-toggle" type="button">注册新账号</button>
+  </form>
+  <div id="auth-status" role="status" aria-live="polite"></div>
+</section></main>
+<script th:src="@{/js/repograph-i18n.js}"></script>
+<script th:src="@{/js/repograph-login.js}"></script>
+</body></html>

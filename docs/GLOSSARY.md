@@ -4,6 +4,9 @@
 
 | 术语 | 定义 |
 |------|------|
+| Account | 平台账号；注册待审核，批准后可使用，停用或改密使旧会话失效。 |
+| Organization | 管理员维护的成员集合，也是项目归属主体。 |
+| ProjectOwner | 将项目绑定至个人账号或组织的归属事实，独立于代码索引。 |
 | CodeUnit | 代码符号或文档章节的统一单元，带源码范围、签名、metadata 等信息。 |
 | CodeUnitKind | CodeUnit 的种类枚举；DOCUMENT 表示 Markdown 章节。 |
 | RelationEdge / EdgeKind | 符号间的关系及关系种类；EXTENDS 表示继承，IMPLEMENTS 表示接口实现。 |
@@ -21,3 +24,5 @@
 | advisoryOnly | 模型输出作为辅助建议的标记，不表示已人工确认的漏洞结论。 |
 
 模型级补充信息和演进继续维护在 CONTEXT.md；新增或修订规范术语需有明确领域证据。
+
+- **ModelProvider（生成模型 Provider）**：admin 管理的模型连接配置；名称与协议独立，当前选中项统一服务研判、Wiki 和架构评审。不同于检索 Embedding 配置。

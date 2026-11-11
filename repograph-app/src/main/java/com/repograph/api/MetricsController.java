@@ -1,5 +1,7 @@
 package com.repograph.api;
 
+import com.repograph.identity.ProjectAccess;
+
 import com.repograph.metrics.ComplexityAnalyzer;
 import com.repograph.metrics.ComplexityMetric;
 import com.repograph.metrics.CouplingAnalyzer;
@@ -33,6 +35,7 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/api/v1/metrics")
+@ProjectAccess
 public class MetricsController {
 
     private final ComplexityAnalyzer complexityAnalyzer;
