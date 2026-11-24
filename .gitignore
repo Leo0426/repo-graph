@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+build/
+.gradle/
+.repograph/
+*.env
+.env.*
+.idea/
+*.iml
+out/
+.DS_Store
+.infcode/
+.claude/settings.local.json
+.worktrees/
