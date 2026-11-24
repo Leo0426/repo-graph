@@ -1,0 +1,37 @@
+{
+  "semantic": [
+    {"id":"S01","description":"Java source declarations","query":"Extract classes, methods and fields from a Java source file.","expectedPatterns":["parseJava"]},
+    {"id":"S02","description":"Java archive indexing","query":"Read compiled class definitions from a JAR and add their symbols to the index.","expectedPatterns":["indexBytecode","jarClasses"]},
+    {"id":"S03","description":"Language parser dispatch","query":"Select the appropriate parser for the source file's language.","expectedPatterns":["parseIndexedSource"]},
+    {"id":"S04","description":"C and C++ declarations","query":"Extract native functions, structs, fields, aliases and macros with Tree-sitter.","expectedPatterns":["parseNative"]},
+    {"id":"S05","description":"Python declarations","query":"Index Python classes, functions, decorators and import references.","expectedPatterns":["parsePython"]},
+    {"id":"S06","description":"JVM invocation edges","query":"Recover relationships between methods from compiled invocation instructions.","expectedPatterns":["indexClasses","readClassFile","invokes"]},
+    {"id":"S07","description":"Heuristic parsing fallback","query":"Recover named declarations and line ranges when the precise source parser cannot run.","expectedPatterns":["heuristicSource","readIndexedFile"]},
+    {"id":"S08","description":"Ollama embedding client","query":"Send a batch of code or natural-language strings to the model and normalize the returned vectors.","expectedPatterns":["OllamaEmbedding.embed"]},
+    {"id":"S09","description":"Dual vector creation","query":"Prepare separate semantic and source vectors for each indexed symbol in a file.","expectedPatterns":["VectorIndex.prepare"]},
+    {"id":"S10","description":"Vector similarity ranking","query":"Find the nearest indexed symbols by vector similarity while honoring the caller's allowed projects.","expectedPatterns":["VectorIndex.search"]},
+    {"id":"S11","description":"Writing vector state","query":"Persist completed embeddings for a file and record the embedding configuration used to create them.","expectedPatterns":["VectorIndex.put"]},
+    {"id":"S12","description":"Caller traversal","query":"Follow incoming call edges to find functions that invoke a selected symbol.","expectedPatterns":["CodeGraph.traverse","RepositoryIndex.traverse"]},
+    {"id":"S13","description":"Impact analysis","query":"Traverse callers, inheritance and type dependencies to estimate which code would be affected by a change.","expectedPatterns":["CodeGraph.traverse","RepositoryIndex.traverse"]},
+    {"id":"S14","description":"Repository indexing pipeline","query":"Coordinate scanning, parsing, graph extraction and embedding for a repository.","expectedPatterns":["RepositoryIndex.indexFiles"]},
+    {"id":"S15","description":"Incremental indexing","query":"Compare stored file fingerprints and skip source that has not changed since the last indexing run.","expectedPatterns":["RepositoryIndex.indexFiles"]},
+    {"id":"S16","description":"Source discovery","query":"Walk the repository tree, skip unsupported files and apply the selected language filters.","expectedPatterns":["RepositoryIndex.indexFiles","languageOf"]},
+    {"id":"S17","description":"Stable code-unit ID","query":"Hash the project, relative path, declaration type and qualified name to identify an indexed symbol.","expectedPatterns":["unitFactory"]},
+    {"id":"S18","description":"Stable project ID","query":"Derive the repository identifier from the canonical root directory when scheduling indexing.","expectedPatterns":["RepositoryIndex.startResolved"]},
+    {"id":"S19","description":"Spring authorization evidence","query":"Report Spring HTTP route mappings, authorization constraints and cited resource accesses.","expectedPatterns":["springAuthorizationEvidence"]},
+    {"id":"S20","description":"REST vector search","query":"Dispatch a natural-language embedding search request and return a page of code matches.","expectedPatterns":["handleHttpRequest","RepositoryIndex.vectorSearch"]},
+    {"id":"S21","description":"REST index submission","query":"Accept a repository index request and return a URL for polling its background progress.","expectedPatterns":["handleHttpRequest","RepositoryIndex.startResolved"]},
+    {"id":"S22","description":"Qualified symbol lookup","query":"Find an exact declaration by name within a repository and reject ambiguous global matches.","expectedPatterns":["RepositoryIndex.symbol"]},
+    {"id":"S23","description":"Locate a declaration by source position","query":"Return the most specific indexed symbol containing a given file and source line.","expectedPatterns":["RepositoryIndex.locate"]}
+  ],
+  "code": [
+    {"id":"C01","description":"Embed input batch","query":"async embed(inputs: string[], signal?: AbortSignal, onBatch?: (completedInputs: number) => void)","expectedPatterns":["OllamaEmbedding.embed"]},
+    {"id":"C02","description":"Dispatch source parser","query":"function parseIndexedSource(projectId: string, filePath: string, language: Language, source: string): IndexedSource","expectedPatterns":["parseIndexedSource"]},
+    {"id":"C03","description":"Hash a stable unit identity","query":"id: digest(projectId + filePath + kind + identityName),","expectedPatterns":["unitFactory","unitFactory.unit"]},
+    {"id":"C04","description":"Search vectors","query":"async search(mode: VectorMode, query: string, options: VectorSearchOptions, signal?: AbortSignal)","expectedPatterns":["VectorIndex.search"]},
+    {"id":"C05","description":"Detect source language","query":"function languageOf(file: string): IndexLanguage | undefined","expectedPatterns":["languageOf"]},
+    {"id":"C06","description":"Store prepared vectors","query":"put(projectId: string, file: string, entries: VectorEntry[])","expectedPatterns":["VectorIndex.put"]},
+    {"id":"C07","description":"Traverse relationships","query":"traverse(seed: string, query: GraphQuery, depth: number, limit = MAX_GRAPH_UNITS)","expectedPatterns":["CodeGraph.traverse"]},
+    {"id":"C08","description":"Submit directory indexing","query":"async start(input: string, languages: Set<IndexLanguage>, incremental: boolean, strategy: IndexStrategy = 'auto')","expectedPatterns":["RepositoryIndex.start"]}
+  ]
+}

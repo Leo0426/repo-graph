@@ -1,0 +1,60 @@
+<!doctype html>
+<!-- Disposable Wiki prototype. Compare editorial, reading-focused, and source-first layouts via ?variant=A|B|C. -->
+<!-- Cover prompt (built-in ImageGen): Create a wide 3:1 editorial illustration for the RepoGraph architecture field guide (web documentation), high-end studio photograph of a sculptural data flow: three separate thin rectangular slabs of frosted bluish-white glass float in an exploded stack, angled in elegant isometric perspective from lower left toward upper right, tiny etched circuit lines and a few crystalline node dots on their surfaces, hairline connection paths emerging around them. Soft cool pearl, silver-blue, faint lavender colors, subtle iridescence at cut edges, diffuse daylight, gentle contact shadows and calm abstract depth. Seamless very light periwinkle mist studio backdrop flowing slightly brighter top left; centered sculpture occupies roughly central 65% horizontally and central 75% vertically. Leave comfortable open space, especially at the extreme left and right. All objects contained within middle 70% height for a wide crop. Quiet and restrained technical editorial, with no black, no heavy contrast. Horizontal composition. Absolutely no text, no labels, no numbers, no logo, no borders, no UI, no watermark. -->
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Repository Wiki · RepoGraph Prototype</title>
+    <link rel="stylesheet" href="/wiki-prototype.css">
+    <script type="module" src="/wiki-prototype.js"></script>
+</head>
+<body>
+    <div class="window" id="prototype" data-variant="A" data-mode="document">
+        <header class="chrome">
+            <a class="brand" href="/" aria-label="Open RepoGraph workbench"><span class="brand-icon" data-icon="graph"></span><span>RepoGraph</span></a>
+            <div class="toolbar glass" role="group" aria-label="Wiki toolbar">
+                <button class="icon-button" id="toggle-outline" aria-label="Toggle outline" title="Toggle outline" aria-pressed="true" data-icon="sidebar"></button>
+                <span class="toolbar-divider"></span>
+                <button class="icon-button toolbar-back" id="previous-section" aria-label="Previous section" title="Previous section" data-icon="left"></button>
+                <button class="icon-button toolbar-forward" id="next-section" aria-label="Next section" title="Next section" data-icon="right"></button>
+                <button class="search-button" id="open-search" aria-label="Find in Wiki" aria-haspopup="dialog"><span data-icon="search"></span><span>Find in Wiki</span><kbd>⌘ K</kbd></button>
+            </div>
+            <div class="chrome-actions">
+                <button class="icon-button type-button" id="text-size" aria-label="Larger reading text" aria-pressed="false" title="Larger reading text">Aa</button>
+                <button class="icon-button" id="copy-link" aria-label="Copy preview link" title="Copy preview link" data-icon="share"></button>
+            </div>
+        </header>
+        <div id="layout" class="layout">
+            <aside class="outline" id="outline" aria-label="Document outline"></aside>
+            <main id="paper" class="paper" tabindex="-1"></main>
+            <aside class="inspector" id="inspector" aria-label="Source references"></aside>
+        </div>
+        <footer class="window-footer">
+            <span class="preview-source"><span class="status-dot"></span><span id="data-label">Preview document</span></span>
+            <div class="segmented glass" id="reading-modes" role="group" aria-label="Reading view">
+                <button data-mode="document" aria-pressed="true"><span data-icon="document"></span>Document</button>
+                <button data-mode="outline" aria-pressed="false"><span data-icon="list"></span>Outline</button>
+                <button data-mode="sources" aria-pressed="false"><span data-icon="code"></span>Sources</button>
+            </div>
+            <span class="version" id="document-version"></span>
+        </footer>
+    </div>
+
+    <nav class="variant-switcher" aria-label="Prototype variants">
+        <button class="icon-button" id="previous-variant" aria-label="Previous variant" data-icon="left"></button>
+        <span class="variant-caption"><span>LAYOUT STUDY</span><strong id="variant-label" aria-live="polite"></strong></span>
+        <button class="icon-button" id="next-variant" aria-label="Next variant" data-icon="right"></button>
+    </nav>
+
+    <dialog id="search-dialog" aria-labelledby="search-title">
+        <div class="search-header">
+            <label class="sr-only" id="search-title" for="search-field">Find in Wiki</label>
+            <span data-icon="search"></span><input id="search-field" type="search" placeholder="Find a section or source…" autocomplete="off">
+            <button class="icon-button" id="close-search" aria-label="Close search" data-icon="close"></button>
+        </div>
+        <div id="search-results" class="search-results"></div>
+    </dialog>
+    <p class="toast" role="status" id="feedback" hidden></p>
+</body>
+</html>

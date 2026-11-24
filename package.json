@@ -1,0 +1,40 @@
+{
+  "name": "repograph",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "start": "node dist/server.js",
+    "benchmark": "node dist/benchmark-cli.js",
+    "migrate:legacy": "node dist/migrate-legacy.js",
+    "prototype:wiki": "npm run build && scratch=$(mktemp -d) && trap 'rm -rf -- \"$scratch\"' EXIT && NODE_ENV=development REPOGRAPH_PROJECTS_ROOT=\"$PWD\" REPOGRAPH_DB_PATH=\"$scratch/index.db\" REPOGRAPH_ASSETS_ROOT=\"$scratch/assets\" REPOGRAPH_ACCESS_TOKEN=\"$(node -e 'process.stdout.write(require(\"node:crypto\").randomBytes(24).toString(\"hex\"))')\" REPOGRAPH_PORT=${REPOGRAPH_PORT:-4173} node dist/server.js",
+    "test": "npm run build && node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@vscode/tree-sitter-wasm": "0.3.1",
+    "bcryptjs": "3.0.3",
+    "busboy": "1.6.0",
+    "fflate": "0.8.3",
+    "packageurl-js": "2.0.1",
+    "pdfkit": "0.21.0",
+    "saxes": "6.0.0",
+    "smol-toml": "1.9.1",
+    "tar": "7.5.23",
+    "tree-sitter-c": "0.24.1",
+    "typescript": "5.9.3",
+    "yauzl": "3.4.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/busboy": "1.5.5",
+    "@types/node": "24.19.2",
+    "@types/pdfkit": "0.17.7",
+    "@types/yauzl": "3.4.0"
+  }
+}

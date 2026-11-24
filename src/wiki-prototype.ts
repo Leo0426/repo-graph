@@ -1,0 +1,501 @@
+// Disposable Wiki prototype. Three reading layouts on /?view=wiki&variant=A|B|C.
+import type { CodeUnit } from './source.js';
+import type { SummaryDocument, WikiSummaries } from './wiki.js';
+import type { SummaryCitation } from './wiki-facts.js';
+
+type WikiNode = ReturnType<WikiSummaries['tree']>[number];
+type ReadingMode = 'document' | 'outline' | 'sources';
+type Citation = SummaryCitation & { excerpt?: string[] };
+type Section = { title: string; body: string; citation?: number };
+
+const variants = ['A', 'B', 'C'] as const;
+const variantNames = { A: 'Editorial', B: 'Reading focus', C: 'Evidence desk' };
+const glyphs: Record<string, string> = {
+    graph: '<path d="m7 7 10 3M7 7l3 11m7-8-7 8"/><circle cx="5.5" cy="5.5" r="2.5"/><circle cx="18.5" cy="10.5" r="2.5"/><circle cx="10" cy="19" r="2.5"/>',
+    sidebar: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M9 5v14m-4-10h2m-2 3h2"/>',
+    left: '<path d="m15 5-7 7 7 7"/>', right: '<path d="m9 5 7 7-7 7"/>',
+    search: '<circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 4 4"/>',
+    share: '<path d="M12 15V3m-4 4 4-4 4 4M8 10H6a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-2"/>',
+    document: '<path d="M6 3h8l4 4v14H6zm8 0v5h4M9 12h6m-6 4h6"/>',
+    list: '<path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/>',
+    code: '<path d="m8 6-6 6 6 6m8-12 6 6-6 6m-2-14-4 16"/>',
+    arrow: '<path d="M6 18 18 6M8 6h10v10"/>', close: '<path d="m6 6 12 12m0-12L6 18"/>',
+    layers: '<path d="m12 3 9 5-9 5-9-5zm-9 9 9 5 9-5m-18 4 9 5 9-5"/>',
+    box: '<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9zm0 18v-9m8-4.5L12 12 4 7.5"/>',
+    link: '<path d="m9 15 6-6m-5-2 2-2a4 4 0 0 1 6 6l-2 2m-2 4-2 2a4 4 0 0 1-6-6l2-2"/>'
+};
+const sectionIcons = ['document', 'layers', 'graph', 'link'];
+const demo = {
+    title: 'Repository architecture',
+    lede: 'From source files to a queryable code graph. A field guide to the indexing pipeline and the evidence behind each answer.',
+    sections: [
+        { title: 'Overview', body: 'RepoGraph turns a source tree into a local map of symbols and relationships. It records each symbol alongside its file and line range, so a reader can follow an answer back to the code.' },
+        { title: 'Indexing pipeline', body: 'The repository index stores parsed files and their symbols in SQLite. A project’s first scan builds the index. Later scans compare file content and refresh the records for changed paths.', citation: 0 },
+        { title: 'Graph retrieval', body: 'Graph retrieval starts with matching symbols, then follows relationships such as callers and callees. The selected project defines the scope of the search.', citation: 1 },
+        { title: 'Source evidence', body: 'Context packs bring together source excerpts and their references within a character budget. Each reference gives the reader a concrete location to check.', citation: 2 }
+    ] satisfies Section[],
+    citations: [
+        { qualifiedName: 'RepositoryIndex', filePath: 'src/index.ts', startLine: 60, endLine: 63,
+            excerpt: ['export class RepositoryIndex {', '    private readonly jobs = new Set<Promise<IndexStatus>>();',
+                '    private readonly graph: CodeGraph;', '    private readonly vectors: VectorIndex;'] },
+        { qualifiedName: 'graphRag', filePath: 'src/retrieval.ts', startLine: 52, endLine: 55,
+            excerpt: ['export async function graphRag(repository: RepositoryIndex, query: string, options: GraphRagOptions, signal?: AbortSignal) {',
+                '    const { projectId, language, noTest, limit, depth } = options;', '    const omittedReasons: string[] = [];',
+                '    const candidates = new Map<string, RankedUnit>();'] },
+        { qualifiedName: 'contextPack', filePath: 'src/retrieval.ts', startLine: 141, endLine: 145,
+            excerpt: ['export function contextPack(', '    query: string, taskType: string, budget: number, retrieval: Awaited<ReturnType<typeof graphRag>>',
+                ') {', '    const { results, seedCount, keywordSeedCount, callGraphExpanded, impactExpanded } = retrieval;',
+                '    const omittedReasons = [...retrieval.omittedReasons];'] }
+    ] satisfies Citation[]
+};
+
+const byId = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+const windowPane = byId('prototype');
+const paper = byId('paper');
+const searchDialog = byId<HTMLDialogElement>('search-dialog');
+const searchField = byId<HTMLInputElement>('search-field');
+const narrowViewport = matchMedia('(max-width: 590px)');
+const initialParams = new URLSearchParams(location.search);
+const project = initialParams.get('project');
+let variant = variants.find(key => key === initialParams.get('variant')) ?? 'A';
+let mode: ReadingMode = 'document';
+let outlineOpen = true;
+let sectionIndex = 0;
+let sourceIndex = 0;
+let wiki: SummaryDocument | undefined;
+let tree: WikiNode[] = [];
+let dataLabel = 'Preview document';
+let currentExcerpt: { source: Citation; start: number; lines: string[] } | undefined;
+let sourceLoad: AbortController | undefined;
+let documentLoad: AbortController | undefined;
+let toastTimer: number | undefined;
+
+function node<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', label = '') {
+    const element = document.createElement(tag);
+    if (className) element.className = className;
+    if (label) element.textContent = label;
+    return element;
+}
+
+function addIcon(element: HTMLElement, name: string) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '1.65');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.innerHTML = glyphs[name];
+    element.append(svg);
+    return element;
+}
+
+function icon(name: string, className = '') {
+    const element = node('span', className);
+    element.dataset.icon = name;
+    return addIcon(element, name);
+}
+for (const element of document.querySelectorAll<HTMLElement>('[data-icon]')) addIcon(element, element.dataset.icon!);
+
+function sections(): Section[] { return wiki ? wiki.sections : demo.sections; }
+function citations(): Citation[] { return wiki ? wiki.citations : demo.citations; }
+function variantUrl() {
+    const url = new URL(location.href);
+    url.searchParams.set('variant', variant);
+    if (wiki) url.searchParams.set('document', wiki.id);
+    return url;
+}
+function plain(text: string) {
+    return text.replace(/\\([\\`*_{}\[\]()#+!|~])/g, '$1')
+        .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+}
+function notify(message: string) {
+    const feedback = byId('feedback');
+    feedback.textContent = message;
+    feedback.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(() => { feedback.hidden = true; }, 3300);
+}
+
+function outlineList() {
+    const list = node('ul', 'outline-list');
+    for (const [index, section] of sections().entries()) {
+        const row = node('li');
+        const button = node('button', 'outline-button');
+        button.dataset.section = String(index);
+        button.setAttribute('aria-current', index === sectionIndex ? 'location' : 'false');
+        button.append(icon(sectionIcons[index % sectionIcons.length]), node('span', '', section.title));
+        button.addEventListener('click', () => selectSection(index));
+        row.append(button);
+        list.append(row);
+    }
+    return list;
+}
+
+function appendOutline(container: HTMLElement) {
+    if (wiki && (tree.length > 1 || !tree.some(item => item.id === wiki?.id))) {
+        const select = node('select', 'wiki-picker');
+        select.setAttribute('aria-label', 'Wiki document');
+        select.append(...tree.map(item => new Option(item.name, item.id)));
+        if (!tree.some(item => item.id === wiki?.id)) select.append(new Option(wiki.title, wiki.id));
+        select.value = wiki.id;
+        select.addEventListener('change', () => { void loadDocument(select.value, true); });
+        container.append(select);
+    }
+    container.append(outlineList());
+}
+
+function article() {
+    const content = node('article', 'article');
+    const lead = node('header', 'article-lead');
+    const eyebrow = node('p', 'eyebrow');
+    eyebrow.append(icon('layers'), wiki?.level === 'PACKAGE' ? 'Repository Wiki / Module' : 'Repository Wiki / Architecture');
+    const title = node('h1', '', wiki?.title ?? demo.title);
+    if (wiki) {
+        const meta = node('p', 'article-meta');
+        meta.append(node('span', '', `Version ${wiki.docVersion}`),
+            node('span', '', new Date(wiki.generatedAt).toLocaleDateString(undefined, { dateStyle: 'medium' })),
+            node('span', '', wiki.status === 'PARTIAL' ? 'Partial summary' : 'Indexed summary'));
+        lead.append(eyebrow, title, meta);
+    } else {
+        lead.append(eyebrow, title, node('p', 'lede', demo.lede));
+    }
+    content.append(lead);
+    if (!wiki) {
+        const figure = node('figure', 'cover');
+        const cover = node('img');
+        cover.src = '/wiki-prototype-cover.jpg';
+        cover.alt = 'Three frosted glass plates linked by points and thin traces';
+        cover.width = 1600;
+        cover.height = 533;
+        figure.append(cover);
+        content.append(figure);
+    }
+    for (const [index, section] of sections().entries()) {
+        const fragment = node('section');
+        const heading = node('h2', '', section.title);
+        heading.id = `section-${index}`;
+        heading.tabIndex = -1;
+        fragment.setAttribute('aria-labelledby', heading.id);
+        fragment.append(heading);
+        if (section.body.startsWith('- ')) {
+            const list = node('ul');
+            list.append(...section.body.split('\n').map(line => node('li', '', plain(line.replace(/^- /, '')))));
+            fragment.append(list);
+        } else {
+            const paragraph = node('p', '', plain(section.body));
+            if (section.citation !== undefined) {
+                const reference = section.citation;
+                const button = node('button', 'inline-reference', String(reference + 1));
+                button.setAttribute('aria-label', `Show source ${citations()[reference].qualifiedName}`);
+                button.addEventListener('click', () => { void selectSource(reference, true); });
+                paragraph.append(' ', button);
+            }
+            fragment.append(paragraph);
+        }
+        content.append(fragment);
+    }
+    if (wiki?.missingInfo.length) {
+        const details = node('details');
+        const list = node('ul');
+        list.append(...wiki.missingInfo.map(reason => node('li', '', reason)));
+        details.append(node('summary', '', 'Missing information'), list);
+        content.append(details);
+    }
+    return content;
+}
+
+function codePanel(reference: Citation) {
+    const panel = node('div', 'code-panel');
+    const header = node('div', 'code-header');
+    const location = reference.startLine === reference.endLine ? `${reference.startLine}` : `${reference.startLine}–${reference.endLine}`;
+    header.append(icon('code'), `${reference.filePath}:${location}`);
+    panel.append(header);
+    const excerpt = currentExcerpt?.source === reference ? currentExcerpt : undefined;
+    const lines = reference.excerpt ?? excerpt?.lines;
+    if (lines?.length) {
+        const pre = node('pre');
+        const code = node('code');
+        code.append(...lines.map((text, index) => {
+            const line = node('span', 'code-line');
+            const number = node('span', 'line-number', String((excerpt?.start ?? reference.startLine) + index));
+            number.setAttribute('aria-hidden', 'true');
+            line.append(number, text);
+            return line;
+        }));
+        pre.append(code);
+        panel.append(pre);
+    }
+    return panel;
+}
+
+function referencePanel(full: boolean) {
+    const panel = node('div', full ? 'document-index' : 'inspector-inner');
+    const references = citations();
+    const heading = node('div', 'inspector-heading');
+    heading.append(node(full ? 'h1' : 'h2', full ? '' : 'rail-heading', 'Source references'), node('span', 'source-count', String(references.length)));
+    panel.append(heading);
+    if (!references.length) {
+        panel.append(node('p', 'no-sources', 'This document has no source references.'));
+        return panel;
+    }
+    const list = node('ul', 'source-list');
+    for (const [index, reference] of references.entries()) {
+        const row = node('li');
+        const button = node('button', 'source-button');
+        button.dataset.source = String(index);
+        button.title = `${reference.qualifiedName} · ${reference.filePath}:${reference.startLine}`;
+        button.setAttribute('aria-pressed', String(index === sourceIndex));
+        const label = node('span');
+        label.append(node('strong', 'source-name', reference.qualifiedName), node('span', 'source-path', `${reference.filePath}:${reference.startLine}`));
+        button.append(icon('code', 'source-icon'), label, icon('right'));
+        button.addEventListener('click', () => { void selectSource(index, false, true); });
+        row.append(button);
+        list.append(row);
+    }
+    const reference = references[sourceIndex];
+    panel.append(list, codePanel(reference));
+    if (wiki) {
+        const link = node('a', 'workbench-link');
+        link.href = workbenchUrl(wiki.projectId, reference);
+        link.append('Open in workbench', icon('arrow'));
+        panel.append(link);
+    }
+    return panel;
+}
+
+function workbenchUrl(projectId: string, reference: Citation) {
+    return '/?' + new URLSearchParams({ view: 'graph', project: projectId, file: reference.filePath, line: String(reference.startLine) });
+}
+
+function renderReferences(keepFocus = false) {
+    const pane = mode === 'sources' ? paper : byId('inspector');
+    const reference = citations()[sourceIndex];
+    if (!reference) return;
+    for (const button of pane.querySelectorAll<HTMLButtonElement>('[data-source]')) {
+        button.setAttribute('aria-pressed', String(Number(button.dataset.source) === sourceIndex));
+    }
+    pane.querySelector('.code-panel')?.replaceWith(codePanel(reference));
+    const link = pane.querySelector<HTMLAnchorElement>('.workbench-link');
+    if (link && wiki) link.href = workbenchUrl(wiki.projectId, reference);
+    if (keepFocus) {
+        const active = pane.querySelector<HTMLButtonElement>(`[data-source="${sourceIndex}"]`);
+        active?.focus({ preventScroll: true });
+        active?.scrollIntoView({ block: 'nearest' });
+    }
+}
+
+function updateSectionControls() {
+    byId<HTMLButtonElement>('previous-section').disabled = sectionIndex <= 0;
+    byId<HTMLButtonElement>('next-section').disabled = sectionIndex >= sections().length - 1;
+    for (const button of document.querySelectorAll<HTMLButtonElement>('[data-section]')) {
+        button.setAttribute('aria-current', Number(button.dataset.section) === sectionIndex ? 'location' : 'false');
+    }
+}
+
+function updateOutlineControl() {
+    const visible = mode === 'outline' || (mode === 'document' && variant !== 'C' && outlineOpen
+        && !(variant === 'A' && narrowViewport.matches));
+    byId('toggle-outline').setAttribute('aria-pressed', String(visible));
+}
+
+function render() {
+    windowPane.dataset.variant = variant;
+    windowPane.dataset.mode = mode;
+    windowPane.dataset.outline = outlineOpen ? 'open' : 'closed';
+    byId('variant-label').textContent = `${variant} · ${variantNames[variant]}`;
+    byId('data-label').textContent = dataLabel;
+    byId('document-version').textContent = wiki ? `v${wiki.docVersion}` : 'RepoGraph Wiki';
+    updateOutlineControl();
+    const readingModes = byId('reading-modes');
+    for (const button of readingModes.querySelectorAll<HTMLButtonElement>('button')) {
+        button.setAttribute('aria-pressed', String(button.dataset.mode === mode));
+    }
+    const rail = byId('outline');
+    rail.replaceChildren(node('h2', 'rail-heading', 'On this page'));
+    appendOutline(rail);
+    byId('inspector').replaceChildren(referencePanel(false));
+    if (mode === 'sources') paper.replaceChildren(referencePanel(true));
+    else if (mode === 'outline') {
+        const index = node('div', 'document-index');
+        index.append(node('h1', '', 'Document outline'));
+        appendOutline(index);
+        paper.replaceChildren(index);
+    } else paper.replaceChildren(article());
+    paper.scrollTo({ top: 0, behavior: 'instant' });
+    updateSectionControls();
+}
+
+function switchMode(next: ReadingMode) {
+    if (mode === next) return;
+    mode = next;
+    render();
+    if (next === 'document' && sectionIndex > 0) scrollToSection(sectionIndex, false);
+}
+
+function scrollToSection(index: number, focus: boolean) {
+    const heading = document.getElementById(`section-${index}`);
+    if (focus) heading?.focus({ preventScroll: true });
+    if (index === 0) paper.scrollTo({ top: 0 });
+    else heading?.parentElement?.scrollIntoView({ block: 'start' });
+}
+
+function selectSection(index: number) {
+    if (index < 0 || index >= sections().length) return;
+    sectionIndex = index;
+    if (mode !== 'document') {
+        mode = 'document';
+        render();
+    }
+    updateSectionControls();
+    scrollToSection(index, true);
+}
+
+async function readApi<T>(path: string, query: Record<string, string>, signal: AbortSignal): Promise<T> {
+    const response = await fetch(`/api/v1${path}?${new URLSearchParams(query)}`, { signal, redirect: 'error', cache: 'no-store' });
+    if (!response.ok) throw new Error(String(response.status));
+    return await response.json() as T;
+}
+
+async function selectSource(index: number, reveal: boolean, focus = false) {
+    const reference = citations()[index];
+    if (!reference) return;
+    sourceIndex = index;
+    if (reveal && (mode !== 'document' || getComputedStyle(byId('inspector')).display === 'none')) switchMode('sources');
+    renderReferences(focus || reveal);
+    if (!wiki) return;
+    sourceLoad?.abort();
+    const controller = new AbortController();
+    sourceLoad = controller;
+    try {
+        const unit = await readApi<CodeUnit>('/locate', { projectId: wiki.projectId, file: reference.filePath,
+            line: String(reference.startLine) }, controller.signal);
+        if (controller.signal.aborted || unit.qualifiedName !== reference.qualifiedName) return;
+        const offset = Math.max(0, reference.startLine - unit.startLine);
+        currentExcerpt = { source: reference, start: unit.startLine + offset, lines: unit.rawSource.split('\n').slice(offset, offset + 12) };
+        renderReferences();
+    } catch {
+        // The original citation remains available if the current index has moved on.
+    }
+}
+
+function changeVariant(direction: number) {
+    variant = variants[(variants.indexOf(variant) + direction + variants.length) % variants.length];
+    history.replaceState(null, '', variantUrl());
+    render();
+    if (mode === 'document' && sectionIndex > 0) scrollToSection(sectionIndex, false);
+}
+
+function renderSearch() {
+    const query = searchField.value.toLocaleLowerCase().trim();
+    const results = byId('search-results');
+    results.replaceChildren();
+    for (const [index, section] of sections().entries()) {
+        if (!`${section.title} ${section.body}`.toLocaleLowerCase().includes(query)) continue;
+        const button = node('button', 'outline-button');
+        button.append(icon('document'), node('span', '', section.title));
+        button.addEventListener('click', () => { searchDialog.close(); selectSection(index); });
+        results.append(button);
+    }
+    if (query) for (const [index, reference] of citations().entries()) {
+        if (!`${reference.qualifiedName} ${reference.filePath}`.toLocaleLowerCase().includes(query)) continue;
+        const button = node('button', 'outline-button');
+        button.append(icon('code'), node('span', '', reference.qualifiedName));
+        button.addEventListener('click', () => { searchDialog.close(); void selectSource(index, true); });
+        results.append(button);
+    }
+    if (!results.childElementCount) results.append(node('p', '', 'No matching sections or sources.'));
+}
+
+function openSearch() {
+    if (searchDialog.open) return;
+    searchField.value = '';
+    renderSearch();
+    searchDialog.showModal();
+    searchField.focus();
+}
+
+async function loadDocument(requested: string | null, replaceUrl: boolean) {
+    if (!project) return;
+    documentLoad?.abort();
+    const controller = new AbortController();
+    documentLoad = controller;
+    try {
+        tree = await readApi<WikiNode[]>('/summaries/tree', { projectId: project }, controller.signal);
+        const id = requested && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(requested) ? requested : tree[0]?.id;
+        if (!id) {
+            dataLabel = 'Preview · No indexed Wiki yet';
+            render();
+            return;
+        }
+        const document = await readApi<SummaryDocument>(`/summaries/${id}`, { projectId: project }, controller.signal);
+        if (controller.signal.aborted || document.projectId !== project) return;
+        sourceLoad?.abort();
+        currentExcerpt = undefined;
+        wiki = document;
+        sectionIndex = 0;
+        sourceIndex = 0;
+        dataLabel = 'Indexed Wiki';
+        if (replaceUrl) history.replaceState(null, '', variantUrl());
+        render();
+        void selectSource(0, false);
+    } catch (error) {
+        if (controller.signal.aborted) return;
+        if (wiki) notify('Could not open that Wiki document');
+        else {
+            dataLabel = error instanceof Error && error.message === '401' ? 'Preview · Sign in to load your Wiki' : 'Preview · Wiki unavailable';
+            render();
+        }
+    }
+}
+
+byId('previous-variant').addEventListener('click', () => changeVariant(-1));
+byId('next-variant').addEventListener('click', () => changeVariant(1));
+byId('previous-section').addEventListener('click', () => selectSection(sectionIndex - 1));
+byId('next-section').addEventListener('click', () => selectSection(sectionIndex + 1));
+narrowViewport.addEventListener('change', updateOutlineControl);
+byId('toggle-outline').addEventListener('click', () => {
+    if (variant === 'C' || mode !== 'document' || (variant === 'A' && narrowViewport.matches)) {
+        switchMode(mode === 'outline' ? 'document' : 'outline');
+    } else {
+        outlineOpen = !outlineOpen;
+        windowPane.dataset.outline = outlineOpen ? 'open' : 'closed';
+        updateOutlineControl();
+    }
+});
+for (const button of byId('reading-modes').querySelectorAll<HTMLButtonElement>('button[data-mode]')) {
+    button.addEventListener('click', () => switchMode(button.dataset.mode as ReadingMode));
+}
+byId('text-size').addEventListener('click', () => {
+    const large = windowPane.dataset.large !== 'true';
+    windowPane.dataset.large = String(large);
+    byId('text-size').setAttribute('aria-pressed', String(large));
+});
+byId('copy-link').addEventListener('click', async () => {
+    try {
+        await navigator.clipboard.writeText(variantUrl().href);
+        notify('Preview link copied');
+    } catch { notify('Copy the preview URL from the address bar'); }
+});
+byId('open-search').addEventListener('click', openSearch);
+byId('close-search').addEventListener('click', () => searchDialog.close());
+searchField.addEventListener('input', renderSearch);
+searchField.addEventListener('keydown', event => {
+    if (event.key === 'Enter') byId('search-results').querySelector('button')?.click();
+});
+document.addEventListener('keydown', event => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        openSearch();
+    }
+    if (event.altKey || event.metaKey || event.ctrlKey || event.shiftKey || searchDialog.open
+        || (event.target instanceof HTMLElement && event.target.closest('input, textarea, select, [contenteditable]'))) return;
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        event.preventDefault();
+        changeVariant(event.key === 'ArrowLeft' ? -1 : 1);
+    }
+});
+
+render();
+if (project) void loadDocument(initialParams.get('document'), false);

@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark light">
+    <title>RepoGraph</title>
+    <link rel="stylesheet" href="/workbench.css">
+    <script type="module" src="/workbench.js"></script>
+</head>
+<body>
+    <header class="login" id="login">
+        <div class="login-card">
+            <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>RepoGraph</span></div>
+            <h1 data-text="connectTitle">Connect to your workspace</h1>
+            <p data-text="connectDescription">Sign in with an approved account or a local administrator token.</p>
+            <form id="login-form">
+                <label><span data-text="method">Sign-in method</span><select id="login-method"><option value="account" data-text="account">Account</option><option value="token" data-text="token">Access token</option></select></label>
+                <div class="credential-fields" id="account-credentials">
+                    <label><span data-text="username">Username</span><input id="username" required maxlength="64" autocomplete="username"></label>
+                    <label><span data-text="password">Password</span><input id="password" type="password" required maxlength="72" autocomplete="current-password"></label>
+                </div>
+                <label id="token-credentials" hidden><span data-text="token">Access token</span><input id="token" type="password" autocomplete="off" disabled></label>
+                <button class="primary" type="submit" data-text="connect">Connect</button>
+            </form>
+            <p class="notice" id="login-status" role="status" hidden></p>
+            <details class="registration">
+                <summary data-text="register">Register an account</summary>
+                <form id="registration-form">
+                    <label><span data-text="username">Username</span><input id="register-username" required maxlength="64" autocomplete="username"></label>
+                    <label><span data-text="displayName">Display name</span><input id="register-name" required maxlength="100" autocomplete="name"></label>
+                    <label><span data-text="email">Email</span><input id="register-email" type="email" required maxlength="254" autocomplete="email"></label>
+                    <label><span data-text="password">Password</span><input id="register-password" type="password" minLength="12" maxlength="72" required autocomplete="new-password"></label>
+                    <button type="submit" data-text="submitRegistration">Submit for approval</button>
+                </form>
+                <p class="notice" id="registration-status" role="status" hidden></p>
+            </details>
+        </div>
+    </header>
+
+    <div class="shell" id="workspace" hidden>
+        <aside class="sidebar" id="sidebar">
+            <a class="brand" href="/" data-view="repositories"><span class="brand-mark" aria-hidden="true"></span><span>RepoGraph</span></a>
+            <nav data-aria="navigation" aria-label="Workspace navigation">
+                <p class="nav-label" data-text="workspace">Workspace</p>
+                <a href="/?view=repositories" data-view="repositories"><span class="nav-icon icon-repo" aria-hidden="true"></span><span data-text="repositories">Repositories</span></a>
+                <p class="nav-label" data-text="explore">Code intelligence</p>
+                <a href="/?view=search" data-view="search"><span class="nav-icon icon-search" aria-hidden="true"></span><span data-text="search">Search</span></a>
+                <a href="/?view=graph" data-view="graph"><span class="nav-icon icon-graph" aria-hidden="true"></span><span data-text="graph">Code graph</span></a>
+                <a href="/?view=evidence" data-view="evidence"><span class="nav-icon icon-evidence" aria-hidden="true"></span><span data-text="evidence">Evidence packs</span></a>
+                <a href="/?view=wiki" data-view="wiki"><span class="nav-icon icon-wiki" aria-hidden="true"></span><span data-text="wiki">Repository Wiki</span></a>
+                <a href="/?view=findings" data-view="findings"><span class="nav-icon icon-findings" aria-hidden="true"></span><span data-text="findings">External findings</span></a>
+                <a href="/?view=scan-history" data-view="scan-history"><span class="nav-icon icon-wiki" aria-hidden="true"></span><span data-text="scan-history">Scan history</span></a>
+                <a href="/?view=review-queue" data-view="review-queue"><span class="nav-icon icon-wiki" aria-hidden="true"></span><span data-text="review-queue">Review queue</span></a>
+                <a href="/?view=vulnerabilities" data-view="vulnerabilities"><span class="nav-icon icon-findings" aria-hidden="true"></span><span data-text="vulnerabilities">Vulnerability inventory</span></a>
+                <a href="/?view=triage-agent" data-view="triage-agent"><span class="nav-icon icon-evidence" aria-hidden="true"></span><span data-text="triage-agent">Triage agent</span></a>
+                <a href="/?view=change-review" data-view="change-review"><span class="nav-icon icon-evidence" aria-hidden="true"></span><span data-text="change-review">Change review</span></a>
+                <a href="/?view=benchmark" data-view="benchmark"><span class="nav-icon icon-findings" aria-hidden="true"></span><span data-text="benchmark">Retrieval benchmark</span></a>
+                <a href="/?view=admin" data-view="admin" id="admin-nav" hidden><span class="nav-icon icon-admin" aria-hidden="true"></span><span data-text="admin">Administration</span></a>
+            </nav>
+            <div class="sidebar-footer"><span class="status-dot" aria-hidden="true"></span><span data-text="local">Local workspace</span></div>
+        </aside>
+        <div class="app">
+            <header class="bar">
+                <button type="button" id="menu" class="menu" aria-expanded="false" aria-controls="sidebar" data-text="menu">Menu</button>
+                <div class="crumb"><span data-text="workspace">Workspace</span><span aria-hidden="true">/</span><strong id="current-view"></strong></div>
+                <div class="bar-actions">
+                    <label class="scope"><span class="sr-only" data-text="repository">Repository</span><select id="project"></select></label>
+                    <button id="language" type="button" title="Switch language">中文</button>
+                    <button id="theme" type="button" data-text="light">Light</button>
+                    <button id="account-button" type="button" data-text="account">Account</button>
+                    <button id="disconnect" type="button" data-text="disconnect">Disconnect</button>
+                </div>
+            </header>
+            <main id="main">
+                <p class="notice" id="connection-status" role="status" hidden></p>
+                <section id="view-repositories" aria-labelledby="repositories-title">
+                    <div class="page-header">
+                        <div><h1 id="repositories-title" data-text="repositories">Repositories</h1><p data-text="repositoriesAbout">Index a local repository to search its code and explore how it fits together.</p></div>
+                        <button id="refresh" type="button" data-text="refresh">Refresh list</button>
+                    </div>
+                    <div class="repo-layout">
+                        <section class="surface repo-surface" aria-labelledby="repository-list-title">
+                            <header class="surface-header"><h2 id="repository-list-title" data-text="repositoryList">Repository list</h2><span class="count" id="repo-count">0</span></header>
+                            <p class="notice repository-notice" id="repositories-status" role="status" hidden></p>
+                            <div id="repository-list"></div>
+                        </section>
+                        <section class="surface side-surface" id="index-section" aria-labelledby="index-title">
+                            <header class="surface-header"><h2 id="index-title" data-text="indexRepository">Index repository</h2></header>
+                            <form class="stack" id="index-form">
+                                <label><span data-text="directory">Repository directory</span><input id="directory" required placeholder="/path/to/repository" maxlength="4096"></label>
+                                <p class="hint" data-text="directoryHint">Use an absolute path inside the configured workspace root.</p>
+                                <label><span data-text="parseStrategy">Parsing strategy</span><select id="index-strategy">
+                                    <option value="auto" data-text="parseAuto">Automatic</option>
+                                    <option value="precise" data-text="parsePrecise">Precise</option>
+                                    <option value="heuristic" data-text="parseHeuristic">Heuristic</option>
+                                </select></label>
+                                <label class="check"><input id="index-bytecode" type="checkbox"><span data-text="includeBytecode">Include Java bytecode (.class and .jar)</span></label>
+                                <label class="check"><input id="rebuild" type="checkbox"><span data-text="rebuild">Rebuild the index</span></label>
+                                <button type="submit" class="primary" data-text="startIndex">Start indexing</button>
+                            </form>
+                            <div class="job" id="index-status" role="status" aria-live="polite" hidden></div>
+                            <details class="archive-upload">
+                                <summary data-text="archiveUpload">Import a source archive</summary>
+                                <form id="archive-form" class="stack">
+                                    <label><span data-text="archiveFile">ZIP, TAR.GZ or JAR file</span><input id="archive-file" type="file" accept=".zip,.tar.gz,.tgz,.jar" required></label>
+                                    <label><span data-text="parseStrategy">Parsing strategy</span><select id="archive-strategy">
+                                        <option value="auto" data-text="parseAuto">Automatic</option>
+                                        <option value="precise" data-text="parsePrecise">Precise</option>
+                                        <option value="heuristic" data-text="parseHeuristic">Heuristic</option>
+                                    </select></label>
+                                    <label class="check"><input id="archive-bytecode" type="checkbox"><span data-text="includeBytecode">Include Java bytecode (.class and .jar)</span></label>
+                                    <button type="submit" class="primary" data-text="importArchive">Import and index</button>
+                                </form>
+                                <div class="job" id="archive-status" role="status" aria-live="polite" hidden></div>
+                            </details>
+                        </section>
+                    </div>
+                </section>
+                <section id="view-overview" aria-labelledby="overview-title" hidden>
+                    <div class="page-header">
+                        <div><h1 id="overview-title" data-text="overview">Repository overview</h1><p class="mono" id="overview-root"></p></div>
+                        <button type="button" id="overview-search" data-text="openSearch">Open search</button>
+                    </div>
+                    <p class="notice" id="overview-status" role="status" hidden></p>
+                    <div class="watch-controls" id="watch-controls" hidden>
+                        <span id="watch-state" role="status"></span>
+                        <button type="button" id="watch-toggle" hidden></button>
+                    </div>
+                    <p class="notice" id="watch-status" role="status" hidden></p>
+                    <div id="overview-data"></div>
+                    <details class="surface quality-panel" id="quality-panel" hidden>
+                        <summary data-text="qualityTitle">Code quality</summary>
+                        <form id="quality-form" class="quality-controls">
+                            <label><span class="sr-only" data-text="qualityMeasure">Quality measure</span>
+                                <select id="quality-measure">
+                                    <option value="report" data-text="qualityReport">Health report</option>
+                                    <option value="architecture" data-text="architectureReview">Architecture review</option>
+                                    <option value="complexity" data-text="qualityComplexity">Complexity</option>
+                                    <option value="coupling" data-text="qualityCoupling">Coupling</option>
+                                    <option value="cycles" data-text="qualityCycles">Package cycles</option>
+                                    <option value="hotspots" data-text="qualityHotspots">Git hotspots</option>
+                                    <option value="deadcode" data-text="qualityDead">Uncalled candidates</option>
+                                    <option value="testgaps" data-text="qualityGaps">Test gaps</option>
+                                </select>
+                            </label>
+                            <button type="submit" data-text="qualityRead">Run analysis</button>
+                            <button type="button" id="export-dot" data-text="downloadDot">Download DOT</button>
+                            <button type="button" id="export-mermaid" data-text="downloadMermaid">Download Mermaid</button>
+                        </form>
+                        <p class="notice repository-notice" id="quality-status" role="status" hidden></p>
+                        <p class="notice repository-notice" id="graph-export-status" role="status" hidden></p>
+                        <div class="stack" id="quality-content"></div>
+                    </details>
+                    <section class="surface archive-profile" id="sbom-section" aria-labelledby="sbom-title" hidden>
+                        <header class="surface-header"><h2 id="sbom-title" data-text="sbomTitle">Dependency inventory</h2></header>
+                        <div class="sbom-actions">
+                            <button type="button" id="sbom-preview" data-text="sbomPreview">Generate SBOM</button>
+                            <button type="button" id="sbom-download" data-text="sbomDownload" hidden>Download CycloneDX JSON</button>
+                            <button type="button" id="dependency-scan" data-text="dependencyScan">Check Maven advisories</button>
+                        </div>
+                        <p class="notice repository-notice" id="sbom-status" role="status" hidden></p>
+                        <div id="sbom-content" class="stack"></div>
+                        <p class="notice repository-notice" id="dependency-scan-status" role="status" hidden></p>
+                        <div id="dependency-scan-content" class="stack"></div>
+                    </section>
+                    <section class="surface archive-profile" id="archive-profile" aria-labelledby="archive-profile-title" hidden>
+                        <header class="surface-header"><h2 id="archive-profile-title" data-text="archiveProfile">Archive profile</h2></header>
+                        <div class="stack" id="profile-content"></div>
+                        <p class="notice repository-notice" id="profile-status" role="status" hidden></p>
+                    </section>
+                </section>
+                <section id="view-search" aria-labelledby="search-title" hidden>
+                    <div class="page-header"><div><h1 id="search-title" data-text="search">Search</h1><p data-text="searchAbout">Find symbols, similar code, and related implementations.</p></div></div>
+                    <form id="search-form" class="surface query-form">
+                        <label class="field-grow"><span data-text="query">Search query</span><textarea id="query" rows="1" maxlength="4096" required data-placeholder="searchPlaceholder" placeholder="Function, code snippet, or behavior"></textarea></label>
+                        <label><span data-text="mode">Mode</span><select id="search-mode"><option value="keyword" data-text="keyword">Keyword</option><option value="semantic" data-text="semantic">Semantic</option><option value="code" data-text="similarity">Code similarity</option><option value="graphrag">GraphRAG</option></select></label>
+                        <label><span data-text="scope">Scope</span><select id="search-scope"><option value="current" data-text="current">Current repository</option><option value="all" data-text="all">All authorized repositories</option></select></label>
+                        <button type="submit" class="primary" data-text="find">Search</button>
+                    </form>
+                    <p class="notice" id="search-status" role="status" hidden></p>
+                    <div class="results" id="search-results"></div>
+                    <button id="next" type="button" data-text="next" hidden>Load more</button>
+                </section>
+                <section id="view-graph" aria-labelledby="graph-title" hidden>
+                    <div class="page-header"><div><h1 id="graph-title" data-text="graph">Code graph</h1><p data-text="graphAbout">Trace calls, type relationships, and source locations.</p></div></div>
+                    <form id="graph-form" class="surface query-form">
+                        <label class="field-grow"><span data-text="target">Symbol name or ID</span><input id="target" required maxlength="4096" data-placeholder="graphPlaceholder" placeholder="e.g. Service.handle"></label>
+                        <label><span data-text="relation">Relationship</span><select id="relation"><option value="callers" data-text="callers">Callers</option><option value="callees" data-text="callees">Callees</option><option value="subtypes" data-text="subtypes">Subtypes</option><option value="impact" data-text="impact">Change impact</option></select></label>
+                        <label><span data-text="depth">Depth</span><select id="depth"><option>1</option><option>2</option><option>3</option><option>5</option><option>12</option></select></label>
+                        <button type="submit" class="primary" data-text="trace">Trace relationships</button>
+                        <button type="button" id="flow-analyze" data-text="flowAnalyze">Analyze flow</button>
+                    </form>
+                    <p class="notice" id="graph-status" role="status" hidden></p>
+                    <div id="graph-results"></div>
+                    <details class="surface locate"><summary data-text="locate">Locate source by file and line</summary>
+                        <form id="locate-form" class="query-form">
+                            <label class="field-grow"><span data-text="file">Relative path</span><input id="file" required maxlength="4096" placeholder="src/main.ts"></label>
+                            <label id="locate-archive" hidden><span data-text="archiveEntry">JAR entry</span><input id="locate-archive-entry" maxlength="4096" placeholder="com/example/Service.class"></label>
+                            <label><span data-text="line">Line</span><input id="line" type="number" min="1" step="1" value="1" required></label>
+                            <button type="submit" data-text="openSource">Open source</button>
+                        </form>
+                        <p class="notice" id="locate-status" role="status" hidden></p>
+                    </details>
+                </section>
+                <section id="view-evidence" aria-labelledby="evidence-title" hidden>
+                    <div class="page-header"><div><h1 id="evidence-title" data-text="evidence">Evidence packs</h1><p data-text="evidenceAbout">Collect related source excerpts with repository, file, and line citations.</p></div></div>
+                    <form id="evidence-form" class="surface query-form">
+                        <label class="field-grow"><span data-text="query">Search query</span><input id="evidence-query" required maxlength="4096" data-placeholder="evidencePlaceholder" placeholder="Describe the context you need"></label>
+                        <label><span data-text="budget">Character budget</span><input id="budget" type="number" min="1000" max="60000" step="1" value="12000" required></label>
+                        <button type="submit" class="primary" data-text="buildPack">Build pack</button>
+                    </form>
+                    <p class="notice" id="evidence-status" role="status" hidden></p>
+                    <div class="results" id="evidence-results"></div>
+                </section>
+                <section id="view-wiki" aria-labelledby="wiki-title" hidden>
+                    <div class="page-header">
+                        <div><h1 id="wiki-title" data-text="wiki">Repository Wiki</h1><p data-text="wikiAbout">Browse indexed modules, entry points, and their source references.</p></div>
+                        <button id="wiki-generate" type="button" class="primary" data-text="wikiGenerate">Generate summaries</button>
+                    </div>
+                    <p class="notice" id="wiki-status" role="status" hidden></p>
+                    <p class="notice" id="wiki-generation-status" role="status" hidden></p>
+                    <details class="surface wiki-run" id="wiki-run" hidden>
+                        <summary data-text="wikiRun">Generation steps</summary>
+                        <div id="wiki-steps" class="stack"></div>
+                    </details>
+                    <section class="surface" id="wiki-document" aria-labelledby="wiki-document-title" hidden>
+                        <div class="wiki-header surface-header">
+                            <h2 id="wiki-document-title"></h2>
+                            <label><span class="sr-only" data-text="wikiChoose">Wiki document</span><select id="wiki-select"></select></label>
+                            <a id="wiki-export" data-text="downloadMarkdown">Download Markdown</a>
+                        </div>
+                        <div class="stack wiki-body" id="wiki-content"></div>
+                    </section>
+                </section>
+                <section id="view-findings" aria-labelledby="findings-title" hidden>
+                    <header class="page-header"><div><h1 id="findings-title" data-text="findings">External findings</h1>
+                        <p data-text="findingsAbout">Import a scan report and compare its findings with the indexed source.</p></div></header>
+                    <form id="findings-form" class="surface stack">
+                        <div class="change-versions">
+                            <label><span data-text="findingFormat">Report format</span><select id="findings-format">
+                                <option value="semgrep">Semgrep JSON</option><option value="sarif">SARIF</option><option value="codeql">CodeQL SARIF</option>
+                                <option value="slither">Slither JSON</option>
+                            </select></label>
+                            <label><span data-text="findingVersion">Report code version (optional)</span><input id="findings-version" maxlength="256"></label>
+                            <label><span data-text="findingRuleVersion">Report rule version (optional)</span><input id="findings-rule-version" maxlength="256"></label>
+                        </div>
+                        <label><span data-text="findingFile">Report file</span><input id="findings-file" type="file" accept=".json,.sarif,application/json,application/sarif+json" required></label>
+                        <div class="change-actions"><button type="submit" class="primary" data-text="findingImport">Import report</button></div>
+                    </form>
+                    <p class="notice" id="finding-import-status" role="status" hidden></p>
+                    <p class="notice" id="finding-list-status" role="status" hidden></p>
+                    <section class="surface change-result" id="finding-detail" aria-labelledby="finding-detail-title" hidden>
+                        <header class="surface-header"><h2 id="finding-detail-title" data-text="findingDetails">Finding detail</h2></header>
+                        <div class="stack" id="finding-detail-content"></div>
+                        <div class="stack" id="finding-advisory-panel" hidden>
+                            <div class="change-actions"><button type="button" id="finding-advisory-button" data-text="advisoryAction">Request model review</button></div>
+                            <p class="notice" id="finding-advisory-status" role="status" hidden></p>
+                            <div id="finding-advisory-content" aria-live="polite" hidden></div>
+                        </div>
+                    </section>
+                    <p class="notice" id="finding-detail-status" role="status" hidden></p>
+                    <p class="notice" id="finding-feedback-status" role="status" hidden></p>
+                    <p class="notice" id="queue-submit-status" role="status" hidden></p>
+                    <p class="notice" id="vuln-seed-status" role="status" hidden></p>
+                    <div class="surface change-result" id="finding-list" hidden>
+                        <div id="finding-list-content" class="stack"></div>
+                        <div class="finding-list-nav"><button type="button" id="findings-previous" data-text="findingPrevious">Previous page</button>
+                            <button type="button" id="findings-next" data-text="findingNext">Next page</button></div>
+                    </div>
+                </section>
+                <section id="view-scan-history" aria-labelledby="scan-history-title" hidden>
+                    <header class="page-header"><div><h1 id="scan-history-title" data-text="scan-history">Scan history</h1>
+                        <p data-text="scanHistoryAbout">Browse scan tasks, tool runs, and findings.</p></div></header>
+                    <p class="notice" id="scan-history-status" role="status" hidden></p>
+                    <div class="stack" id="scan-history-content"></div>
+                </section>
+                <section id="view-review-queue" aria-labelledby="review-queue-title" hidden>
+                    <header class="page-header"><div><h1 id="review-queue-title" data-text="review-queue">Review queue</h1>
+                        <p data-text="queueAbout">Review frozen findings and record decisions.</p></div></header>
+                    <section class="surface" id="queue-detail" aria-labelledby="queue-detail-title" hidden>
+                        <header class="surface-header queue-actions"><h2 id="queue-detail-title" data-text="queueFrozen">Frozen report</h2>
+                            <div class="change-actions">
+                                <a id="queue-download-json" data-text="downloadJson">Download JSON</a>
+                                <a id="queue-download-markdown" data-text="downloadMarkdown">Download Markdown</a>
+                                <a id="queue-download-pdf" data-text="queueDownloadPdf">Download PDF</a>
+                            </div></header>
+                        <p class="notice repository-notice" id="queue-transition-status" role="status" hidden></p>
+                        <div class="stack" id="queue-detail-content"></div>
+                        <div class="stack" id="queue-advisory-panel" hidden>
+                            <div class="change-actions"><button type="button" id="queue-advisory-button" data-text="advisoryAction">Request model review</button></div>
+                            <p class="notice" id="queue-advisory-status" role="status" hidden></p>
+                            <div id="queue-advisory-content" aria-live="polite" hidden></div>
+                        </div>
+                    </section>
+                    <p class="notice" id="queue-detail-status" role="status" hidden></p>
+                    <div class="surface change-result">
+                        <div class="queue-actions quality-controls">
+                            <label><span data-text="queueStatus">Review status</span><select id="queue-filter">
+                                <option value="" data-text="all">All</option><option value="PENDING" data-text="PENDING">Pending review</option>
+                                <option value="IN_REVIEW" data-text="IN_REVIEW">In review</option><option value="CONFIRMED" data-text="CONFIRMED">Confirmed</option>
+                                <option value="REJECTED" data-text="REJECTED">Rejected</option>
+                            </select></label>
+                            <label><span data-text="queueExportFormat">Export format</span><select id="queue-export-format">
+                                <option value="json">JSON</option><option value="markdown">Markdown</option><option value="pdf">PDF</option>
+                            </select></label>
+                            <button id="queue-batch" type="button" data-text="queueBatch" disabled>Download selected snapshots</button>
+                        </div>
+                        <p class="notice repository-notice" id="queue-list-status" role="status" hidden></p>
+                        <p class="notice repository-notice" id="queue-batch-status" role="status" hidden></p>
+                        <div class="stack" id="queue-list-content"></div>
+                        <div class="finding-list-nav"><button type="button" id="queue-previous" data-text="findingPrevious" disabled>Previous page</button>
+                            <button type="button" id="queue-next" data-text="findingNext" disabled>Next page</button></div>
+                    </div>
+                </section>
+                <section id="view-vulnerabilities" aria-labelledby="vulnerabilities-title" hidden>
+                    <header class="page-header"><div><h1 id="vulnerabilities-title" data-text="vulnerabilities">Vulnerability inventory</h1>
+                        <p data-text="vulnAbout">Track recorded findings and their review history.</p></div></header>
+                    <section class="surface" id="vuln-detail" aria-labelledby="vuln-detail-title" hidden>
+                        <header class="surface-header"><h2 id="vuln-detail-title" data-text="findingDetails">Finding detail</h2></header>
+                        <p class="notice repository-notice" id="vuln-transition-status" role="status" hidden></p>
+                        <div class="stack" id="vuln-detail-content"></div>
+                    </section>
+                    <p class="notice" id="vuln-detail-status" role="status" hidden></p>
+                    <div class="surface change-result">
+                        <div class="quality-controls">
+                            <button id="code-scan" type="button" data-text="codeScan">Check indexed source</button>
+                            <button id="taint-scan" type="button" data-text="taintScan">Trace request parameters</button>
+                            <label><span data-text="queueStatus">Review status</span><select id="vuln-filter">
+                                <option value="" data-text="all">All</option><option value="SUSPECTED" data-text="SUSPECTED">Suspected</option>
+                                <option value="CONFIRMED" data-text="CONFIRMED">Confirmed</option><option value="FIXED" data-text="FIXED">Fixed</option>
+                                <option value="DISMISSED" data-text="DISMISSED">Dismissed</option>
+                            </select></label>
+                            <label><span data-text="findingSeverity">Severity</span><select id="vuln-severity">
+                                <option value="" data-text="all">All</option><option value="CRITICAL">CRITICAL</option><option value="HIGH">HIGH</option>
+                                <option value="MEDIUM">MEDIUM</option><option value="LOW">LOW</option><option value="INFO">INFO</option><option value="UNKNOWN">UNKNOWN</option>
+                            </select></label>
+                        </div>
+                        <p class="notice repository-notice" id="inventory-scan-status" role="status" hidden></p>
+                        <p class="notice repository-notice" id="vuln-list-status" role="status" hidden></p>
+                        <div class="stack" id="vuln-list-content"></div>
+                        <div class="finding-list-nav"><button id="vuln-previous" type="button" data-text="findingPrevious" disabled>Previous page</button>
+                            <button id="vuln-next" type="button" data-text="findingNext" disabled>Next page</button></div>
+                    </div>
+                </section>
+                <section id="view-triage-agent" aria-labelledby="triage-agent-title" hidden>
+                    <header class="page-header"><div><h1 id="triage-agent-title" data-text="triage-agent">Triage agent</h1>
+                        <p data-text="triageAbout">Analyze recorded findings and send the captured evidence for human review.</p></div>
+                        <button type="button" id="triage-refresh" data-text="refresh">Refresh</button></header>
+                    <details class="surface" id="triage-setup" open>
+                        <summary><span data-text="triagePrepare">Prepare triage</span><span id="triage-setup-selection" class="hint"></span></summary>
+                        <form class="stack" id="triage-form">
+                            <label><span data-text="triageInput">Source</span><select id="triage-mode">
+                                <option value="upload" data-text="triageUpload">Scan report</option>
+                                <option value="finding" data-text="triageFinding">Imported finding</option>
+                                <option value="vulnerability" data-text="triageVulnerability">Inventory record</option>
+                            </select></label>
+                            <div class="change-versions" id="triage-upload-fields">
+                                <label><span data-text="findingFormat">Report format</span><select id="triage-format">
+                                    <option value="semgrep">Semgrep JSON</option><option value="sarif">SARIF</option><option value="codeql">CodeQL SARIF</option>
+                                    <option value="slither">Slither JSON</option>
+                                </select></label>
+                                <label><span data-text="findingFile">Report file</span><input type="file" id="triage-file"
+                                    accept=".json,.sarif,application/json,application/sarif+json" required></label>
+                            </div>
+                            <label id="triage-target-fields" hidden><span data-text="triageTarget">Record</span><select id="triage-target" disabled required></select></label>
+                            <p class="notice" id="triage-targets-status" role="status" hidden></p>
+                            <details id="triage-advanced"><summary data-text="triageAdvanced">Version and evidence budget</summary>
+                                <div class="change-versions">
+                                    <label id="triage-code-field"><span data-text="findingVersion">Report code version (optional)</span><input id="triage-code-version" maxlength="256"></label>
+                                    <label id="triage-rule-field"><span data-text="findingRuleVersion">Report rule version (optional)</span><input id="triage-rule-version" maxlength="256"></label>
+                                    <label><span data-text="triageBudget">Evidence character limit</span><input id="triage-budget" type="number" min="1000" max="60000" value="12000"></label>
+                                </div>
+                            </details>
+                            <div class="change-actions"><button type="submit" class="primary" id="triage-start" data-text="triageStart">Start triage</button></div>
+                            <p class="notice" id="triage-submit-status" role="status" hidden></p>
+                        </form>
+                    </details>
+                    <section class="surface change-result" id="triage-run" aria-labelledby="triage-run-title" hidden>
+                        <header class="surface-header queue-actions"><h2 id="triage-run-title" tabindex="-1" data-text="triageTimeline">Run timeline</h2>
+                            <span class="kind" id="triage-run-state" role="status"></span></header>
+                        <div class="stack">
+                            <p class="mono hint" id="triage-run-reference"></p>
+                            <p class="hint" id="triage-run-history-note" hidden></p>
+                            <div class="change-actions">
+                                <a id="triage-open-review" data-text="queueFrozen" hidden>Frozen report</a>
+                                <a id="triage-export" data-text="downloadJson">Download JSON</a>
+                                <button type="button" id="triage-cancel" data-text="changeModelCancel" hidden>Cancel run</button>
+                            </div>
+                            <p class="notice" id="triage-cancel-status" role="status" hidden></p>
+                            <div id="triage-steps"></div>
+                        </div>
+                    </section>
+                    <p class="notice" id="triage-run-status" role="status" hidden></p>
+                    <section class="surface change-result" aria-labelledby="triage-runs-title">
+                        <header class="surface-header"><h2 id="triage-runs-title" data-text="triageHistory">Recent runs</h2></header>
+                        <p class="notice repository-notice" id="triage-runs-status" role="status" hidden></p>
+                        <ul class="stack triage-runs" id="triage-run-list"></ul>
+                    </section>
+                </section>
+                <section id="view-change-review" aria-labelledby="change-review-title" hidden>
+                    <div class="page-header"><div><h1 id="change-review-title" data-text="change-review">Change review</h1>
+                        <p data-text="changeAbout">Submit a unified diff to capture evidence from the current repository index.</p></div></div>
+                    <form id="change-form" class="surface stack">
+                        <div class="change-versions">
+                            <label><span data-text="changeBase">Base version</span><input id="change-base" maxlength="256" autocomplete="off"></label>
+                            <label><span data-text="changeTarget">Target version</span><input id="change-target" maxlength="256" autocomplete="off"></label>
+                        </div>
+                        <label><span data-text="changeDiff">Unified diff</span><textarea class="mono" id="change-diff" rows="9" required maxlength="2000000" spellcheck="false"></textarea></label>
+                        <div class="change-actions"><button type="submit" class="primary" data-text="changeSubmit">Create snapshot</button></div>
+                    </form>
+                    <p class="notice" id="change-status" role="status" hidden></p>
+                    <section class="surface change-result" id="change-snapshot" aria-labelledby="change-result-title" hidden>
+                        <header class="surface-header"><h2 id="change-result-title" data-text="changeSnapshot">Review snapshot</h2>
+                            <div class="change-actions">
+                                <a id="change-link" href="/" data-text="changeLink">Snapshot link</a>
+                                <button id="change-export-json" type="button" data-text="downloadJson">Download JSON</button>
+                                <button id="change-export-md" type="button" data-text="downloadMarkdown">Download Markdown</button>
+                                <button id="change-model-start" type="button" data-text="changeModelStart">Run model review</button>
+                            </div></header>
+                        <p class="notice repository-notice" id="change-export-status" role="status" hidden></p>
+                        <p class="notice repository-notice" id="change-model-status" role="status" hidden></p>
+                        <p class="notice repository-notice" id="change-cancel-status" role="status" hidden></p>
+                        <div class="stack" id="change-run" hidden>
+                            <div class="change-actions">
+                                <strong data-text="changeModelRun">Model review</strong>
+                                <span class="kind" id="change-model-state"></span>
+                                <button id="change-model-cancel" type="button" data-text="changeModelCancel">Cancel run</button>
+                            </div>
+                            <div id="change-run-steps"></div>
+                        </div>
+                        <div class="stack" id="change-results"></div>
+                    </section>
+                </section>
+                <section id="view-benchmark" aria-labelledby="benchmark-title" hidden>
+                    <header class="page-header benchmark-header">
+                        <div><h1 id="benchmark-title" data-text="benchmark">Retrieval benchmark</h1>
+                            <p data-text="benchmarkAbout">Review the latest saved results from the benchmark’s source repository.</p></div>
+                        <button id="benchmark-refresh" type="button" data-text="benchmarkRefresh">Read latest results</button>
+                    </header>
+                    <p class="notice" id="benchmark-status" role="status" hidden></p>
+                    <div id="benchmark-content" class="benchmark-content" aria-busy="false"></div>
+                </section>
+                <section id="view-admin" aria-labelledby="admin-title" hidden>
+                    <div class="page-header">
+                        <div><h1 id="admin-title" data-text="admin">Administration</h1><p data-text="adminAbout">Review accounts and manage access to indexed repositories.</p></div>
+                        <button type="button" id="admin-refresh" data-text="refresh">Refresh list</button>
+                    </div>
+                    <p class="notice" id="admin-status" role="status" hidden></p>
+                    <p class="notice" id="admin-write-status" role="status" hidden></p>
+                    <div class="admin-layout">
+                        <section class="surface">
+                            <header class="surface-header"><h2 data-text="accounts">Accounts</h2></header>
+                            <div id="account-list" class="admin-list"></div>
+                            <form id="review-form" class="stack">
+                                <label><span data-text="account">Account</span><select id="review-account" required></select></label>
+                                <label><span data-text="decision">Decision</span><select id="review-decision" required></select></label>
+                                <label><span data-text="reason">Reason</span><input id="review-reason" required maxlength="500"></label>
+                                <button type="submit" class="primary" data-text="saveReview">Save review</button>
+                            </form>
+                        </section>
+                        <section class="surface">
+                            <header class="surface-header"><h2 data-text="organizations">Organizations</h2></header>
+                            <form id="organization-form" class="stack">
+                                <label><span data-text="organization">Organization</span><select id="managed-org"></select></label>
+                                <label><span data-text="organizationName">Organization name</span><input id="org-name" maxlength="100" required></label>
+                                <label class="check"><input id="org-active" type="checkbox" checked><span data-text="active">Active</span></label>
+                                <button type="submit" class="primary" data-text="saveOrganization">Save organization</button>
+                            </form>
+                            <form id="membership-form" class="stack" hidden>
+                                <div id="members-list"></div>
+                                <label><span data-text="account">Account</span><select id="member-account" required></select></label>
+                                <label class="check"><input id="member-present" type="checkbox"><span data-text="member">Organization member</span></label>
+                                <button type="submit" data-text="saveMembership">Save membership</button>
+                            </form>
+                            <p class="notice repository-notice" id="admin-members-status" role="status" hidden></p>
+                        </section>
+                        <section class="surface">
+                            <header class="surface-header"><h2 data-text="ownership">Repository ownership</h2></header>
+                            <form id="owner-form" class="stack">
+                                <label><span data-text="repository">Repository</span><select id="owner-project" required></select></label>
+                                <p id="current-owner" class="hint"></p>
+                                <label><span data-text="ownerType">Owner type</span><select id="owner-type"><option value="PERSONAL" data-text="personal">Personal</option><option value="ORGANIZATION" data-text="organization">Organization</option></select></label>
+                                <label><span data-text="owner">Owner</span><select id="owner-target" required></select></label>
+                                <button type="submit" class="primary" data-text="assign">Assign repository</button>
+                            </form>
+                        </section>
+                        <section class="surface">
+                            <header class="surface-header"><h2 data-text="audit">Management audit</h2></header>
+                            <div id="audit-list" class="admin-list"></div>
+                        </section>
+                    </div>
+                    <details class="surface provider-panel" id="provider-panel">
+                        <summary data-text="generationProviders">Generation providers</summary>
+                        <p class="notice repository-notice" id="provider-list-status" role="status" hidden></p>
+                        <form id="provider-form" class="stack" hidden>
+                            <label><span data-text="providerProfile">Profile</span><select id="provider-profile"></select></label>
+                            <div class="provider-fields">
+                                <label><span data-text="providerName">Name</span><input id="provider-name" maxlength="100" required></label>
+                                <label><span data-text="providerProtocol">Protocol</span><select id="provider-protocol">
+                                    <option value="OLLAMA">Ollama</option><option value="OPENAI">OpenAI</option>
+                                    <option value="OPENAI_COMPATIBLE">OpenAI compatible</option><option value="ANTHROPIC">Anthropic</option>
+                                </select></label>
+                                <label><span data-text="providerUrl">Base URL</span><input id="provider-url" type="url" maxlength="500" required></label>
+                                <label><span data-text="providerModel">Model ID</span><input id="provider-model" list="provider-models" maxlength="200" required><datalist id="provider-models"></datalist></label>
+                                <label><span data-text="providerKey">API key</span><input id="provider-key" type="password" autocomplete="new-password" maxlength="8192"></label>
+                                <label><span data-text="providerTimeout">Timeout (ms)</span><input id="provider-timeout" type="number" min="1000" max="600000" required></label>
+                                <label><span data-text="providerTokens">Output token limit</span><input id="provider-tokens" type="number" min="1" max="65536" required></label>
+                                <label><span data-text="providerInputPrice">Input USD per million tokens</span><input id="provider-input-price" type="number" min="0" max="1000000" step="any"></label>
+                                <label><span data-text="providerOutputPrice">Output USD per million tokens</span><input id="provider-output-price" type="number" min="0" max="1000000" step="any"></label>
+                            </div>
+                            <div class="provider-actions">
+                                <label class="check"><input id="provider-enabled" type="checkbox"><span data-text="active">Active</span></label>
+                                <label class="check"><input id="provider-clear-key" type="checkbox"><span data-text="providerClearKey">Clear saved key</span></label>
+                                <span id="provider-key-state" class="hint"></span>
+                            </div>
+                            <div class="provider-actions">
+                                <button type="submit" class="primary" data-text="providerSave">Save profile</button>
+                                <button type="button" id="provider-discover" data-text="providerDiscover">Discover models</button>
+                                <button type="button" id="provider-test" data-text="providerTest">Test saved profile</button>
+                                <button type="button" id="provider-select" data-text="providerSelect">Select saved profile</button>
+                                <button type="button" id="provider-delete" data-text="providerDelete">Delete profile</button>
+                            </div>
+                        </form>
+                        <p class="notice repository-notice" id="provider-write-status" role="status" hidden></p>
+                    </details>
+                </section>
+            </main>
+        </div>
+    </div>
+    <dialog id="source-dialog" class="source-dialog" aria-labelledby="source-title">
+        <header class="surface-header"><div><h2 id="source-title"></h2><p id="source-path"></p></div><form method="dialog"><button type="submit" data-text="close">Close</button></form></header>
+        <div class="source-actions"><a id="source-link" href="/" data-text="sourceLink">Source link</a><button id="copy" type="button" data-text="copy">Copy source</button><span id="copy-status" role="status"></span></div>
+        <pre id="source-content" tabindex="0"></pre>
+    </dialog>
+    <dialog id="account-dialog" class="source-dialog account-dialog" aria-labelledby="account-title">
+        <header class="surface-header"><div><h2 id="account-title" data-text="account">Account</h2><p id="account-details"></p></div><form method="dialog"><button type="submit" data-text="close">Close</button></form></header>
+        <form id="password-form" class="stack">
+            <label><span data-text="oldPassword">Current password</span><input id="old-password" type="password" required maxlength="72" autocomplete="current-password"></label>
+            <label><span data-text="newPassword">New password</span><input id="new-password" type="password" required minLength="12" maxlength="72" autocomplete="new-password"></label>
+            <button type="submit" class="primary" data-text="changePassword">Change password</button>
+        </form>
+        <p class="notice repository-notice" id="password-status" role="status" hidden></p>
+    </dialog>
+</body>
+</html>

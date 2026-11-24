@@ -1,0 +1,204 @@
+[
+  {
+    "ruleId": "host-ssh-protocol-2",
+    "dimension": "HOST_BASELINE",
+    "name": "SSH 仅使用协议版本 2",
+    "basis": "主机安全基线—远程服务加固",
+    "severity": "HIGH",
+    "remediation": "设置 Protocol 为 2，禁用不安全的协议版本 1",
+    "matcher": {
+      "type": "PRESENT",
+      "key": "Protocol",
+      "valuePattern": "^2$"
+    }
+  },
+  {
+    "ruleId": "host-ssh-x11-forwarding",
+    "dimension": "HOST_BASELINE",
+    "name": "禁止 SSH X11 转发",
+    "basis": "主机安全基线—远程服务加固",
+    "severity": "MEDIUM",
+    "remediation": "将 X11Forwarding 设置为 no",
+    "matcher": {
+      "type": "FORBIDDEN",
+      "key": "X11Forwarding"
+    }
+  },
+  {
+    "ruleId": "host-password-reuse",
+    "dimension": "HOST_BASELINE",
+    "name": "口令历史记忆不少于 5 次",
+    "basis": "主机安全基线—口令策略",
+    "severity": "MEDIUM",
+    "remediation": "设置 PASSWORD_HISTORY 为不小于 5 的整数",
+    "matcher": {
+      "type": "PRESENT",
+      "key": "PASSWORD_HISTORY",
+      "valuePattern": "^([5-9]|[1-9][0-9]+)$"
+    }
+  },
+  {
+    "ruleId": "host-ssh-idle-interval",
+    "dimension": "HOST_BASELINE",
+    "name": "SSH 空闲心跳间隔已配置",
+    "basis": "主机安全基线—会话管理",
+    "severity": "LOW",
+    "remediation": "设置 ClientAliveInterval 为 1~9999 的整数（秒）",
+    "matcher": {
+      "type": "VALUE_PATTERN",
+      "key": "ClientAliveInterval",
+      "valuePattern": "^[1-9][0-9]{0,3}$"
+    }
+  },
+  {
+    "ruleId": "policy-password-min-length",
+    "dimension": "SECURITY_POLICY",
+    "name": "口令最小长度不小于 8 位",
+    "basis": "安全策略—口令策略",
+    "severity": "HIGH",
+    "remediation": "设置 PASS_MIN_LEN 为不小于 8 的整数",
+    "matcher": {
+      "type": "PRESENT",
+      "key": "PASS_MIN_LEN",
+      "valuePattern": "^([8-9]|[1-9][0-9]+)$"
+    }
+  },
+  {
+    "ruleId": "policy-ssh-max-auth-tries",
+    "dimension": "SECURITY_POLICY",
+    "name": "SSH 登录尝试次数不大于 5",
+    "basis": "安全策略—登录失败处理",
+    "severity": "MEDIUM",
+    "remediation": "将 sshd_config 中 MaxAuthTries 设置为 1~5",
+    "matcher": {
+      "type": "VALUE_PATTERN",
+      "key": "MaxAuthTries",
+      "valuePattern": "^([1-5])$"
+    }
+  },
+  {
+    "ruleId": "policy-session-timeout",
+    "dimension": "SECURITY_POLICY",
+    "name": "会话空闲超时已启用",
+    "basis": "安全策略—会话超时",
+    "severity": "MEDIUM",
+    "remediation": "设置 TMOUT 为正整数（秒）",
+    "matcher": {
+      "type": "PRESENT",
+      "key": "TMOUT",
+      "valuePattern": "^[1-9][0-9]*$"
+    }
+  },
+  {
+    "ruleId": "policy-permit-root-login",
+    "dimension": "SECURITY_POLICY",
+    "name": "禁止 root 远程登录",
+    "basis": "安全策略—远程登录管理",
+    "severity": "HIGH",
+    "remediation": "将 PermitRootLogin 设置为 no 或 prohibit-password",
+    "matcher": {
+      "type": "FORBIDDEN",
+      "key": "PermitRootLogin"
+    }
+  },
+  {
+    "ruleId": "policy-empty-password",
+    "dimension": "SECURITY_POLICY",
+    "name": "禁止空口令登录",
+    "basis": "安全策略—口令策略",
+    "severity": "HIGH",
+    "remediation": "将 PermitEmptyPasswords 设置为 no",
+    "matcher": {
+      "type": "FORBIDDEN",
+      "key": "PermitEmptyPasswords"
+    }
+  },
+  {
+    "ruleId": "sys-accept-redirects",
+    "dimension": "SYSTEM_CONFIG",
+    "name": "禁止接受 ICMP 重定向",
+    "basis": "系统配置—网络参数安全",
+    "severity": "HIGH",
+    "remediation": "设置 net.ipv4.conf.all.accept_redirects 为 0",
+    "matcher": {
+      "type": "FORBIDDEN",
+      "key": "net.ipv4.conf.all.accept_redirects"
+    }
+  },
+  {
+    "ruleId": "sys-ip-forward",
+    "dimension": "SYSTEM_CONFIG",
+    "name": "禁止 IP 转发（非路由设备）",
+    "basis": "系统配置—网络参数安全",
+    "severity": "MEDIUM",
+    "remediation": "设置 net.ipv4.ip_forward 为 0",
+    "matcher": {
+      "type": "FORBIDDEN",
+      "key": "net.ipv4.ip_forward"
+    }
+  },
+  {
+    "ruleId": "sys-magic-sysrq",
+    "dimension": "SYSTEM_CONFIG",
+    "name": "关闭 Magic SysRq 组合键",
+    "basis": "系统配置—内核参数安全",
+    "severity": "MEDIUM",
+    "remediation": "设置 kernel.sysrq 为 0",
+    "matcher": {
+      "type": "FORBIDDEN",
+      "key": "kernel.sysrq"
+    }
+  },
+  {
+    "ruleId": "sys-kexec-disabled",
+    "dimension": "SYSTEM_CONFIG",
+    "name": "禁用运行时 kexec 内核加载",
+    "basis": "系统配置—内核参数安全",
+    "severity": "LOW",
+    "remediation": "设置 kernel.kexec_load_disabled 为 1",
+    "matcher": {
+      "type": "PRESENT",
+      "key": "kernel.kexec_load_disabled",
+      "valuePattern": "^1$"
+    }
+  },
+  {
+    "ruleId": "log-auditd-max-file-action",
+    "dimension": "SYSTEM_LOG",
+    "name": "审计日志写满时保留历史",
+    "basis": "系统日志—日志留存",
+    "severity": "HIGH",
+    "remediation": "将 auditd.conf 中 max_log_file_action 设置为 KEEP_LOGS",
+    "matcher": {
+      "type": "PRESENT",
+      "key": "max_log_file_action",
+      "valuePattern": "^KEEP_LOGS$"
+    }
+  },
+  {
+    "ruleId": "log-journald-storage",
+    "dimension": "SYSTEM_LOG",
+    "name": "journald 日志持久化存储",
+    "basis": "系统日志—日志留存",
+    "severity": "MEDIUM",
+    "remediation": "将 journald.conf 中 Storage 设置为 persistent",
+    "matcher": {
+      "type": "PRESENT",
+      "key": "Storage",
+      "valuePattern": "^persistent$"
+    }
+  },
+  {
+    "ruleId": "log-auditd-flush",
+    "dimension": "SYSTEM_LOG",
+    "name": "审计日志异步刷盘策略已配置",
+    "basis": "系统日志—日志完整性",
+    "severity": "LOW",
+    "remediation": "将 auditd.conf 中 flush 设置为 incremental_async",
+    "matcher": {
+      "type": "VALUE_PATTERN",
+      "key": "flush",
+      "valuePattern": "^(incremental_async|incremental)$"
+    }
+  }
+]
