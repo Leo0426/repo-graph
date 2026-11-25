@@ -79,6 +79,7 @@ svg { width: 17px; height: 17px; display: block; flex: none; }
     transition: background-color .16s ease, color .16s ease;
 }
 .icon-button { width: 33px; height: 33px; padding: 0; }
+.chrome-actions .language-button { width: auto; padding: 0 6px; font-size: .75rem; }
 .icon-button:hover:not(:disabled), .search-button:hover { background: #5675a716; color: var(--ink); }
 .toolbar-divider { width: 1px; height: 17px; margin: 0 2px; background: #7f90b230; }
 .search-button { min-width: 180px; height: 33px; padding: 0 9px; gap: 7px; justify-content: start; font-size: 13px; text-align: left; }

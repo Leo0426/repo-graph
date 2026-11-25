@@ -615,10 +615,18 @@ export class RepositoryIndex {
         return this.vectors.search(mode, query, options, signal);
     }
 
-    projects(allowed: readonly string[] | null = null) {
+    projects(allowed: readonly string[] | null = null, summary = false) {
         const scope = allowed === null ? null : JSON.stringify(allowed);
+        const dashboard = summary ? `,
+            a.filename AS archiveName,
+            (SELECT count(*) FROM indexed_file WHERE project_id = p.id) AS fileCount,
+            (SELECT language FROM unit WHERE project_id = p.id AND language <> 'doc'
+                GROUP BY language ORDER BY count(*) DESC, language LIMIT 1) AS mainLanguage,
+            (SELECT status FROM index_status WHERE project_id = p.id) AS indexStatus
+        ` : '';
         const rows = this.db.prepare(`
             SELECT p.id AS projectId, p.root AS projectRoot, p.indexed_at AS indexedAt, count(u.id) AS nodeCount, a.id AS assetId
+            ${dashboard}
             FROM project p LEFT JOIN unit u ON u.project_id = p.id
             LEFT JOIN managed_asset a ON a.project_id = p.id AND a.deleting = 0
             WHERE ? IS NULL OR p.id IN (SELECT value FROM json_each(?))
@@ -627,7 +635,13 @@ export class RepositoryIndex {
         return rows.map(row => ({
             projectId: String(row.projectId), projectName: basename(String(row.projectRoot)) || String(row.projectId),
             projectRoot: String(row.projectRoot), indexedAt: String(row.indexedAt), nodeCount: Number(row.nodeCount),
-            ...(row.assetId ? { assetId: String(row.assetId) } : {})
+            ...(row.assetId ? { assetId: String(row.assetId) } : {}),
+            ...(summary ? {
+                fileCount: Number(row.fileCount),
+                mainLanguage: row.mainLanguage ?? null,
+                indexStatus: row.indexStatus ?? (row.indexedAt ? 'done' : 'idle'),
+                ...(row.archiveName ? { archiveName: String(row.archiveName) } : {})
+            } : {})
         }));
     }
 
@@ -830,7 +844,7 @@ export class RepositoryIndex {
             load, unit => this.flowFields(unit, projectId), deadline);
     }
 
-    traverse(target: string, projectId: string | null, query: GraphQuery, depth: number) {
+    private graphTarget(target: string, projectId: string | null) {
         const rows = this.db.prepare(`
             SELECT candidate.id FROM unit candidate WHERE (candidate.qualified_name = ? OR candidate.id = ?)
                 AND (? IS NULL OR candidate.project_id = ?)
@@ -844,7 +858,17 @@ export class RepositoryIndex {
                 LIMIT 2
         `).all(target, target, projectId, projectId, target);
         if (rows.length > 1) throw new HttpError(409, 'AMBIGUOUS_GRAPH_TARGET');
-        return rows[0] ? this.graph.traverse(String(rows[0].id), query, depth) : [];
+        return rows[0] ? String(rows[0].id) : undefined;
+    }
+
+    traverse(target: string, projectId: string | null, query: GraphQuery, depth: number) {
+        const id = this.graphTarget(target, projectId);
+        return id ? this.graph.traverse(id, query, depth) : [];
+    }
+
+    traverseView(target: string, projectId: string | null, query: GraphQuery, depth: number) {
+        const id = this.graphTarget(target, projectId);
+        return id ? this.graph.traverseView(id, query, depth) : null;
     }
 
     graphNeighbors(unitId: string, query: GraphQuery, depth: number, limit: number) {

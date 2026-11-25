@@ -1,17 +1,22 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="light">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="color-scheme" content="dark light">
+    <meta name="color-scheme" content="light dark">
     <title>RepoGraph</title>
+    <link rel="icon" type="image/svg+xml" href="/workbench-assets/favicon.svg">
     <link rel="stylesheet" href="/workbench.css">
+    <link rel="stylesheet" href="/document-reader.css">
     <script type="module" src="/workbench.js"></script>
 </head>
 <body>
     <header class="login" id="login">
         <div class="login-card">
-            <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>RepoGraph</span></div>
+            <div class="login-header">
+                <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>RepoGraph</span></div>
+                <button type="button" data-language aria-label="Switch to Chinese" title="Switch to Chinese"><span lang="zh-CN">中文</span></button>
+            </div>
             <h1 data-text="connectTitle">Connect to your workspace</h1>
             <p data-text="connectDescription">Sign in with an approved account or a local administrator token.</p>
             <form id="login-form">
@@ -40,95 +45,142 @@
 
     <div class="shell" id="workspace" hidden>
         <aside class="sidebar" id="sidebar">
-            <a class="brand" href="/" data-view="repositories"><span class="brand-mark" aria-hidden="true"></span><span>RepoGraph</span></a>
+            <div class="sidebar-heading">
+                <a class="brand" href="/" data-view="repositories"><span class="brand-mark" aria-hidden="true"></span><span class="brand-name">RepoGraph</span></a>
+            </div>
             <nav data-aria="navigation" aria-label="Workspace navigation">
-                <p class="nav-label" data-text="workspace">Workspace</p>
-                <a href="/?view=repositories" data-view="repositories"><span class="nav-icon icon-repo" aria-hidden="true"></span><span data-text="repositories">Repositories</span></a>
-                <p class="nav-label" data-text="explore">Code intelligence</p>
-                <a href="/?view=search" data-view="search"><span class="nav-icon icon-search" aria-hidden="true"></span><span data-text="search">Search</span></a>
-                <a href="/?view=graph" data-view="graph"><span class="nav-icon icon-graph" aria-hidden="true"></span><span data-text="graph">Code graph</span></a>
-                <a href="/?view=evidence" data-view="evidence"><span class="nav-icon icon-evidence" aria-hidden="true"></span><span data-text="evidence">Evidence packs</span></a>
-                <a href="/?view=wiki" data-view="wiki"><span class="nav-icon icon-wiki" aria-hidden="true"></span><span data-text="wiki">Repository Wiki</span></a>
-                <a href="/?view=findings" data-view="findings"><span class="nav-icon icon-findings" aria-hidden="true"></span><span data-text="findings">External findings</span></a>
-                <a href="/?view=scan-history" data-view="scan-history"><span class="nav-icon icon-wiki" aria-hidden="true"></span><span data-text="scan-history">Scan history</span></a>
-                <a href="/?view=review-queue" data-view="review-queue"><span class="nav-icon icon-wiki" aria-hidden="true"></span><span data-text="review-queue">Review queue</span></a>
-                <a href="/?view=vulnerabilities" data-view="vulnerabilities"><span class="nav-icon icon-findings" aria-hidden="true"></span><span data-text="vulnerabilities">Vulnerability inventory</span></a>
-                <a href="/?view=triage-agent" data-view="triage-agent"><span class="nav-icon icon-evidence" aria-hidden="true"></span><span data-text="triage-agent">Triage agent</span></a>
-                <a href="/?view=change-review" data-view="change-review"><span class="nav-icon icon-evidence" aria-hidden="true"></span><span data-text="change-review">Change review</span></a>
-                <a href="/?view=benchmark" data-view="benchmark"><span class="nav-icon icon-findings" aria-hidden="true"></span><span data-text="benchmark">Retrieval benchmark</span></a>
-                <a href="/?view=admin" data-view="admin" id="admin-nav" hidden><span class="nav-icon icon-admin" aria-hidden="true"></span><span data-text="admin">Administration</span></a>
+                <div class="nav-group">
+                    <p class="nav-label" data-text="workspace">Workspace</p>
+                    <a href="/?view=repositories" data-view="repositories"><span class="nav-icon icon-repo" aria-hidden="true"></span><span data-text="repositories">Repositories</span></a>
+                </div>
+                <div class="nav-group">
+                    <p class="nav-label" data-text="explore">Code intelligence</p>
+                    <a href="/?view=search" data-view="search"><span class="nav-icon icon-search" aria-hidden="true"></span><span data-text="search">Code search</span></a>
+                    <a href="/?view=graph" data-view="graph"><span class="nav-icon icon-graph" aria-hidden="true"></span><span data-text="graph">Code graph</span></a>
+                    <a href="/?view=evidence" data-view="evidence"><span class="nav-icon icon-evidence" aria-hidden="true"></span><span data-text="evidence">Evidence packs</span></a>
+                    <a href="/?view=wiki" data-view="wiki"><span class="nav-icon icon-wiki" aria-hidden="true"></span><span data-text="wiki">Repository Wiki</span></a>
+                </div>
+                <div class="nav-group">
+                    <p class="nav-label" data-text="securityNav">Security and review</p>
+                    <a href="/?view=findings" data-view="findings"><span class="nav-icon icon-findings" aria-hidden="true"></span><span data-text="findings">External findings</span></a>
+                    <a href="/?view=scan-history" data-view="scan-history"><span class="nav-icon icon-history" aria-hidden="true"></span><span data-text="scan-history">Scan history</span></a>
+                    <a href="/?view=review-queue" data-view="review-queue"><span class="nav-icon icon-queue" aria-hidden="true"></span><span data-text="review-queue">Review queue</span></a>
+                    <a href="/?view=vulnerabilities" data-view="vulnerabilities"><span class="nav-icon icon-shield" aria-hidden="true"></span><span data-text="vulnerabilities">Vulnerability inventory</span></a>
+                    <a href="/?view=triage-agent" data-view="triage-agent"><span class="nav-icon icon-agent" aria-hidden="true"></span><span data-text="triage-agent">Triage agent</span></a>
+                    <a href="/?view=change-review" data-view="change-review"><span class="nav-icon icon-change" aria-hidden="true"></span><span data-text="change-review">Change review</span></a>
+                </div>
+                <div class="nav-group">
+                    <p class="nav-label" data-text="systemNav">System</p>
+                    <a href="/?view=benchmark" data-view="benchmark"><span class="nav-icon icon-chart" aria-hidden="true"></span><span data-text="benchmark">Retrieval benchmark</span></a>
+                    <a href="/?view=admin" data-view="admin" id="admin-nav" hidden><span class="nav-icon icon-admin" aria-hidden="true"></span><span data-text="admin">Administration</span></a>
+                </div>
             </nav>
-            <div class="sidebar-footer"><span class="status-dot" aria-hidden="true"></span><span data-text="local">Local workspace</span></div>
+            <div class="sidebar-footer">
+                <img src="/workbench-assets/workspace.svg" width="34" height="34" alt="">
+                <div class="workspace-label"><strong data-text="workspaceName">Local workspace</strong><small><span class="status-dot" aria-hidden="true"></span><span data-text="local">Local environment</span></small></div>
+            </div>
         </aside>
-        <div class="app">
+        <div id="nav-scrim" class="nav-scrim" hidden></div>
+        <div class="app" id="workspace-app">
             <header class="bar">
-                <button type="button" id="menu" class="menu" aria-expanded="false" aria-controls="sidebar" data-text="menu">Menu</button>
-                <div class="crumb"><span data-text="workspace">Workspace</span><span aria-hidden="true">/</span><strong id="current-view"></strong></div>
+                <div class="bar-start">
+                    <button type="button" id="menu" class="menu icon-button" aria-expanded="false" aria-controls="sidebar" data-aria="menu" aria-label="Menu"><span class="icon-menu" aria-hidden="true"></span></button>
+                    <button type="button" id="collapse-nav" class="sidebar-toggle icon-button" aria-expanded="true" aria-controls="sidebar" aria-label="Collapse sidebar"><span class="icon-panel" aria-hidden="true"></span></button>
+                    <div class="crumb"><span data-text="workspace">Workspace</span><span aria-hidden="true">/</span><strong id="current-view"></strong></div>
+                </div>
                 <div class="bar-actions">
-                    <label class="scope"><span class="sr-only" data-text="repository">Repository</span><select id="project"></select></label>
-                    <button id="language" type="button" title="Switch language">中文</button>
-                    <button id="theme" type="button" data-text="light">Light</button>
-                    <button id="account-button" type="button" data-text="account">Account</button>
-                    <button id="disconnect" type="button" data-text="disconnect">Disconnect</button>
+                    <label class="scope"><span class="nav-icon icon-repo" aria-hidden="true"></span><span class="sr-only" data-text="repository">Repository</span><select id="project"></select></label>
+                    <button type="button" class="icon-button" data-language aria-label="Switch to Chinese" title="Switch to Chinese"><span class="sr-only" lang="zh-CN">中文</span><i class="nav-icon icon-lang" aria-hidden="true"></i></button>
+                    <button id="theme" class="icon-button" type="button"><span class="nav-icon icon-sun" aria-hidden="true"></span></button>
+                    <details class="action-popover session-popover" id="session-actions" data-dropdown>
+                        <summary class="icon-button" data-aria="account" aria-label="Account"><span class="icon-person" aria-hidden="true"></span></summary>
+                        <div class="popover-items">
+                            <button id="account-button" type="button" data-text="account">Account</button>
+                            <button id="disconnect" type="button" data-text="disconnect">Disconnect</button>
+                        </div>
+                    </details>
                 </div>
             </header>
             <main id="main">
                 <p class="notice" id="connection-status" role="status" hidden></p>
                 <section id="view-repositories" aria-labelledby="repositories-title">
-                    <div class="page-header">
-                        <div><h1 id="repositories-title" data-text="repositories">Repositories</h1><p data-text="repositoriesAbout">Index a local repository to search its code and explore how it fits together.</p></div>
-                        <button id="refresh" type="button" data-text="refresh">Refresh list</button>
+                    <div class="page-header workspace-heading">
+                        <div><h1 id="repositories-title" data-text="repositories">Repositories</h1><p data-text="repositoriesAbout">Manage local repositories, track indexing progress, and see recent activity.</p></div>
+                        <button id="connect-repository" type="button" class="primary" aria-haspopup="dialog" hidden><span class="nav-icon icon-plus" aria-hidden="true"></span><span data-text="connectRepository">Connect repository</span></button>
                     </div>
-                    <div class="repo-layout">
-                        <section class="surface repo-surface" aria-labelledby="repository-list-title">
-                            <header class="surface-header"><h2 id="repository-list-title" data-text="repositoryList">Repository list</h2><span class="count" id="repo-count">0</span></header>
-                            <p class="notice repository-notice" id="repositories-status" role="status" hidden></p>
-                            <div id="repository-list"></div>
+                    <dl id="workspace-summary" class="summary-grid"></dl>
+                    <section class="repo-board" aria-labelledby="repository-list-title">
+                        <header class="repo-board-heading">
+                            <h2 id="repository-list-title" data-text="repositoryList">Repository list</h2>
+                            <div class="repo-controls">
+                                <label class="repo-search">
+                                    <span class="sr-only" data-text="filterRepositories">Filter repositories</span>
+                                    <span class="nav-icon icon-search" aria-hidden="true"></span>
+                                    <input id="repo-filter" type="search" placeholder="Find repository…" data-placeholder="filterRepositoriesPlaceholder">
+                                </label>
+                                <label>
+                                    <span class="sr-only" data-text="repositoryType">Repository source</span>
+                                    <select id="repo-kind">
+                                        <option value="all" data-text="repositoryAllSources">All sources</option>
+                                        <option value="local" data-text="repositoryLocal">Local folders</option>
+                                        <option value="archive" data-text="repositoryArchives">Archives</option>
+                                    </select>
+                                </label>
+                                <button id="refresh" class="icon-button" type="button" data-aria="refresh" aria-label="Refresh list"><span class="nav-icon icon-refresh" aria-hidden="true"></span></button>
+                            </div>
+                        </header>
+                        <div class="status-tabs" role="group" aria-label="Index status" data-aria="repositoryIndexStatus">
+                            <button type="button" data-repo-status="all" aria-pressed="true"><span data-text="allFilter">All</span><small></small></button>
+                            <button type="button" data-repo-status="done" aria-pressed="false"><span data-text="repositoryReady">Ready</span><small></small></button>
+                            <button type="button" data-repo-status="running" aria-pressed="false"><span data-text="repositoryIndexing">Indexing</span><small></small></button>
+                            <button type="button" data-repo-status="partial" aria-pressed="false"><span data-text="repositoryPartial">Partial</span><small></small></button>
+                        </div>
+                        <p class="notice repository-notice" id="repositories-status" role="status" hidden></p>
+                        <div class="repository-table">
+                            <table>
+                                <thead><tr>
+                                    <th scope="col" data-text="repository">Repository</th>
+                                    <th scope="col" class="repo-language" data-text="repositoryLanguage">Language</th>
+                                    <th scope="col" data-text="repositoryIndexStatus">Index status</th>
+                                    <th scope="col" class="repo-updated" data-text="repositoryUpdated">Updated</th>
+                                    <th scope="col" class="repo-actions"><span class="sr-only" data-text="repositoryActions">Repository actions</span></th>
+                                </tr></thead>
+                                <tbody id="repository-list"></tbody>
+                            </table>
+                            <p id="repository-empty" class="empty" role="status" hidden></p>
+                        </div>
+                    </section>
+                    <div class="workspace-panels">
+                        <section class="surface workspace-panel" aria-labelledby="repo-activity-title">
+                            <h2 id="repo-activity-title" data-text="repositoryActivity">Recent activity</h2>
+                            <div id="repository-activity"></div>
                         </section>
-                        <section class="surface side-surface" id="index-section" aria-labelledby="index-title">
-                            <header class="surface-header"><h2 id="index-title" data-text="indexRepository">Index repository</h2></header>
-                            <form class="stack" id="index-form">
-                                <label><span data-text="directory">Repository directory</span><input id="directory" required placeholder="/path/to/repository" maxlength="4096"></label>
-                                <p class="hint" data-text="directoryHint">Use an absolute path inside the configured workspace root.</p>
-                                <label><span data-text="parseStrategy">Parsing strategy</span><select id="index-strategy">
-                                    <option value="auto" data-text="parseAuto">Automatic</option>
-                                    <option value="precise" data-text="parsePrecise">Precise</option>
-                                    <option value="heuristic" data-text="parseHeuristic">Heuristic</option>
-                                </select></label>
-                                <label class="check"><input id="index-bytecode" type="checkbox"><span data-text="includeBytecode">Include Java bytecode (.class and .jar)</span></label>
-                                <label class="check"><input id="rebuild" type="checkbox"><span data-text="rebuild">Rebuild the index</span></label>
-                                <button type="submit" class="primary" data-text="startIndex">Start indexing</button>
-                            </form>
-                            <div class="job" id="index-status" role="status" aria-live="polite" hidden></div>
-                            <details class="archive-upload">
-                                <summary data-text="archiveUpload">Import a source archive</summary>
-                                <form id="archive-form" class="stack">
-                                    <label><span data-text="archiveFile">ZIP, TAR.GZ or JAR file</span><input id="archive-file" type="file" accept=".zip,.tar.gz,.tgz,.jar" required></label>
-                                    <label><span data-text="parseStrategy">Parsing strategy</span><select id="archive-strategy">
-                                        <option value="auto" data-text="parseAuto">Automatic</option>
-                                        <option value="precise" data-text="parsePrecise">Precise</option>
-                                        <option value="heuristic" data-text="parseHeuristic">Heuristic</option>
-                                    </select></label>
-                                    <label class="check"><input id="archive-bytecode" type="checkbox"><span data-text="includeBytecode">Include Java bytecode (.class and .jar)</span></label>
-                                    <button type="submit" class="primary" data-text="importArchive">Import and index</button>
-                                </form>
-                                <div class="job" id="archive-status" role="status" aria-live="polite" hidden></div>
-                            </details>
+                        <section class="surface workspace-panel" aria-labelledby="repo-languages-title">
+                            <h2 id="repo-languages-title" data-text="repositoryLanguages">Repository languages</h2>
+                            <div id="repository-languages"></div>
                         </section>
                     </div>
                 </section>
                 <section id="view-overview" aria-labelledby="overview-title" hidden>
                     <div class="page-header">
                         <div><h1 id="overview-title" data-text="overview">Repository overview</h1><p class="mono" id="overview-root"></p></div>
-                        <button type="button" id="overview-search" data-text="openSearch">Open search</button>
+                        <span id="overview-state" hidden></span>
                     </div>
                     <p class="notice" id="overview-status" role="status" hidden></p>
-                    <div class="watch-controls" id="watch-controls" hidden>
-                        <span id="watch-state" role="status"></span>
-                        <button type="button" id="watch-toggle" hidden></button>
-                    </div>
-                    <p class="notice" id="watch-status" role="status" hidden></p>
                     <div id="overview-data"></div>
+                    <section class="surface overview-status-panel" id="overview-actions" hidden>
+                        <h2 data-text="repositoryStatus">Repository status</h2>
+                        <p id="overview-updated"></p>
+                        <div class="watch-controls" id="watch-controls" hidden>
+                            <span id="watch-state" role="status"></span>
+                            <button type="button" id="watch-toggle" hidden></button>
+                        </div>
+                        <p class="notice" id="watch-status" role="status" hidden></p>
+                        <div class="change-actions">
+                            <button type="button" class="primary" id="overview-search" data-text="openSearch">Open search</button>
+                            <button type="button" id="overview-wiki" data-text="wiki">Repository Wiki</button>
+                        </div>
+                    </section>
                     <details class="surface quality-panel" id="quality-panel" hidden>
                         <summary data-text="qualityTitle">Code quality</summary>
                         <form id="quality-form" class="quality-controls">
@@ -171,22 +223,34 @@
                     </section>
                 </section>
                 <section id="view-search" aria-labelledby="search-title" hidden>
-                    <div class="page-header"><div><h1 id="search-title" data-text="search">Search</h1><p data-text="searchAbout">Find symbols, similar code, and related implementations.</p></div></div>
+                    <div class="page-header"><div><h1 id="search-title" data-text="search">Code search</h1><p data-text="searchAbout">Find symbols, similar code, and related implementations.</p></div></div>
+                    <div class="query-tabs control-tabs" data-query-modes="search-mode" role="group" data-aria="mode" aria-label="Mode">
+                        <button type="button" data-query-option="keyword" aria-pressed="true" data-text="keyword">Keyword</button>
+                        <button type="button" data-query-option="semantic" aria-pressed="false" data-text="semantic">Semantic</button>
+                        <button type="button" data-query-option="code" aria-pressed="false" data-text="similarity">Code similarity</button>
+                        <button type="button" data-query-option="graphrag" aria-pressed="false">GraphRAG</button>
+                    </div>
                     <form id="search-form" class="surface query-form">
+                        <select id="search-mode" hidden><option value="keyword">Keyword</option><option value="semantic">Semantic</option><option value="code">Code similarity</option><option value="graphrag">GraphRAG</option></select>
                         <label class="field-grow"><span data-text="query">Search query</span><textarea id="query" rows="1" maxlength="4096" required data-placeholder="searchPlaceholder" placeholder="Function, code snippet, or behavior"></textarea></label>
-                        <label><span data-text="mode">Mode</span><select id="search-mode"><option value="keyword" data-text="keyword">Keyword</option><option value="semantic" data-text="semantic">Semantic</option><option value="code" data-text="similarity">Code similarity</option><option value="graphrag">GraphRAG</option></select></label>
                         <label><span data-text="scope">Scope</span><select id="search-scope"><option value="current" data-text="current">Current repository</option><option value="all" data-text="all">All authorized repositories</option></select></label>
                         <button type="submit" class="primary" data-text="find">Search</button>
                     </form>
                     <p class="notice" id="search-status" role="status" hidden></p>
-                    <div class="results" id="search-results"></div>
+                    <div id="search-results" class="search-split"></div>
                     <button id="next" type="button" data-text="next" hidden>Load more</button>
                 </section>
                 <section id="view-graph" aria-labelledby="graph-title" hidden>
                     <div class="page-header"><div><h1 id="graph-title" data-text="graph">Code graph</h1><p data-text="graphAbout">Trace calls, type relationships, and source locations.</p></div></div>
+                    <div class="query-tabs control-tabs" data-query-modes="relation" role="group" data-aria="relation" aria-label="Relation">
+                        <button type="button" data-query-option="callers" aria-pressed="true" data-text="callers">Callers</button>
+                        <button type="button" data-query-option="callees" aria-pressed="false" data-text="callees">Callees</button>
+                        <button type="button" data-query-option="subtypes" aria-pressed="false" data-text="subtypes">Subtypes</button>
+                        <button type="button" data-query-option="impact" aria-pressed="false" data-text="impact">Change impact</button>
+                    </div>
                     <form id="graph-form" class="surface query-form">
+                        <select id="relation" hidden><option value="callers">Callers</option><option value="callees">Callees</option><option value="subtypes">Subtypes</option><option value="impact">Change impact</option></select>
                         <label class="field-grow"><span data-text="target">Symbol name or ID</span><input id="target" required maxlength="4096" data-placeholder="graphPlaceholder" placeholder="e.g. Service.handle"></label>
-                        <label><span data-text="relation">Relationship</span><select id="relation"><option value="callers" data-text="callers">Callers</option><option value="callees" data-text="callees">Callees</option><option value="subtypes" data-text="subtypes">Subtypes</option><option value="impact" data-text="impact">Change impact</option></select></label>
                         <label><span data-text="depth">Depth</span><select id="depth"><option>1</option><option>2</option><option>3</option><option>5</option><option>12</option></select></label>
                         <button type="submit" class="primary" data-text="trace">Trace relationships</button>
                         <button type="button" id="flow-analyze" data-text="flowAnalyze">Analyze flow</button>
@@ -214,9 +278,9 @@
                     <div class="results" id="evidence-results"></div>
                 </section>
                 <section id="view-wiki" aria-labelledby="wiki-title" hidden>
-                    <div class="page-header">
+                    <div class="page-header wiki-page-header">
                         <div><h1 id="wiki-title" data-text="wiki">Repository Wiki</h1><p data-text="wikiAbout">Browse indexed modules, entry points, and their source references.</p></div>
-                        <button id="wiki-generate" type="button" class="primary" data-text="wikiGenerate">Generate summaries</button>
+                        <div id="wiki-primary-action"><button id="wiki-generate" type="button" data-text="wikiGenerate">Generate summaries</button></div>
                     </div>
                     <p class="notice" id="wiki-status" role="status" hidden></p>
                     <p class="notice" id="wiki-generation-status" role="status" hidden></p>
@@ -224,13 +288,15 @@
                         <summary data-text="wikiRun">Generation steps</summary>
                         <div id="wiki-steps" class="stack"></div>
                     </details>
-                    <section class="surface" id="wiki-document" aria-labelledby="wiki-document-title" hidden>
-                        <div class="wiki-header surface-header">
-                            <h2 id="wiki-document-title"></h2>
-                            <label><span class="sr-only" data-text="wikiChoose">Wiki document</span><select id="wiki-select"></select></label>
-                            <a id="wiki-export" data-text="downloadMarkdown">Download Markdown</a>
+                    <section class="surface" id="wiki-document" aria-labelledby="wiki-content-title" hidden>
+                        <div id="wiki-controls" hidden>
+                            <label class="document-select" id="wiki-document-picker"><span class="sr-only" data-text="wikiChoose">Wiki document</span><select id="wiki-select"></select></label>
+                            <details class="action-popover" id="wiki-actions" data-dropdown>
+                                <summary class="icon-button" data-aria="readerActions" aria-label="Document actions"><span aria-hidden="true">···</span></summary>
+                                <div class="popover-items" id="wiki-action-items"><a id="wiki-export" data-text="downloadMarkdown">Download Markdown</a></div>
+                            </details>
                         </div>
-                        <div class="stack wiki-body" id="wiki-content"></div>
+                        <div class="document-reader" data-document-reader id="wiki-content"></div>
                     </section>
                 </section>
                 <section id="view-findings" aria-labelledby="findings-title" hidden>
@@ -297,7 +363,7 @@
                     <div class="surface change-result">
                         <div class="queue-actions quality-controls">
                             <label><span data-text="queueStatus">Review status</span><select id="queue-filter">
-                                <option value="" data-text="all">All</option><option value="PENDING" data-text="PENDING">Pending review</option>
+                                <option value="" data-text="allFilter">All</option><option value="PENDING" data-text="PENDING">Pending review</option>
                                 <option value="IN_REVIEW" data-text="IN_REVIEW">In review</option><option value="CONFIRMED" data-text="CONFIRMED">Confirmed</option>
                                 <option value="REJECTED" data-text="REJECTED">Rejected</option>
                             </select></label>
@@ -327,13 +393,13 @@
                             <button id="code-scan" type="button" data-text="codeScan">Check indexed source</button>
                             <button id="taint-scan" type="button" data-text="taintScan">Trace request parameters</button>
                             <label><span data-text="queueStatus">Review status</span><select id="vuln-filter">
-                                <option value="" data-text="all">All</option><option value="SUSPECTED" data-text="SUSPECTED">Suspected</option>
+                                <option value="" data-text="allFilter">All</option><option value="SUSPECTED" data-text="SUSPECTED">Suspected</option>
                                 <option value="CONFIRMED" data-text="CONFIRMED">Confirmed</option><option value="FIXED" data-text="FIXED">Fixed</option>
                                 <option value="DISMISSED" data-text="DISMISSED">Dismissed</option>
                             </select></label>
                             <label><span data-text="findingSeverity">Severity</span><select id="vuln-severity">
-                                <option value="" data-text="all">All</option><option value="CRITICAL">CRITICAL</option><option value="HIGH">HIGH</option>
-                                <option value="MEDIUM">MEDIUM</option><option value="LOW">LOW</option><option value="INFO">INFO</option><option value="UNKNOWN">UNKNOWN</option>
+                                <option value="" data-text="allFilter">All</option><option value="CRITICAL" data-text="CRITICAL">Critical</option><option value="HIGH" data-text="HIGH">High</option>
+                                <option value="MEDIUM" data-text="MEDIUM">Medium</option><option value="LOW" data-text="LOW">Low</option><option value="INFO" data-text="INFO">Informational</option><option value="UNKNOWN" data-text="UNKNOWN">Unknown</option>
                             </select></label>
                         </div>
                         <p class="notice repository-notice" id="inventory-scan-status" role="status" hidden></p>
@@ -499,7 +565,7 @@
                                 <label><span data-text="providerName">Name</span><input id="provider-name" maxlength="100" required></label>
                                 <label><span data-text="providerProtocol">Protocol</span><select id="provider-protocol">
                                     <option value="OLLAMA">Ollama</option><option value="OPENAI">OpenAI</option>
-                                    <option value="OPENAI_COMPATIBLE">OpenAI compatible</option><option value="ANTHROPIC">Anthropic</option>
+                                    <option value="OPENAI_COMPATIBLE" data-text="openAiCompatible">OpenAI compatible</option><option value="ANTHROPIC">Anthropic</option>
                                 </select></label>
                                 <label><span data-text="providerUrl">Base URL</span><input id="provider-url" type="url" maxlength="500" required></label>
                                 <label><span data-text="providerModel">Model ID</span><input id="provider-model" list="provider-models" maxlength="200" required><datalist id="provider-models"></datalist></label>
@@ -528,6 +594,44 @@
             </main>
         </div>
     </div>
+    <dialog id="index-section" class="source-dialog index-dialog" aria-labelledby="index-title">
+        <header class="surface-header">
+            <h2 id="index-title" data-text="connectRepository">Connect repository</h2>
+            <form method="dialog"><button type="submit" class="icon-button" aria-label="Close" data-aria="close"><span class="nav-icon icon-close" aria-hidden="true"></span></button></form>
+        </header>
+        <div class="control-tabs" role="group" aria-label="Repository source" data-aria="repositoryType">
+            <button type="button" data-connect-source="local" aria-pressed="true" aria-controls="local-index" data-text="repositoryLocal">Local folders</button>
+            <button type="button" data-connect-source="archive" aria-pressed="false" aria-controls="archive-upload" data-text="archiveUpload">Import a source archive</button>
+        </div>
+        <div id="local-index">
+            <form class="stack" id="index-form">
+                <label><span data-text="directory">Repository directory</span><input id="directory" required placeholder="/path/to/repository" maxlength="4096"></label>
+                <p class="hint" data-text="directoryHint">Use an absolute path inside the configured workspace root.</p>
+                <label><span data-text="parseStrategy">Parsing strategy</span><select id="index-strategy">
+                    <option value="auto" data-text="parseAuto">Automatic</option>
+                    <option value="precise" data-text="parsePrecise">Precise</option>
+                    <option value="heuristic" data-text="parseHeuristic">Heuristic</option>
+                </select></label>
+                <label class="check"><input id="index-bytecode" type="checkbox"><span data-text="includeBytecode">Include Java bytecode (.class and .jar)</span></label>
+                <label class="check"><input id="rebuild" type="checkbox"><span data-text="rebuild">Rebuild the index</span></label>
+                <button type="submit" class="primary" data-text="startIndex">Start indexing</button>
+            </form>
+            <div class="job" id="index-status" role="status" aria-live="polite" hidden></div>
+        </div>
+        <div id="archive-upload" hidden>
+            <form id="archive-form" class="stack">
+                <label><span data-text="archiveFile">ZIP, TAR.GZ or JAR file</span><input id="archive-file" type="file" accept=".zip,.tar.gz,.tgz,.jar" required></label>
+                <label><span data-text="parseStrategy">Parsing strategy</span><select id="archive-strategy">
+                    <option value="auto" data-text="parseAuto">Automatic</option>
+                    <option value="precise" data-text="parsePrecise">Precise</option>
+                    <option value="heuristic" data-text="parseHeuristic">Heuristic</option>
+                </select></label>
+                <label class="check"><input id="archive-bytecode" type="checkbox"><span data-text="includeBytecode">Include Java bytecode (.class and .jar)</span></label>
+                <button type="submit" class="primary" data-text="importArchive">Import and index</button>
+            </form>
+            <div class="job" id="archive-status" role="status" aria-live="polite" hidden></div>
+        </div>
+    </dialog>
     <dialog id="source-dialog" class="source-dialog" aria-labelledby="source-title">
         <header class="surface-header"><div><h2 id="source-title"></h2><p id="source-path"></p></div><form method="dialog"><button type="submit" data-text="close">Close</button></form></header>
         <div class="source-actions"><a id="source-link" href="/" data-text="sourceLink">Source link</a><button id="copy" type="button" data-text="copy">Copy source</button><span id="copy-status" role="status"></span></div>

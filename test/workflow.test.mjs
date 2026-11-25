@@ -156,8 +156,14 @@ test('REST and stdio MCP share an isolated and persistent repository index', { t
     assert.match(homepage.headers.get('content-security-policy'), /frame-ancestors 'none'/);
     const markup = await homepage.text();
     assert.match(markup, /id="repositories-title"[^>]*>Repositories/);
+    assert.match(markup, /data-document-reader id="wiki-content"/);
+    assert.match(markup, /id="login"[\s\S]*?data-language\s+aria-label="Switch to Chinese"[\s\S]*?<\/header>/);
     assert.match((await fetch(`${server.base}/workbench.js`)).headers.get('content-type'), /javascript/);
+    assert.match((await fetch(`${server.base}/web-locale.js`)).headers.get('content-type'), /javascript/);
+    assert.match((await fetch(`${server.base}/document-reader.js`)).headers.get('content-type'), /javascript/);
+    assert.match((await fetch(`${server.base}/document-reader.css`)).headers.get('content-type'), /text\/css/);
     assert.match((await fetch(`${server.base}/workbench.css`)).headers.get('content-type'), /text\/css/);
+    assert.equal((await fetch(`${server.base}/workbench-assets/brand.svg`)).headers.get('content-type'), 'image/svg+xml');
     assert.ok(!markup.includes(env.REPOGRAPH_ACCESS_TOKEN));
     const signIn = await fetch(`${server.base}/api/v1/web/session`, {
         method: 'POST',
@@ -199,6 +205,11 @@ test('REST and stdio MCP share an isolated and persistent repository index', { t
     const callees = await api('/graph/callees', { target: 'greet', projectId: alphaId, depth: 1 });
     assert.equal(callees.status, 200);
     assert.deepEqual(callees.body.map(unit => unit.qualifiedName), ['answer', 'format']);
+    const diagram = await api('/graph/callees', { target: 'greet', projectId: alphaId, depth: 1, diagram: true });
+    assert.equal(diagram.body.root.qualifiedName, 'greet');
+    assert.deepEqual(diagram.body.connections, callees.body.map(unit => ({
+        source: diagram.body.root.id, target: unit.id, depth: 1
+    })));
     const implementations = await api('/graph/subtypes', { target: 'Repository', projectId: alphaId });
     assert.equal(implementations.status, 200);
     assert.deepEqual(implementations.body.map(unit => unit.qualifiedName), ['Base']);
@@ -227,6 +238,8 @@ test('REST and stdio MCP share an isolated and persistent repository index', { t
     assert.equal(budgeted.body.evidence[0].excerpt.length, 1000);
     assert.equal(budgeted.body.usedBudgetChars, 1000);
     assert.deepEqual((await api('/projects')).body.map(project => project.projectId), [alphaId, betaId].sort());
+    const summarized = (await api('/projects', { summary: true })).body.find(project => project.projectId === alphaId);
+    assert.deepEqual([summarized.fileCount, summarized.mainLanguage, summarized.indexStatus], [5, 'typescript', 'done']);
     assert.equal((await api('/symbol/greet')).status, 409);
     assert.match((await api('/symbol/greet', { projectId: alphaId })).body.rawSource, /answer\(\)/);
     assert.match((await api('/locate', { projectId: betaId, file: 'shared.ts', line: 1 })).body.rawSource, /betaMessage/);

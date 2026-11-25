@@ -5,6 +5,7 @@ import { jsAliasPrefix } from './js-path-aliases.js';
 import type { JsAliasTarget } from './js-path-aliases.js';
 
 const MAX_GRAPH_UNITS = 500;
+const MAX_DIAGRAM_CONNECTIONS = 32;
 const queryKinds = {
     callees: ['CALLS'],
     callers: ['CALLS'],
@@ -12,6 +13,10 @@ const queryKinds = {
     impact: ['CALLS', 'EXTENDS', 'IMPLEMENTS', 'DEFINES_TYPE', 'OVERRIDES']
 };
 export type GraphQuery = keyof typeof queryKinds;
+type GraphConnection = { source: string; target: string; depth: number };
+export type GraphDiagram = {
+    root: CodeUnit; results: CodeUnit[]; members: CodeUnit[]; connections: GraphConnection[];
+};
 
 export class CodeGraph {
     constructor(private readonly db: DatabaseSync) {
@@ -357,7 +362,7 @@ export class CodeGraph {
         `).iterate(projectId, projectId);
     }
 
-    traverse(seed: string, query: GraphQuery, depth: number, limit = MAX_GRAPH_UNITS) {
+    traverse(seed: string, query: GraphQuery, depth: number, limit = MAX_GRAPH_UNITS, connections?: GraphConnection[]) {
         const [from, to] = query === 'callees' ? ['source_id', 'target_id'] : ['target_id', 'source_id'];
         const kinds = queryKinds[query];
         const neighbors = this.db.prepare(`
@@ -385,11 +390,28 @@ export class CodeGraph {
                     seen.add(neighbor);
                     next.push(neighbor);
                     units.push(JSON.parse(String(payload.get(neighbor)?.payload)) as CodeUnit);
+                    if (connections && connections.length < MAX_DIAGRAM_CONNECTIONS) {
+                        const source = query === 'callees' ? id : neighbor;
+                        const target = query === 'callees' ? neighbor : id;
+                        connections.push({ source, target, depth: step + 1 });
+                    }
                     if (units.length >= limit) return units;
                 }
             }
             frontier = next;
         }
         return units;
+    }
+
+    traverseView(seed: string, query: GraphQuery, depth: number): GraphDiagram {
+        const payload = this.db.prepare('SELECT payload FROM unit WHERE id = ?');
+        const load = (id: string) => JSON.parse(String(payload.get(id)?.payload)) as CodeUnit;
+        const root = load(seed);
+        const connections: GraphConnection[] = [];
+        const results = this.traverse(seed, query, depth, MAX_GRAPH_UNITS, connections);
+        const parents = new Set(connections.map(edge => query === 'callees' ? edge.source : edge.target));
+        for (const { id } of [root, ...results]) parents.delete(id);
+        const members = [...parents].map(load);
+        return { root, results, connections, members };
     }
 }

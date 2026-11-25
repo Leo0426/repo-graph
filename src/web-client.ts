@@ -8,6 +8,7 @@ import type { ArchitectureReview } from './architecture-review.js';
 import type { BenchmarkSnapshot, BenchmarkSuite } from './benchmark.js';
 import type { DependencyScanResult } from './dependency-advisories.js';
 import type { FlowAnalysis } from './flow-analysis.js';
+import type { GraphDiagram } from './graph.js';
 import type { GenerationProtocol, ModelProvider } from './model-providers.js';
 import type { SummaryDocument, WikiSummaries } from './wiki.js';
 import type { ExternalFindings, findingReport } from './external-findings.js';
@@ -16,6 +17,9 @@ import type { ReviewQueue, ReviewQueueEntry, ReviewAction } from './review-queue
 import type { ArchivedScannerRun, ArchivedScannerSummary, ArchivedScanTask, ScanFindingsPage, ScanHistoryPage } from './scan-history.js';
 import type { TriageAdvisory } from './triage-advisory.js';
 import type { VulnerabilityFinding, VulnerabilityInventory, VulnerabilityStatus } from './vulnerability-inventory.js';
+import { bindLanguageSwitch, preference, preferredLanguage, setDocumentLanguage } from './web-locale.js';
+import { DocumentReader } from './document-reader.js';
+import type { ReaderSource } from './document-reader.js';
 
 type View = 'repositories' | 'overview' | 'search' | 'graph' | 'evidence' | 'wiki' | 'findings' | 'review-queue' | 'vulnerabilities'
     | 'scan-history' | 'triage-agent' | 'change-review' | 'benchmark' | 'admin';
@@ -32,9 +36,14 @@ type QueueView = ReturnType<ReviewQueue['view']>;
 type QueueAudit = ReturnType<ReviewQueue['audit']>;
 type AdvisoryPanel = 'finding' | 'queue';
 type VulnerabilityDetail = ReturnType<VulnerabilityInventory['detail']>;
-type Language = 'en' | 'zh';
 type Severity = 'error' | 'warning' | 'success';
-interface Project { projectId: string; projectName: string; projectRoot: string; nodeCount: number; indexedAt: string; assetId?: string }
+interface Project {
+    projectId: string; projectName: string; projectRoot: string; nodeCount: number; indexedAt: string; assetId?: string;
+}
+interface DashboardProject extends Project {
+    fileCount: number; mainLanguage: string | null; archiveName?: string;
+    indexStatus: 'done' | 'running' | 'partial' | 'error' | 'idle';
+}
 interface Hit { unit: CodeUnit; projectId: string; score?: number; finalScore?: number; relation?: string }
 interface Evidence {
     citationId: string; projectId: string; qualifiedName: string; filePath: string; startLine: number;
@@ -74,10 +83,11 @@ interface Administration { accounts: Account[]; organizations: Organization[]; p
 
 const zh: Record<string, string> = {
     connectTitle: '连接到工作台', connectDescription: '使用已批准的账号或本地管理员令牌登录。', token: '访问令牌', connect: '连接',
-    navigation: '工作台导航', workspace: '工作台', repositories: '仓库', explore: '代码理解', search: '检索',
-    graph: '代码图谱', evidence: '证据包', local: '本地工作台', menu: '菜单', repository: '仓库',
+    navigation: '工作台导航', workspace: '工作空间', repositories: '仓库工作台', explore: '代码理解', search: '代码搜索',
+    graph: '代码图谱', evidence: '证据包', local: '本地环境', menu: '菜单', repository: '仓库',
     light: '浅色', dark: '深色', disconnect: '断开连接', refresh: '刷新列表',
-    repositoriesAbout: '为本地仓库建立索引，检索代码并追踪关系。', repositoryList: '仓库列表', indexRepository: '索引仓库',
+    repositoriesAbout: '管理本地代码仓库，查看索引进度与最近活动。', repositoryList: '仓库列表', indexRepository: '索引仓库',
+    filterRepositoriesPlaceholder: '筛选仓库…',
     directory: '仓库目录', directoryHint: '使用配置的工作区根目录下的绝对路径。', rebuild: '重建索引', startIndex: '开始索引',
     includeBytecode: '索引 Java 字节码（.class 和 .jar）', archiveEntry: 'JAR 内条目', openSignature: '查看签名',
     searchAbout: '查找符号、相似代码和相关实现。', query: '查询内容', searchPlaceholder: '函数、代码片段或行为描述',
@@ -144,10 +154,10 @@ const zh: Record<string, string> = {
     qualityScore: '健康分', productionMethods: '生产代码单元', instability: '不稳定度', fanIn: '传入', fanOut: '传出',
     changeCount: '变更次数', hotspotScore: '热点分', qualitySymbol: '符号', heuristics: '基于静态调用图的候选，需结合实际运行路径核实。',
     wiki: '仓库 Wiki', wikiAbout: '浏览已索引的模块、入口及其源码引用。', wikiGenerate: '生成摘要', wikiChoose: 'Wiki 文档',
-    wikiRun: '生成步骤', wikiEmpty: '还没有 Wiki 文档。', wikiCitations: '源码引用', wikiGenerated: '已生成 Wiki 摘要。',
+    wikiRun: '生成步骤', wikiEmpty: '还没有 Wiki 文档。', wikiGenerated: '已生成 Wiki 摘要。',
     legacyWiki: '从旧版迁移的 Wiki 文档', LEGACY_WIKI_CITATION_UNAVAILABLE: '部分旧引用缺少安全的项目路径或有效行号。',
     wikiPartial: '已生成部分摘要，详见生成步骤。', wikiFailedRun: 'Wiki 生成失败。', wikiPending: '摘要仍在生成，可刷新此页面继续查看。',
-    wikiNotes: '缺失信息', wikiCurrentIndex: '引用链接打开当前索引中的源码位置。',
+    wikiNotes: '缺失信息',
     QUEUED: '排队中', RUNNING: '运行中', SKIPPED: '已跳过',
     WIKI_MODEL_UNAVAILABLE: '生成模型暂不可用。', WIKI_INDEX_RUNNING: '请等待当前索引任务完成。',
     WIKI_ALREADY_RUNNING: '此仓库已有 Wiki 生成任务。', WIKI_QUEUE_FULL: 'Wiki 任务队列已满。',
@@ -166,13 +176,12 @@ const zh: Record<string, string> = {
     providerKeySaved: '密钥已保存', providerDeleteConfirm: '删除这个模型配置？', providerModelsFound: '已获取模型列表，可选择或手动填写。',
     PROVIDER_CONNECTED: '连接与模型调用成功。', PROVIDER_CREDENTIAL_CHANGE_REQUIRED: '更改地址或协议时，请更换或清除保存的密钥。',
     PROVIDER_TIMEOUT: '模型请求超时。', PROVIDER_REDIRECT_BLOCKED: '模型端点返回了重定向。',
-    architectureReview: '架构评审', architectureReady: '已收集静态证据，正在生成评审。', architectureSuggestions: '模型建议',
+    architectureReview: '架构评审', architectureReady: '已收集静态证据，正在生成评审。',
     architectureDisabled: '已收集静态事实。生成模型已停用。', architectureFailed: '已收集静态事实。模型评审生成失败。',
     architectureProblem: '问题', architectureSuggestion: '建议', architectureBenefit: '收益', architectureCost: '实施成本', architectureRisk: '风险',
     architectureEvidence: '静态证据', architectureUsage: '模型用量', architecturePriceUnknown: '费用未知',
-    evidenceReference: '引用', evidenceSummary: '摘要',
     ARCHITECTURE_UNKNOWN_CITATIONS: '已省略模型提供的未知引用。', ARCHITECTURE_STREAM_FAILED: '架构评审连接已断开。',
-    'change-review': '变更评审', changeAbout: '提交 unified diff，冻结当前仓库索引中的评审证据。',
+    'change-review': '变更评审', changeAbout: '提交统一差异，冻结当前仓库索引中的评审证据。',
     legacyChangeReview: '从旧版迁移的变更评审快照', legacyChangeFindings: '旧版报警指纹', legacyChangeVulnerabilities: '旧版漏洞记录 ID',
     LEGACY_CHANGE_PATH_UNAVAILABLE: '旧路径无法定位至当前项目。', LEGACY_CHANGE_HUNK_MAPPING_UNAVAILABLE: '旧记录未提供唯一的分组引用。',
     findings: '外部报警', findingsAbout: '导入扫描报告，对照索引查看报警位置。', findingFormat: '报告格式',
@@ -245,7 +254,7 @@ const zh: Record<string, string> = {
     VULNERABILITY_STATE_CONFLICT: '库存记录已更新，请查看当前状态。', INVALID_VULNERABILITY_TRANSITION: '当前状态不允许此操作。',
     legacyVulnerability: '从旧版库存迁移', legacyVulnerabilityEvidence: '历史证据', taintScanEvidence: '参数流证据',
     legacyEvidenceSOURCE: '来源', legacyEvidencePROPAGATION: '传播', legacyEvidenceSINK: '终点',
-    changeBase: '基线版本', changeTarget: '目标版本', changeDiff: 'Unified diff', changeSubmit: '创建快照',
+    changeBase: '基线版本', changeTarget: '目标版本', changeDiff: '统一差异（Unified diff）', changeSubmit: '创建快照',
     changeSnapshot: '评审快照', changeLink: '快照链接', downloadJson: '下载 JSON', downloadMarkdown: '下载 Markdown',
     changeLedger: 'Hunk 纳入记录', changePlanned: '已纳入', changeOmitted: '已省略', changeMapping: '索引映射',
     changeReason: '原因', changeExcerpt: '冻结证据', changePreviewLimit: '完整记录请下载快照。',
@@ -401,11 +410,11 @@ const englishDynamic: Record<string, string> = {
     DEPENDENCY_INVENTORY_UNAVAILABLE: 'Dependency inventory unavailable',
     VULNERABILITY_INVENTORY_UNAVAILABLE: 'Vulnerability inventory unavailable',
     SOURCE_HOTSPOTS_UNAVAILABLE: 'Source hotspots unavailable',
-    wikiEmpty: 'No Wiki documents yet.', wikiCitations: 'Source references', wikiGenerated: 'Wiki summaries generated.',
+    wikiEmpty: 'No Wiki documents yet.', wikiGenerated: 'Wiki summaries generated.',
     legacyWiki: 'Wiki document migrated from the legacy instance', LEGACY_WIKI_CITATION_UNAVAILABLE: 'Some legacy references lacked usable project paths or line numbers.',
     wikiPartial: 'Some summaries are incomplete. See the generation steps.', wikiFailedRun: 'Wiki generation failed.',
     wikiPending: 'Generation is still running. Refresh this page to resume tracking.', wikiNotes: 'Missing information',
-    wikiCurrentIndex: 'Links open source locations in the current index.', QUEUED: 'Queued', RUNNING: 'Running', SKIPPED: 'Skipped',
+    QUEUED: 'Queued', RUNNING: 'Running', SKIPPED: 'Skipped',
     WIKI_MODEL_UNAVAILABLE: 'Generation model unavailable.', WIKI_INDEX_RUNNING: 'Wait for indexing to finish.',
     WIKI_ALREADY_RUNNING: 'A Wiki generation is already running for this repository.', WIKI_QUEUE_FULL: 'The Wiki queue is full.',
     WIKI_UNIT_LIMIT: 'Symbol sampling limit reached.', WIKI_MODULE_LIMIT: 'Module sampling limit reached.',
@@ -419,11 +428,10 @@ const englishDynamic: Record<string, string> = {
     providerDeleteConfirm: 'Delete this model profile?', providerModelsFound: 'Models loaded. Select a result or enter a model ID.',
     PROVIDER_CONNECTED: 'Connection and generation succeeded.', PROVIDER_CREDENTIAL_CHANGE_REQUIRED: 'Replace or clear the saved API key when changing the endpoint or protocol.',
     PROVIDER_TIMEOUT: 'The model request timed out.', PROVIDER_REDIRECT_BLOCKED: 'The model endpoint returned a redirect.',
-    architectureReady: 'Static evidence collected. Generating the review.', architectureSuggestions: 'Model suggestions',
+    architectureReady: 'Static evidence collected. Generating the review.',
     architectureDisabled: 'Static evidence collected. Generation is disabled.', architectureFailed: 'Static evidence collected. Model review failed.',
     architectureProblem: 'Problem', architectureSuggestion: 'Suggestion', architectureBenefit: 'Benefit', architectureCost: 'Implementation cost', architectureRisk: 'Risk',
     architectureEvidence: 'Static evidence', architectureUsage: 'Model usage', architecturePriceUnknown: 'Cost unknown',
-    evidenceReference: 'Reference', evidenceSummary: 'Summary',
     ARCHITECTURE_UNKNOWN_CITATIONS: 'Unknown model citations were omitted.', ARCHITECTURE_STREAM_FAILED: 'The architecture review connection ended.'
 };
 const messagesByCode: Record<string, string> = {
@@ -440,14 +448,148 @@ const messagesByCode: Record<string, string> = {
     NO_SUPPORTED_MANIFEST: 'NO_SUPPORTED_MANIFEST', DEPENDENCY_INVENTORY_UNAVAILABLE: 'DEPENDENCY_INVENTORY_UNAVAILABLE',
     INVALID_BENCHMARK_RESULTS: 'INVALID_BENCHMARK_RESULTS', CODE_SCAN_INDEX_CHANGED: 'CODE_SCAN_INDEX_CHANGED'
 };
+const uiLabels: Record<string, readonly [english: string, chinese: string]> = {
+    workspaceName: ['Local workspace', '本地工作区'], connectRepository: ['Connect repository', '接入仓库'],
+    workspaceRepositories: ['Repositories', '已接入仓库'], workspaceSources: ['Folders and archives', '本地目录与归档'],
+    workspaceFiles: ['Indexed files', '已索引文件'], workspaceAcrossProjects: ['Across repositories', '按仓库统计'],
+    workspaceSymbols: ['Parsed symbols', '已解析符号'], workspaceSnapshot: ['Current snapshot', '当前索引快照'],
+    workspaceReadiness: ['Index readiness', '索引就绪率'], workspaceReady: ['ready', '个仓库已就绪'],
+    workspaceUpdated: ['Index snapshot updated', '索引快照已更新'], workspaceNoActivity: ['No index updates yet.', '暂无索引更新。'],
+    workspaceNoLanguages: ['No repository language data yet.', '暂无仓库语言数据。'],
+    workspaceUnknownLanguage: ['Unknown', '未知'],
+    repositoryAllSources: ['All sources', '全部来源'], repositoryLanguage: ['Language', '主要语言'],
+    repositoryLanguages: ['Repository languages', '仓库语言分布'], repositoryActivity: ['Recent activity', '最近活动'],
+    repositoryIndexStatus: ['Index status', '索引状态'], repositoryUpdated: ['Updated', '最近更新'],
+    repositoryReady: ['Ready', '已就绪'], repositoryIndexing: ['Indexing', '索引中'],
+    repositoryPartial: ['Partial', '部分索引'], repositoryIdle: ['Not indexed', '未索引'],
+    repositoryStatus: ['Repository status', '仓库状态'], indexOverview: ['Index overview', '索引概览'],
+    toggleTheme: ['Toggle theme', '切换主题'],
+    graphDiagram: ['Relationship graph', '关系图'], graphDiagramLimit: ['The diagram shows the first 32 relationships. See the list for more results.', '图中展示前 32 条关系，其余结果可在列表中查看。'],
+    graphRelationshipList: ['Relationship list', '关系列表'], graphZoomIn: ['Zoom in', '放大'],
+    graphZoomOut: ['Zoom out', '缩小'], graphZoomReset: ['Reset zoom', '恢复为 100%'],
+    graphNoNeighbors: ['No related symbols at this depth.', '当前深度没有关联符号。'],
+    allFilter: ['All', '全部'], openAiCompatible: ['OpenAI compatible', '兼容 OpenAI'],
+    repositoryType: ['Repository source', '仓库来源'], repositoryLocal: ['Local folders', '本地目录'],
+    repositoryArchives: ['Archives', '源码归档'], repositoryLocalCard: ['Local folder', '本地目录'],
+    filterRepositories: ['Filter repositories', '筛选仓库'], repositoryFilterEmpty: ['No repositories match these filters.', '没有符合筛选条件的仓库。'],
+    repositoryActions: ['Repository actions', '仓库操作'],
+    securityNav: ['Security and review', '安全与评审'], systemNav: ['System', '系统'],
+    collapseNavigation: ['Collapse sidebar', '收起侧栏'], expandNavigation: ['Expand sidebar', '展开侧栏'],
+    readerToolbar: ['Document toolbar', '文稿工具栏'], readerToggleOutline: ['Toggle outline', '切换目录'],
+    readerPrevious: ['Previous section', '上一节'], readerNext: ['Next section', '下一节'],
+    readerSearch: ['Search document', '搜索文稿'], readerSearchPlaceholder: ['Find a section or source reference…', '搜索章节或源码引用…'],
+    readerDocument: ['Document', '文稿'], readerOutline: ['Outline', '目录'], readerSources: ['References', '引用'],
+    readerMode: ['Reading view', '阅读视图'], readerActions: ['Document actions', '文稿操作'],
+    readerResults: ['Document search results', '文稿搜索结果'], readerSections: ['Sections', '章节'],
+    readerNavigate: ['Navigate', '选择'], readerOpen: ['Open', '打开'], readerCopy: ['Copy', '复制'],
+    readerLargerText: ['Larger reading text', '放大阅读字号'], readerCopyLink: ['Copy link', '复制链接'],
+    readerCopied: ['Link copied.', '链接已复制。'], readerCopyFailed: ['Copy the link from the address bar.', '请从地址栏复制链接。'],
+    readerNoSources: ['This document has no references.', '本文档暂无引用。'],
+    readerNoExcerpt: ['No matching excerpt in the current index.', '当前索引没有匹配的源码片段。'],
+    readerExcerptFailed: ['Could not load the source excerpt.', '无法加载源码片段。'],
+    readerExcerpt: ['Indexed source excerpt', '索引中的源码片段'], readerShowSource: ['Show reference', '查看引用'],
+    readerWikiIntroduction: ['Indexed modules, entry points, and source references.', '查看已索引的模块、入口及其源码引用。'],
+    wikiFactOverview: ['Overview', '概览'], wikiFactModules: ['Modules', '模块'],
+    wikiFactEntrypoints: ['Entry points and direct calls', '入口点与直接调用'], wikiFactHotspots: ['Complexity hotspots', '复杂度热点'],
+    wikiFactModule: ['Module facts', '模块概况'], wikiFactDependencies: ['Cross-module dependencies', '跨模块依赖'],
+    wikiFactSymbols: ['Key symbols', '关键符号'],
+    architectureObservations: ['Observations', '观察结果'],
+    CLASS: ['Class', '类'], INTERFACE: ['Interface', '接口'], ENUM: ['Enum', '枚举'], ANNOTATION: ['Annotation', '注解'],
+    METHOD: ['Method', '方法'], CONSTRUCTOR: ['Constructor', '构造函数'], FIELD: ['Field', '字段'], LOCAL_VAR: ['Local variable', '局部变量'],
+    STRUCT: ['Struct', '结构体'], UNION: ['Union', '联合体'], TYPEDEF: ['Type alias', '类型别名'], MACRO: ['Macro', '宏'],
+    FUNCTION: ['Function', '函数'], DOCUMENT: ['Document', '文档'],
+    CALLS: ['Calls', '调用'], CONTAINS: ['Contains', '包含'], IMPORTS: ['Imports', '导入'], EXTENDS: ['Extends', '继承'],
+    IMPLEMENTS: ['Implements', '实现'], DEFINES_TYPE: ['Defines type', '定义类型'], OVERRIDES: ['Overrides', '重写'],
+    typescript: ['TypeScript', 'TypeScript'], javascript: ['JavaScript', 'JavaScript'], java: ['Java', 'Java'],
+    python: ['Python', 'Python'], c: ['C', 'C'], cpp: ['C++', 'C++'], doc: ['Markdown', 'Markdown'],
+    VECTOR: ['Vector search', '向量检索'], KEYWORD: ['Keyword search', '关键词检索'], CALL_GRAPH: ['Call graph', '调用图谱'],
+    SEED: ['Initial match', '初始匹配'], CALLER: ['Caller', '调用方'], CALLEE: ['Callee', '被调用方'], IMPACT: ['Impact', '变更影响'],
+    CHANGE: ['Change', '变更'], FINDING: ['Finding', '报警'],
+    CRITICAL: ['Critical', '严重'], HIGH: ['High', '高危'], MEDIUM: ['Medium', '中危'], LOW: ['Low', '低危'], INFO: ['Informational', '提示'],
+    SOURCE: ['Source', '来源'], PROPAGATION: ['Propagation', '传播'], SINK: ['Sink', '终点'],
+    CALL: ['Call', '调用'], FLOW: ['Flow', '流转'], NOTE: ['Note', '备注'], PROTECTION: ['Protection', '防护'],
+    ACCESS_DENIED: ['You do not have access to this resource.', '你没有权限访问此资源。'],
+    RATE_LIMITED: ['Too many attempts. Try again later.', '尝试次数过多，请稍后重试。'],
+    INVALID_REQUEST: ['Check the submitted fields and try again.', '请检查填写内容后重试。'],
+    INVALID_CSRF_TOKEN: ['Refresh the page and try again.', '请刷新页面后重试。'],
+    ACCOUNT_EXISTS: ['This username is already registered.', '该用户名已注册。'],
+    INVALID_USERNAME: ['Enter a valid username.', '请输入有效的用户名。'],
+    INVALID_PASSWORD_LENGTH: ['Use at least 12 characters and at most 72 UTF-8 bytes.', '密码至少需要 12 个字符，且不超过 72 个 UTF-8 字节。'],
+    INVALID_ACCOUNT_TRANSITION: ['The account state has changed. Refresh the list.', '账号状态已变更，请刷新列表。'],
+    ORGANIZATION_EXISTS: ['An organization already uses this name.', '已有组织使用该名称。'],
+    MEMBERSHIP_REQUIRES_ACTIVE: ['Select an active account and organization.', '请选择已启用的账号和组织。'],
+    OWNER_MUST_BE_ACTIVE: ['Select an active account or organization.', '请选择已启用的账号或组织。'],
+    ACCOUNT_REGISTERED: ['Account registered', '账号已注册'], ACCOUNT_ACTIVE: ['Account approved', '账号已批准'],
+    ACCOUNT_REJECTED: ['Account rejected', '账号申请已驳回'], ACCOUNT_DISABLED: ['Account disabled', '账号已停用'],
+    ORGANIZATION_CREATED: ['Organization created', '已创建组织'], ORGANIZATION_UPDATED: ['Organization updated', '已更新组织'],
+    MEMBERSHIP_ADDED: ['Member added', '已添加成员'], MEMBERSHIP_REMOVED: ['Member removed', '已移除成员'],
+    PROJECT_ASSIGNED: ['Repository assigned', '已分配仓库'],
+    PROJECT_NOT_FOUND: ['This repository is unavailable.', '该仓库不可用。'],
+    ABSOLUTE_PROJECT_ROOT_REQUIRED: ['Enter the repository’s absolute path.', '请输入仓库的绝对路径。'],
+    PROJECT_ROOT_UNAVAILABLE: ['The repository directory is unavailable.', '仓库目录不可用。'],
+    PROJECT_ROOT_NOT_DIRECTORY: ['Select a repository directory.', '请选择仓库目录。'],
+    PROJECT_ROOT_OUTSIDE_ALLOWED_DIRECTORY: ['Use a directory inside the configured workspace root.', '请使用配置的工作区根目录下的目录。'],
+    INDEX_ALREADY_RUNNING: ['This repository is already being indexed.', '此仓库正在索引。'],
+    INDEX_CAPACITY_EXHAUSTED: ['The indexer is busy. Try again later.', '索引服务繁忙，请稍后重试。'],
+    SYNTAX_ERROR: ['Syntax error', '语法错误'], PARSE_TIMEOUT: ['Parsing timed out', '解析超时'],
+    FILE_CHECK_FAILED: ['Could not check the file', '无法检查文件'], FILE_LIMIT_EXCEEDED: ['File limit exceeded', '超过文件数量上限'],
+    INDEX_CANCELLED: ['Indexing was cancelled.', '索引已取消。'], PROJECT_INDEX_FAILED: ['Repository indexing failed.', '仓库索引失败。'],
+    SOURCE_FILE_NOT_FOUND: ['The source file could not be found.', '找不到源文件。'],
+    AMBIGUOUS_GRAPH_TARGET: ['Multiple symbols share this name. Use a symbol ID.', '存在多个同名符号，请使用符号 ID。'],
+    AMBIGUOUS_RESULT_USE_PROJECT_ID: ['Multiple repositories matched. Select a repository.', '有多个仓库匹配，请选择一个仓库。'],
+    ARCHIVE_EMPTY: ['The archive is empty.', '归档为空。'], ARCHIVE_FILE_REQUIRED: ['Choose a source archive.', '请选择源码归档。'],
+    UNSUPPORTED_ARCHIVE_TYPE: ['This archive format is not supported.', '不支持此归档格式。'],
+    INVALID_ARCHIVE: ['The source archive could not be read.', '无法读取源码归档。'],
+    UNSAFE_ARCHIVE_ENTRY: ['The archive contains an invalid entry.', '归档包含无效条目。'],
+    BODY_TOO_LARGE: ['The upload exceeds the size limit.', '上传内容超过大小限制。'],
+    INVALID_INPUT: ['Check the submitted fields and try again.', '请检查填写内容后重试。'],
+    ASSET_INDEXING: ['This archive is still being indexed.', '此归档仍在索引。'],
+    ASSET_NOT_READY: ['Wait for archive indexing to finish.', '请等待归档索引完成。'],
+    ASSET_SOURCE_UNAVAILABLE: ['The archived source is unavailable.', '归档源码不可用。'],
+    CODEQL_DATABASE_FAILED: ['CodeQL could not build its analysis database.', 'CodeQL 无法创建分析数据库。'],
+    CODEQL_ANALYSIS_FAILED: ['CodeQL analysis failed.', 'CodeQL 分析失败。'],
+    INVALID_SCANNER_REPORT: ['The scanner returned an invalid report.', '扫描工具返回的报告格式无效。'],
+    SCANNER_OUTPUT_LIMIT: ['The scanner report exceeded the size limit.', '扫描报告超过大小限制。'],
+    CONTEXT_REFERENCE_LIMIT: ['Evidence reference limit reached.', '已达到证据引用上限。'],
+    CONTEXT_BUDGET_LIMIT: ['The evidence pack reached its character budget.', '证据包已达到字符预算。'],
+    NO_CONTEXT_EVIDENCE: ['No context evidence was found.', '未找到上下文证据。'],
+    'empty rawSource': ['Source is unavailable.', '源码不可用。'],
+    'budget exhausted': ['The character budget was exhausted.', '字符预算已用尽。'],
+    'excerpt truncated by budget': ['The excerpt was shortened to fit the budget.', '源码片段已按预算截断。'],
+    BINARY_CHANGE_NOT_REVIEWED: ['Binary changes were omitted.', '已省略二进制文件变更。'],
+    HUNK_EXCEEDS_BUDGET: ['The diff hunk exceeds the review budget.', '该差异块超过评审预算。'],
+    REMOVED_OR_CONTEXT_ONLY_LINES: ['This hunk has only removed lines or context.', '该差异块只有删除行或上下文。'],
+    CHANGED_LINE_NOT_INDEXED: ['The changed line is absent from the index.', '索引中没有该变更行。'],
+    INVALID_DIFF_PATH: ['The diff contains an invalid repository path.', '差异中包含无效的仓库路径。'],
+    INVALID_DIFF_HUNK: ['The diff contains an invalid hunk.', '差异中包含无效的差异块。'],
+    UNSUPPORTED_COMBINED_DIFF: ['Combined diffs are unsupported.', '不支持合并差异。'],
+    DIFF_FILE_LIMIT: ['The diff exceeds the file limit.', '差异中的文件数量超过上限。'],
+    DIFF_HUNK_LIMIT: ['The diff exceeds the hunk limit.', '差异块数量超过上限。'],
+    FILE_PARSE_INCOMPLETE: ['The file change could not be parsed completely.', '未能完整解析该文件的变更。'],
+    NO_TEXT_HUNKS: ['There are no text changes to review.', '没有可评审的文本变更。'],
+    MAX_UNITS_REACHED: ['The review reached its unit limit.', '已达到评审单元上限。'],
+    BUDGET_CLAMPED: ['The character budget was reduced to the supported limit.', '字符预算已降低至支持的上限。'],
+    BASE_VERSION_UNKNOWN: ['The base version is unknown.', '基线版本未知。'], TARGET_VERSION_UNKNOWN: ['The target version is unknown.', '目标版本未知。'],
+    INDEX_LOOKUP_LIMIT: ['The index lookup limit was reached.', '已达到索引查询上限。'],
+    EXTERNAL_FINDING_REFERENCE_LIMIT: ['The external finding reference limit was reached.', '已达到外部报警引用上限。'],
+    VULNERABILITY_REFERENCE_LIMIT: ['The vulnerability reference limit was reached.', '已达到漏洞引用上限。'],
+    PARSE_FAILED: ['Parsing failed.', '解析失败。'], MODULE_UNAVAILABLE: ['The module is unavailable.', '模块不可用。'],
+    POM_LIMIT: ['The Maven POM limit was reached.', '已达到 Maven POM 数量上限。'],
+    PARENT_DEPTH_LIMIT: ['The parent manifest depth limit was reached.', '已达到父清单层数上限。'],
+    DEPENDENCY_LIMIT: ['The dependency limit was reached.', '已达到依赖数量上限。'],
+    SUBPROJECT_LIMIT: ['The subproject limit was reached.', '已达到子项目数量上限。'],
+    DECLARATION_LIMIT: ['The dependency declaration limit was reached.', '已达到依赖声明数量上限。']
+};
 const views: View[] = ['repositories', 'overview', 'search', 'graph', 'evidence', 'wiki', 'findings', 'review-queue', 'vulnerabilities',
     'scan-history', 'triage-agent', 'change-review', 'benchmark', 'admin'];
 const originals = new Map<Element, string>();
 const staticEnglish = new Map<string, string>();
-let language: Language = preference('language') === 'zh' || (!preference('language') && navigator.language.startsWith('zh'))
-    ? 'zh' : 'en';
-let theme = preference('theme') === 'light' ? 'light' : 'dark';
-let projects: Project[] = [];
+const liveMessages = new WeakMap<HTMLElement, () => string>();
+let language = preferredLanguage();
+let theme = preference('theme') === 'dark' ? 'dark' : 'light';
+let sidebarCollapsed = preference('sidebar') === 'compact';
+let projects: DashboardProject[] = [];
+let repositoryFilter = 'all';
 let view: View = 'repositories';
 let selected = '';
 let connected = false;
@@ -459,8 +601,13 @@ let flowView: { result: FlowAnalysis; nodeId: string; includeDependencies: boole
 let account: Account | undefined;
 let administration: Administration | undefined;
 let organizationMembers: Account[] = [];
+let searchHits: Hit[] = [];
+let searchPreview = 0;
+let graphView: { data: GraphDiagram; relation: string; target: string; projectId: string } | undefined;
 let nextPage: { path: string; args: Record<string, string>; offset: number } | undefined;
 let indexRequest: AbortController | undefined;
+let indexJob: IndexJob | undefined;
+let repositoryDialogOpener: HTMLElement | undefined;
 let archiveRequest: AbortController | undefined;
 let sourceFocus: HTMLElement | null = null;
 let overview: ProjectStats | undefined;
@@ -494,32 +641,48 @@ let vulnDetail: VulnerabilityDetail | undefined;
 const vulnPageSize = 25;
 let wikiSummary: { tree: WikiNode[]; document: SummaryDocument } | undefined;
 let wikiRun: AgentRun | undefined;
+const wikiReader = new DocumentReader(element('wiki-content'), t, {
+    storage: element('wiki-controls'), picker: element('wiki-document-picker'), actions: element('wiki-actions')
+});
+let architectureReader: DocumentReader | undefined;
 let sbom: Sbom | undefined;
 let dependencyScan: DependencyScanResult | undefined;
 let archiveOverview: { asset: ArchiveAsset; profile?: ArchiveProfile } | undefined;
 const controllers = new Map<string, AbortController>();
-const notes = new Map<string, { key: string; detail: string; kind?: Severity }>();
+const notes = new Map<string, { key: string; detail: string | (() => string); kind?: Severity }>();
 
 function element<T extends HTMLElement>(id: string) { return document.getElementById(id) as T; }
 function input(id: string) { return element<HTMLInputElement>(id); }
 function select(id: string) { return element<HTMLSelectElement>(id); }
-function el(tag: string, text = '', className = '') {
+function el(tag: string, text: string | (() => string) = '', className = '') {
     const node = document.createElement(tag);
-    node.textContent = text;
+    if (typeof text === 'function') {
+        liveMessages.set(node, text);
+        node.dataset.localized = '';
+        node.textContent = text();
+    } else node.textContent = text;
     if (className) node.className = className;
     return node;
 }
-function preference(key: string, value?: string) {
-    const name = `repograph.${key}`;
-    try {
-        if (value !== undefined) localStorage.setItem(name, value);
-        return localStorage.getItem(name);
-    } catch { return null; }
-}
 function t(key: string) {
-    return (language === 'zh' ? zh[key] : englishDynamic[key]) ?? staticEnglish.get(key) ?? key;
+    const catalog = language === 'zh' ? zh : englishDynamic;
+    if (Object.hasOwn(catalog, key)) return catalog[key];
+    if (Object.hasOwn(uiLabels, key)) return uiLabels[key][language === 'zh' ? 1 : 0];
+    return staticEnglish.get(key) ?? key;
 }
-function report(id: string, key = '', detail = '', kind?: Severity) {
+function messageKey(code: string) {
+    const key = Object.hasOwn(messagesByCode, code) ? messagesByCode[code] : code;
+    return Object.hasOwn(zh, key) || Object.hasOwn(uiLabels, key) ? key : undefined;
+}
+function diagnostic(message: string) {
+    const split = message.lastIndexOf(': ');
+    const key = messageKey(message.slice(split < 0 ? 0 : split + 2));
+    return key ? (split < 0 ? '' : message.slice(0, split + 2)) + t(key) : message;
+}
+function formatNumber(value: number, fractionDigits?: number) {
+    return value.toLocaleString(language, { minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits });
+}
+function report(id: string, key = '', detail: string | (() => string) = '', kind?: Severity) {
     const node = element(id);
     node.hidden = !key;
     if (!key) {
@@ -527,25 +690,31 @@ function report(id: string, key = '', detail = '', kind?: Severity) {
         return;
     }
     notes.set(id, { key, detail, kind });
-    node.textContent = key === 'matches' ? `${detail} ${t(detail === '1' ? 'match' : 'matches')}`
-        : [t(key), detail].filter(Boolean).join(' · ');
+    const value = typeof detail === 'function' ? detail() : detail;
+    node.textContent = key === 'matches' ? `${formatNumber(Number(value))} ${t(value === '1' ? 'match' : 'matches')}`
+        : [t(key), value].filter(Boolean).join(' · ');
     node.dataset.kind = kind ?? '';
 }
 function localize() {
-    document.documentElement.lang = language === 'zh' ? 'zh-CN' : 'en';
+    const draftFields = () => document.querySelectorAll<HTMLTextAreaElement | HTMLSelectElement>('[data-locale-draft]');
+    const drafts = new Map([...draftFields()].map(field => [field.dataset.localeDraft, field.value]));
+    setDocumentLanguage(language);
     document.documentElement.dataset.theme = theme;
     for (const [node, original] of originals) {
         const item = node as HTMLElement;
-        if (item.dataset.text) item.textContent = language === 'zh' ? zh[item.dataset.text] ?? original : original;
+        if (item.dataset.text) item.textContent = language === 'zh' ? t(item.dataset.text) : original;
         else if (item.dataset.placeholder) item.setAttribute('placeholder', language === 'zh' ? zh[item.dataset.placeholder] ?? original : original);
-        else if (item.dataset.aria) item.setAttribute('aria-label', language === 'zh' ? zh[item.dataset.aria] ?? original : original);
+        else if (item.dataset.aria) item.setAttribute('aria-label', language === 'zh' && messageKey(item.dataset.aria) ? t(item.dataset.aria) : original);
     }
-    element('theme').textContent = t(theme === 'dark' ? 'light' : 'dark');
-    element('language').textContent = language === 'en' ? '中文' : 'English';
-    element('language').setAttribute('aria-label', language === 'en' ? 'Switch to Chinese' : '切换为英文');
+    renderSidebar();
+    renderThemeControl();
     element('current-view').textContent = t(view);
     for (const [id, note] of notes) report(id, note.key, note.detail, note.kind);
-    for (const button of document.querySelectorAll<HTMLElement>('[data-label]')) button.textContent = t(button.dataset.label!);
+    for (const node of document.querySelectorAll<HTMLElement>('[data-localized]')) {
+        const text = liveMessages.get(node);
+        if (text) node.textContent = text();
+    }
+    if (indexJob && !element('index-status').hidden && !notes.has('index-status')) showJob(indexJob);
     if (view === 'overview' && overview) renderOverview(overview);
     renderWatch();
     if (view === 'overview' && quality) renderQuality(quality.measure, quality.result);
@@ -568,11 +737,17 @@ function localize() {
     if (view === 'wiki' && wikiRun) renderWikiRun(wikiRun);
     if (view === 'overview' && sbom) renderSbom(sbom);
     if (view === 'overview' && dependencyScan) renderDependencyScan(dependencyScan);
+    if (view === 'search') renderSearchResults();
+    if (view === 'graph' && graphView) renderGraphResults(graphView);
     if (view === 'graph' && flowView) renderFlow(flowView);
     if (view === 'overview' && archiveOverview) renderArchiveProfile(archiveOverview.asset, archiveOverview.profile);
-    if (view === 'admin' && administration) renderAdministration(administration);
+    if (view === 'admin' && administration) renderAdministration(administration, true);
     if (view === 'admin' && providers.length) renderProviderChoices();
     renderProjects();
+    for (const field of draftFields()) {
+        const draft = drafts.get(field.dataset.localeDraft);
+        if (draft !== undefined) field.value = draft;
+    }
 }
 for (const item of document.querySelectorAll<HTMLElement>('[data-text], [data-placeholder], [data-aria]')) {
     const original = item.dataset.text ? item.textContent?.trim()
@@ -614,7 +789,7 @@ function showFailure(id: string, error: unknown) {
             showLogin('expired');
             return;
         }
-        const known = messagesByCode[error.code];
+        const known = messageKey(error.code);
         report(id, known ?? 'failed', known ? '' : error.code, 'error');
     } else report(id, 'noNetwork', '', 'error');
 }
@@ -635,9 +810,30 @@ async function run<T>(key: string, task: (signal: AbortSignal) => Promise<T>, su
     }
 }
 
+function renderThemeControl() {
+    const control = element('theme');
+    control.setAttribute('aria-pressed', String(theme === 'dark'));
+    const label = t('toggleTheme');
+    control.setAttribute('aria-label', label);
+    control.title = label;
+}
+
 function closeMenu() {
     element('sidebar').classList.remove('open');
+    element('nav-scrim').hidden = true;
+    element('workspace-app').inert = false;
     element('menu').setAttribute('aria-expanded', 'false');
+}
+function renderSidebar() {
+    element('workspace').dataset.sidebar = sidebarCollapsed ? 'compact' : 'full';
+    const toggle = element('collapse-nav');
+    const label = t(sidebarCollapsed ? 'expandNavigation' : 'collapseNavigation');
+    toggle.setAttribute('aria-expanded', String(!sidebarCollapsed));
+    toggle.setAttribute('aria-label', label);
+    toggle.title = label;
+    for (const link of document.querySelectorAll<HTMLAnchorElement>('.sidebar nav a[data-view]')) {
+        link.title = sidebarCollapsed ? t(link.dataset.view ?? '') : '';
+    }
 }
 function route(view: View, project: string, params: Record<string, string> = {}) {
     const query = new URLSearchParams({ ...(view === 'repositories' ? {} : { view }), ...params });
@@ -650,6 +846,7 @@ function isUuid(value: string | null): value is string {
 function navigate(next: View, project = selected, params: Record<string, string> = {}) {
     history.pushState(null, '', route(next, project, params));
     readRoute();
+    window.scrollTo(0, 0);
 }
 function readRoute() {
     const params = new URL(location.href).searchParams;
@@ -665,6 +862,8 @@ function readRoute() {
     const previous = view;
     if (previous === 'admin' && destination !== 'admin') input('provider-key').value = '';
     if (selected !== project || view !== destination) {
+        if (previous === 'wiki') wikiReader.suspend();
+        if (previous === 'overview') architectureReader?.suspend();
         for (const [key, controller] of controllers) {
             if (key === 'repositories' || (key === 'benchmark' && previous === destination)) continue;
             controller.abort();
@@ -672,6 +871,9 @@ function readRoute() {
         }
         if (selected !== project) {
             flowView = undefined;
+            graphView = undefined;
+            searchHits = [];
+            searchPreview = 0;
             for (const panel of ['search', 'graph', 'evidence']) {
                 element(`${panel}-results`).replaceChildren();
                 report(`${panel}-status`);
@@ -751,59 +953,229 @@ function readRoute() {
 }
 
 function resultButton(label: string, action: () => void) {
-    const control = el('button', t(label)) as HTMLButtonElement;
+    const control = el('button', () => t(label)) as HTMLButtonElement;
     control.type = 'button';
-    control.dataset.label = label;
     control.addEventListener('click', action);
     return control;
 }
 
+function repositoryName(project: DashboardProject) {
+    return project.archiveName || project.projectName || project.projectId;
+}
+
+function workbenchIcon(name: string, className = '') {
+    const icon = el('span', '', `nav-icon icon-${name} ${className}`);
+    icon.setAttribute('aria-hidden', 'true');
+    return icon;
+}
+
+function repositoryStatus(project: DashboardProject) {
+    const status = project.indexStatus;
+    const [label, icon] = {
+        done: ['repositoryReady', 'ready'], running: ['repositoryIndexing', 'indexing'],
+        partial: ['repositoryPartial', 'partial'], error: ['indexError', 'partial'], idle: ['repositoryIdle', 'clock']
+    }[status];
+    const badge = el('span', '', 'repository-status');
+    badge.dataset.status = status;
+    badge.append(workbenchIcon(icon), t(label));
+    return badge;
+}
+
+function repositoryTime(indexedAt: string) {
+    const time = document.createElement('time');
+    time.dateTime = indexedAt;
+    const date = new Date(indexedAt);
+    time.textContent = date.toDateString() === new Date().toDateString()
+        ? date.toLocaleTimeString(language, { timeStyle: 'short' })
+        : date.toLocaleDateString(language, { dateStyle: 'medium' });
+    time.title = date.toLocaleString(language);
+    return time;
+}
+
+function renderWorkspaceSummary() {
+    const total = projects.length;
+    const ready = projects.filter(project => project.indexStatus === 'done').length;
+    const percent = new Intl.NumberFormat(language, { style: 'percent' });
+    const readiness = total ? ready / total : 0;
+    const ring = el('span', '', 'summary-ring');
+    ring.setAttribute('aria-hidden', 'true');
+    ring.style.setProperty('--readiness', `${readiness * 100}%`);
+    const bars = (field: 'fileCount' | 'nodeCount', className: string) => {
+        const chart = el('span', '', `summary-bars ${className}`);
+        chart.setAttribute('aria-hidden', 'true');
+        // Aggregate neighboring repositories when the graphic has more than eight values.
+        const values = Array.from({ length: Math.min(8, total) }, () => 0);
+        projects.forEach((project, index) => {
+            values[Math.floor(index * values.length / total)] += project[field];
+        });
+        const max = Math.max(1, ...values);
+        for (const count of values) {
+            const bar = el('i');
+            bar.style.height = `${Math.max(4, 44 * count / max)}px`;
+            chart.append(bar);
+        }
+        return chart;
+    };
+    const cell = (label: string, value: string, detail: string, graphic: HTMLElement) => {
+        const group = el('div', '', 'summary-cell');
+        const count = el('dd', '', 'summary-value');
+        count.append(el('strong', value), graphic);
+        group.append(el('dt', t(label)), count, el('dd', detail, 'summary-detail'));
+        return group;
+    };
+    element('workspace-summary').replaceChildren(
+        cell('workspaceRepositories', formatNumber(total), t('workspaceSources'), workbenchIcon('repo', 'summary-icon')),
+        cell('workspaceFiles', formatNumber(projects.reduce((sum, project) => sum + project.fileCount, 0)), t('workspaceAcrossProjects'), bars('fileCount', 'file-bars')),
+        cell('workspaceSymbols', formatNumber(projects.reduce((sum, project) => sum + project.nodeCount, 0)), t('workspaceSnapshot'), bars('nodeCount', 'symbol-bars')),
+        cell('workspaceReadiness', total ? percent.format(readiness) : '—', `${formatNumber(ready)} / ${formatNumber(total)} ${t('workspaceReady')}`, ring)
+    );
+
+    const completed = projects.filter(project => project.indexedAt)
+        .sort((a, b) => b.indexedAt.localeCompare(a.indexedAt)).slice(0, 3);
+    element('repository-activity').replaceChildren(...(completed.length ? completed.map(project => {
+        const item = el('a', '', 'repo-event') as HTMLAnchorElement;
+        item.href = route('overview', project.projectId);
+        item.dataset.openRepository = project.projectId;
+        const text = el('span');
+        text.append(el('strong', repositoryName(project)), el('small', t('workspaceUpdated')));
+        item.append(workbenchIcon('clock'), text, repositoryTime(project.indexedAt));
+        return item;
+    }) : [el('p', t('workspaceNoActivity'), 'workspace-empty')]));
+
+    const byLanguage = new Map<string, number>();
+    for (const project of projects) {
+        const name = project.mainLanguage ?? 'workspaceUnknownLanguage';
+        byLanguage.set(name, (byLanguage.get(name) ?? 0) + 1);
+    }
+    const distribution = [...byLanguage].sort(([a, ac], [b, bc]) => bc - ac || t(a).localeCompare(t(b), language));
+    const graph = el('div', '', 'workspace-lang-bar');
+    graph.setAttribute('aria-hidden', 'true');
+    const legend = el('ul', '', 'workspace-lang-legend');
+    for (const [name, count] of distribution) {
+        const bar = el('i');
+        bar.style.flexGrow = String(count);
+        graph.append(bar);
+        const item = el('li');
+        item.append(el('i'), el('span', t(name)), el('span', percent.format(count / total)));
+        legend.append(item);
+    }
+    element('repository-languages').replaceChildren(...(total
+        ? [graph, legend] : [el('p', t('workspaceNoLanguages'), 'workspace-empty')]));
+}
+
 function renderProjects() {
-    const list = element('repository-list');
-    if (!list) return;
     const projectControl = select('project');
     projectControl.replaceChildren(new Option(t('choose'), ''), ...projects.map(project =>
-        new Option(project.projectName || project.projectId, project.projectId)));
+        new Option(repositoryName(project), project.projectId)));
     projectControl.value = selected;
-    element('repo-count').textContent = String(projects.length);
-    if (!projects.length) {
-        list.replaceChildren(el('p', t('emptyRepos'), 'empty'));
-        return;
+    renderWorkspaceSummary();
+    renderRepositoryList();
+}
+
+function renderRepositoryList() {
+    const query = input('repo-filter').value.trim().toLocaleLowerCase(language);
+    const source = select('repo-kind').value;
+    const matching = projects.filter(project =>
+        (source === 'all' || Boolean(project.assetId) === (source === 'archive')) &&
+        [repositoryName(project), project.projectRoot, project.projectId, t(project.mainLanguage ?? '')]
+            .some(value => value.toLocaleLowerCase(language).includes(query)));
+    for (const control of document.querySelectorAll<HTMLButtonElement>('[data-repo-status]')) {
+        const status = control.dataset.repoStatus;
+        control.setAttribute('aria-pressed', String(status === repositoryFilter));
+        control.querySelector('small')!.textContent = formatNumber(status === 'all' ? matching.length
+            : matching.filter(project => project.indexStatus === status).length);
     }
-    list.replaceChildren(...projects.map(project => {
-        const article = el('article', '', `repo-row${selected === project.projectId ? ' current' : ''}`);
-        const description = el('div');
-        description.append(el('h3', project.projectName || project.projectId), el('p', project.projectRoot, 'mono'));
-        const metrics = el('div', '', 'repo-meta');
-        metrics.append(el('span', `${project.nodeCount} ${t('units')}`), el('span', project.projectId, 'mono'));
-        if (project.assetId) metrics.append(el('span', t('assetsArchive'), 'kind'));
-        if (project.indexedAt) metrics.append(el('time', new Date(project.indexedAt).toLocaleString(language)));
-        description.append(metrics);
-        const actions = el('div', '', 'row-actions');
-        actions.append(resultButton('overview', () => navigate('overview', project.projectId)), resultButton('openSearch', () => {
-            select('search-scope').value = 'current';
-            navigate('search', project.projectId);
-        }));
-        if (account?.role === 'ADMIN') {
-            if (!project.assetId) actions.append(resultButton('indexRepository', () => {
-                input('directory').value = project.projectRoot;
-                input('directory').focus();
-            }));
-            actions.append(resultButton(project.assetId ? 'removeArchive' : 'remove', () => {
-                if (!confirm(t(project.assetId ? 'removeArchiveConfirm' : 'removeConfirm'))) return;
-                void run('repositories', signal => api('/index/project', { projectId: project.projectId }, { method: 'DELETE', signal }), () => {
-                    if (selected === project.projectId) navigate('repositories', '');
-                    void refreshProjects();
-                });
-            }));
-        }
-        article.append(description, actions);
-        return article;
+    const filtered = matching.filter(project => repositoryFilter === 'all' || project.indexStatus === repositoryFilter)
+        .sort((a, b) => b.indexedAt.localeCompare(a.indexedAt) || repositoryName(a).localeCompare(repositoryName(b), language));
+    const empty = element('repository-empty');
+    empty.hidden = filtered.length > 0;
+    empty.textContent = t(projects.length ? 'repositoryFilterEmpty' : 'emptyRepos');
+    element('repository-list').replaceChildren(...filtered.map(repositoryRow));
+}
+
+function repositoryRow(project: DashboardProject) {
+    const name = repositoryName(project);
+    const row = el('tr');
+    row.classList.toggle('current', selected === project.projectId);
+    const identity = el('th', '', 'repo-identity');
+    identity.setAttribute('scope', 'row');
+    const group = el('div');
+    const text = el('div');
+    const link = el('a', name, 'repository-name') as HTMLAnchorElement;
+    link.href = route('overview', project.projectId);
+    link.dataset.openRepository = project.projectId;
+    const path = el('span', project.archiveName ? t('assetsArchive') : project.projectRoot, 'repo-path mono');
+    path.title = path.textContent;
+    text.append(link, path);
+    if (project.mainLanguage || project.indexedAt) {
+        const metadata = el('span', project.mainLanguage ? t(project.mainLanguage) : '', 'repo-mobile-meta');
+        if (project.indexedAt) metadata.append(repositoryTime(project.indexedAt));
+        text.append(metadata);
+    }
+    const glyph = workbenchIcon(project.assetId ? 'box' : 'repo');
+    const tile = el('span', '', 'repo-tile');
+    tile.dataset.color = String(parseInt(project.projectId.slice(-2), 16) % 5);
+    tile.append(glyph);
+    group.append(tile, text);
+    identity.append(group);
+
+    const mainLanguage = el('td', '', 'repo-language');
+    if (project.mainLanguage) {
+        const label = el('span', t(project.mainLanguage), 'repo-language-label');
+        label.dataset.language = project.mainLanguage;
+        mainLanguage.append(label);
+    } else mainLanguage.textContent = '—';
+    const status = el('td');
+    status.append(repositoryStatus(project));
+    const updated = el('td', '', 'repo-updated mono');
+    updated.append(project.indexedAt ? repositoryTime(project.indexedAt) : '—');
+    const actions = el('td', '', 'repo-actions');
+    const menu = el('details', '', 'action-popover');
+    menu.dataset.dropdown = '';
+    const trigger = el('summary', '···', 'icon-button');
+    trigger.setAttribute('aria-label', t('repositoryActions') + ' · ' + name);
+    const items = el('div', '', 'popover-items');
+    items.append(resultButton('openSearch', () => {
+        select('search-scope').value = 'current';
+        navigate('search', project.projectId);
     }));
+    if (account?.role === 'ADMIN') {
+        if (!project.assetId) items.append(resultButton('indexRepository', () => {
+            input('directory').value = project.projectRoot;
+            openRepositoryDialog('local', trigger);
+        }));
+        items.append(resultButton(project.assetId ? 'removeArchive' : 'remove', () => {
+            if (!confirm(t(project.assetId ? 'removeArchiveConfirm' : 'removeConfirm'))) return;
+            void run('repositories', signal => api('/index/project', { projectId: project.projectId }, { method: 'DELETE', signal }), () => {
+                if (selected === project.projectId) navigate('repositories', '');
+                void refreshProjects();
+            });
+        }));
+    }
+    menu.append(trigger, items);
+    actions.append(menu);
+    row.append(identity, mainLanguage, status, updated, actions);
+    return row;
+}
+
+function selectRepositorySource(source: 'local' | 'archive') {
+    element('local-index').hidden = source !== 'local';
+    element('archive-upload').hidden = source !== 'archive';
+    for (const tab of document.querySelectorAll<HTMLButtonElement>('[data-connect-source]')) {
+        tab.setAttribute('aria-pressed', String(tab.dataset.connectSource === source));
+    }
+}
+
+function openRepositoryDialog(source: 'local' | 'archive', opener = element('connect-repository')) {
+    if (account?.role !== 'ADMIN') return;
+    repositoryDialogOpener = opener;
+    selectRepositorySource(source);
+    element<HTMLDialogElement>('index-section').showModal();
+    input(source === 'local' ? 'directory' : 'archive-file').focus();
 }
 
 function refreshProjects() {
-    return run('repositories', signal => api<Project[]>('/projects', {}, { signal }), result => {
+    return run('repositories', signal => api<DashboardProject[]>('/projects', { summary: 'true' }, { signal }), result => {
         projects = result;
         if (account?.role === 'USER' && selected && !projects.some(project => project.projectId === selected)) {
             navigate(view, '');
@@ -822,7 +1194,11 @@ function loadOverview() {
     renderWatch();
     resetSbom();
     element('overview-data').replaceChildren();
+    document.getElementById('overview-distributions')?.remove();
     element('overview-root').textContent = '';
+    element('overview-title').textContent = t('overview');
+    element('overview-state').hidden = true;
+    element('overview-actions').hidden = true;
     element('archive-profile').hidden = true;
     element('profile-content').replaceChildren();
     report('profile-status');
@@ -858,7 +1234,14 @@ function renderWatch() {
 
 function renderOverview(data: ProjectStats) {
     const content = element('overview-data');
-    element('overview-root').textContent = data.projectRoot;
+    const project = projects.find(project => project.projectId === selected);
+    element('overview-title').textContent = project ? repositoryName(project) : t('overview');
+    element('overview-root').textContent = project?.archiveName ?? data.projectRoot;
+    element('overview-state').hidden = !project;
+    element('overview-state').replaceChildren(...(project ? [repositoryStatus(project)] : []));
+    element('overview-updated').hidden = !project?.indexedAt;
+    if (project?.indexedAt) element('overview-updated').replaceChildren(t('repositoryUpdated') + ' · ', repositoryTime(project.indexedAt));
+    element('overview-actions').hidden = !data.projectRoot;
     if (!data.projectRoot) {
         report('overview-status', 'noResults');
         return;
@@ -866,13 +1249,14 @@ function renderOverview(data: ProjectStats) {
     report('overview-status');
     element('quality-panel').hidden = false;
     element('sbom-section').hidden = false;
-    const metrics = el('div', '', 'metrics');
+    const hero = el('section', '', 'overview-hero');
+    const metrics = el('dl', '', 'overview-metrics');
     for (const [name, count] of [
         ['allFiles', data.totalFiles], ['allUnits', data.totalUnits], ['allRelations', data.totalEdges],
         ['testUnits', data.testCount], ['entryPoints', data.entryPointCount]
     ] as const) {
-        const metric = el('section', '', 'surface metric');
-        metric.append(el('h2', t(name)), el('strong', String(count)));
+        const metric = el('div');
+        metric.append(el('dt', t(name)), el('dd', formatNumber(count)));
         metrics.append(metric);
     }
     const distributions = el('div', '', 'distributions');
@@ -880,7 +1264,7 @@ function renderOverview(data: ProjectStats) {
         ['languageBreakdown', data.languageDistribution], ['symbolKinds', data.kindDistribution],
         ['relationKinds', data.edgeKindDistribution], ['frameworks', data.frameworkDistribution]
     ] as const) {
-        const rows = Object.entries(distribution).sort(([a, ac], [b, bc]) => bc - ac || a.localeCompare(b));
+        const rows = Object.entries(distribution).sort(([a, ac], [b, bc]) => bc - ac || t(a).localeCompare(t(b), language));
         if (!rows.length) continue;
         const panel = el('section', '', 'surface distribution');
         panel.append(el('h2', t(name)));
@@ -890,16 +1274,22 @@ function renderOverview(data: ProjectStats) {
             const meter = el('meter') as HTMLMeterElement;
             meter.max = maximum;
             meter.value = count;
-            meter.setAttribute('aria-label', label);
-            row.append(el('span', label), meter, el('strong', String(count)));
+            meter.setAttribute('aria-label', t(label));
+            row.append(el('span', t(label)), meter, el('strong', formatNumber(count)));
             panel.append(row);
         }
         distributions.append(panel);
     }
-    content.replaceChildren(metrics, distributions);
+    hero.append(el('h2', t('indexOverview')), metrics);
+    content.replaceChildren(hero);
+    distributions.id = 'overview-distributions';
+    document.getElementById(distributions.id)?.remove();
+    element('overview-actions').after(distributions);
 }
 
 function resetQuality() {
+    architectureReader?.clear();
+    architectureReader = undefined;
     quality = undefined;
     element('quality-panel').hidden = true;
     element<HTMLDetailsElement>('quality-panel').open = false;
@@ -1050,7 +1440,7 @@ function renderScanHistory(history: ScanHistoryView) {
     content.replaceChildren(back);
     const observations = (findings: ExternalFinding[], paging: { page: number; size: number; total: number }, params: Record<string, string>) =>
         section('scanObservations', qualityTable(['findingRule', 'file', 'findingSeverity', 'scanMessage'], findings.map(finding => [
-            finding.ruleId, evidenceLocation(finding.filePath, finding.startLine, finding.endLine), finding.severity, finding.message
+            finding.ruleId, evidenceLocation(finding.filePath, finding.startLine, finding.endLine), t(finding.severity), finding.message
         ])), scanHistoryPager(projectId, paging, 'findingsPage', params));
     if (history.type === 'task') {
         const { task, observations: page } = history;
@@ -1060,7 +1450,7 @@ function renderScanHistory(history: ScanHistoryView) {
         const detail = section('scanTask', metadata);
         if (task.assetId) detail.append(el('p', [t(task.assetAvailable ? 'scanAsset' : 'scanMissingAsset'), task.assetId].join(' · '), 'hint'));
         if (task.originalStatus) detail.append(el('p', [t('scanOriginalState'), status(task.originalStatus)].join(' · '), 'hint'));
-        if (task.error) detail.append(el('p', t(task.error), 'hint'));
+        if (task.error) detail.append(el('p', diagnostic(task.error), 'hint'));
         const action = activeScan(task) ? 'cancel' : ['FAILED', 'PARTIAL', 'CANCELLED'].includes(task.status) ? 'retry' : null;
         if (task.execution === 'LOCAL' && action) {
             const button = resultButton(action === 'cancel' ? 'cancelScan' : 'retryScan', () => {
@@ -1082,7 +1472,7 @@ function renderScanHistory(history: ScanHistoryView) {
         scanRun.toolVersion || '—', String(scanRun.exitCode), scanRun.batchId || '—'
     ]]);
     const detail = section('scanRun', metadata);
-    if (scanRun.error) detail.append(el('p', t(scanRun.error), 'hint'));
+    if (scanRun.error) detail.append(el('p', diagnostic(scanRun.error), 'hint'));
     const offset = page * scanHistoryPageSize;
     content.append(detail, observations(scanRun.findings.slice(offset, offset + scanHistoryPageSize),
         { page, size: scanHistoryPageSize, total: scanRun.findingCount }, { scan: scanRun.scanId }));
@@ -1108,7 +1498,7 @@ async function loadBenchmark() {
         if (controller.signal.aborted) return;
         if (benchmarkView && !(error instanceof RequestError && error.status === 401)) {
             const reason = error instanceof RequestError ? error.code : '';
-            report('benchmark-status', 'benchmarkRetained', reason, 'warning');
+            report('benchmark-status', 'benchmarkRetained', () => diagnostic(reason), 'warning');
         } else showFailure('benchmark-status', error);
     } finally {
         if (controllers.get('benchmark') === controller) {
@@ -1128,7 +1518,9 @@ function renderBenchmark(snapshot: BenchmarkSnapshot | null) {
         return;
     }
     rememberOpenBenchmarkCases(content);
-    const origin = el('p', [snapshot.projectLabel, snapshot.embedding?.model, snapshot.generatedAt].filter(Boolean).join(' · '), 'benchmark-origin hint');
+    const date = new Date(snapshot.generatedAt);
+    const generatedAt = Number.isNaN(date.getTime()) ? snapshot.generatedAt : date.toLocaleString(language);
+    const origin = el('p', [snapshot.projectLabel, snapshot.embedding?.model, generatedAt].filter(Boolean).join(' · '), 'benchmark-origin hint');
     content.replaceChildren(origin, renderBenchmarkSuite('semantic', snapshot.semantic), renderBenchmarkSuite('code', snapshot.code));
     if (focus) {
         const target = [...content.querySelectorAll<HTMLElement>('[data-benchmark-focus]')].find(node => node.dataset.benchmarkFocus === focus);
@@ -1236,6 +1628,27 @@ function renderQuality(measure: QualityMeasure, data: unknown) {
     }
 }
 
+function readerSource(projectId: string, label: string, path: string, start?: number, end?: number, symbol?: string, description?: string): ReaderSource {
+    const location = path + (start ? ':' + start + (end && end > start ? '–' + end : '') : '');
+    const source: ReaderSource = { label, description, location, filename: path.split('/').at(-1) };
+    if (!path || !start || start < 1) return source;
+    const args = indexedLocation(path, start);
+    source.href = route('graph', projectId, args);
+    source.open = () => navigate('graph', projectId, args);
+    source.excerpt = async signal => {
+        const unit = await api<CodeUnit>('/locate', { ...args, projectId }, { signal }).catch(error => {
+            if (error instanceof RequestError && error.status === 404) return undefined;
+            throw error;
+        });
+        if (!unit || unit.filePath !== path || (symbol && unit.qualifiedName !== symbol) || unit.startLine > start || unit.endLine < start) return;
+        const offset = start - unit.startLine;
+        const count = Math.min(12, (end ?? unit.endLine) - start + 1);
+        const lines = unit.rawSource.split(/\r?\n/).slice(offset, offset + count).map(line => line.slice(0, 1600));
+        return lines.some(line => line.trim()) ? { firstLine: start, lines } : undefined;
+    };
+    return source;
+}
+
 function streamArchitecture(projectId: string, signal: AbortSignal): Promise<ArchitectureReview> {
     return new Promise((resolve, reject) => {
         if (signal.aborted) { reject(signal.reason); return; }
@@ -1266,40 +1679,56 @@ function streamArchitecture(projectId: string, signal: AbortSignal): Promise<Arc
 }
 
 function renderArchitecture(content: HTMLElement, review: ArchitectureReview) {
-    content.replaceChildren(el('p', t(review.status === 'DISABLED' ? 'architectureDisabled'
-        : review.status === 'FAILED' ? 'architectureFailed' : 'COMPLETED'), 'hint'));
-    for (const observation of review.observations) content.append(el('p', observation));
-    if (review.candidates.length) content.append(el('h3', t('architectureSuggestions')));
+    if (!architectureReader) {
+        const reader = el('div', '', 'document-reader');
+        reader.id = 'architecture-reader';
+        reader.dataset.documentReader = '';
+        content.replaceChildren(reader);
+        architectureReader = new DocumentReader(reader, t);
+    }
+    const references = review.evidence.map(item => readerSource(review.projectId, item.citationId,
+        item.filePath ?? item.location, item.line, undefined, undefined, item.summary));
+    const byId = new Map(review.evidence.map((item, index) => [item.citationId, index]));
+    const sections: { title: string; content: HTMLElement; references?: number[] }[] = [];
+    const evidence = el('ul');
+    for (const item of review.evidence) evidence.append(el('li', item.citationId + ' · ' + item.summary));
+    sections.push({ title: t('architectureEvidence'), content: evidence, references: references.map((_, index) => index) });
+    if (review.observations.length) {
+        const observations = el('ul');
+        observations.append(...review.observations.map(observation => el('li', observation)));
+        sections.push({ title: t('architectureObservations'), content: observations });
+    }
     for (const candidate of review.candidates) {
-        const row = el('section', '', 'architecture-candidate');
-        row.append(el('h3', candidate.title), el('p', [candidate.location, candidate.methodology, ...candidate.citations].join(' · '), 'mono hint'));
+        const row = el('div');
+        row.append(el('p', [candidate.location, candidate.methodology, ...candidate.citations].join(' · '), 'mono hint'));
         for (const [key, value] of [['architectureProblem', candidate.problem], ['architectureSuggestion', candidate.suggestion],
             ['architectureBenefit', candidate.benefit], ['architectureCost', candidate.cost], ['architectureRisk', candidate.risk]]) {
             const field = el('p');
             field.append(el('strong', t(key)), ' · ' + value);
             row.append(field);
         }
-        content.append(row);
+        sections.push({ title: candidate.title, content: row, references: candidate.citations.flatMap(id => {
+            const index = byId.get(id);
+            return index === undefined ? [] : [index];
+        }) });
     }
+    let usage = '';
     if (review.usage) {
         const { inputTokens, outputTokens, costUsd } = review.usage;
-        content.append(el('p', [t('architectureUsage'), review.model, `${inputTokens ?? '—'} / ${outputTokens ?? '—'} tokens`,
+        usage = [t('architectureUsage'), review.model, `${inputTokens ?? '—'} / ${outputTokens ?? '—'} tokens`,
             costUsd === null ? t('architecturePriceUnknown') : new Intl.NumberFormat(language, {
                 style: 'currency', currency: 'USD', maximumFractionDigits: 6
-            }).format(costUsd)].join(' · '), 'hint'));
+            }).format(costUsd)].join(' · ');
     }
-    const rows = review.evidence.map(item => {
-        const { filePath, line } = item;
-        const link = filePath && line ? resultButton('openSource', () => navigate('graph', review.projectId,
-            { file: filePath, line: String(line) })) : '—';
-        return [item.citationId, item.location, item.summary, link];
-    });
-    content.append(el('h3', t('architectureEvidence')), qualityTable(['evidenceReference', 'file', 'evidenceSummary', 'openSource'], rows));
     if (review.missingInfo.length) {
         const omissions = el('ul');
         omissions.append(...review.missingInfo.map(reason => el('li', t(reason))));
-        content.append(omissions);
+        sections.push({ title: t('wikiNotes'), content: omissions });
     }
+    architectureReader.show({ id: review.projectId + ':' + review.generatedAt, title: t('architectureReview'),
+        introduction: t(review.status === 'DISABLED' ? 'architectureDisabled' : review.status === 'FAILED' ? 'architectureFailed' : 'COMPLETED'),
+        metadata: [new Date(review.generatedAt).toLocaleString(language), usage].filter(Boolean).join(' · '),
+        sections, references });
 }
 
 function loadChangeReview(id: string | null, runId: string | null = null) {
@@ -1378,7 +1807,7 @@ function renderFindingList(page: FindingList) {
     element('finding-list').hidden = !page.total;
     if (!page.total) { element('finding-list-content').replaceChildren(); return; }
     const rows = page.findings.map(finding => [findingLink(`${finding.tool} · ${finding.ruleId}`, finding.fingerprint, page.projectId),
-        evidenceLocation(finding.filePath, finding.startLine, finding.startLine), finding.severity]);
+        evidenceLocation(finding.filePath, finding.startLine, finding.startLine), t(finding.severity)]);
     element('finding-list-content').replaceChildren(qualityTable(['findingRule', 'file', 'findingSeverity'], rows));
     element<HTMLButtonElement>('findings-previous').disabled = page.offset === 0;
     element<HTMLButtonElement>('findings-next').disabled = !page.hasMore;
@@ -1388,7 +1817,7 @@ function renderFindingDetail(entry: FindingDetail) {
     const { finding, report: assessment } = entry;
     const content = element('finding-detail-content');
     content.replaceChildren(el('h3', `${finding.tool} · ${finding.ruleId}`),
-        el('p', [finding.severity, finding.cwe, t(assessment.verdict)].filter(Boolean).join(' · '), 'kind'),
+        el('p', [t(finding.severity), finding.cwe, t(assessment.verdict)].filter(Boolean).join(' · '), 'kind'),
         el('p', finding.message));
     const location = evidenceLocation(finding.filePath, finding.startLine, finding.endLine);
     if (location) content.append(el('p', location, 'mono'));
@@ -1416,7 +1845,7 @@ function renderFindingDetail(entry: FindingDetail) {
         const hasPaths = finding.trace.some(trace => trace.path !== undefined);
         const columns = hasPaths ? ['findingTracePath', 'file', 'line', 'relation'] : ['file', 'line', 'relation'];
         const rows = finding.trace.map(trace => [
-            ...(hasPaths ? [String(trace.path ?? '—')] : []), trace.filePath, `${trace.startLine}–${trace.endLine}`, trace.kind
+            ...(hasPaths ? [String(trace.path ?? '—')] : []), trace.filePath, `${trace.startLine}–${trace.endLine}`, t(trace.kind.toUpperCase())
         ]);
         content.append(el('h3', t('findingTrace')), qualityTable(columns, rows));
     }
@@ -1496,8 +1925,10 @@ function findingFeedbackForm(detail: FindingDetail) {
     const form = document.createElement('form');
     form.className = 'stack';
     const status = document.createElement('select');
+    status.dataset.localeDraft = 'finding-status';
     for (const value of ['NEEDS_REVIEW', 'TRUE_POSITIVE', 'FALSE_POSITIVE', 'FIXED']) status.add(new Option(t(value), value));
     const reasons = document.createElement('textarea');
+    reasons.dataset.localeDraft = 'finding-reason';
     reasons.rows = 2;
     reasons.maxLength = 500;
     const statusLabel = el('label');
@@ -1589,7 +2020,7 @@ function loadVulnerabilities(offset: number) {
 
 function renderVulnerabilities(page: NonNullable<typeof vulnPage>) {
     const rows = page.items.slice(0, vulnPageSize).map(finding => [vulnerabilityLink(finding.title, finding.id, finding.projectId),
-        finding.startLine > 0 ? `${finding.filePath}:${finding.startLine}` : finding.filePath, finding.severity, t(finding.status)]);
+        finding.startLine > 0 ? `${finding.filePath}:${finding.startLine}` : finding.filePath, t(finding.severity), t(finding.status)]);
     element('vuln-list-content').replaceChildren(...(rows.length ? [qualityTable(['findingRule', 'file', 'findingSeverity', 'queueStatus'], rows)] : []));
     element<HTMLButtonElement>('vuln-previous').disabled = page.offset === 0;
     element<HTMLButtonElement>('vuln-next').disabled = page.items.length <= vulnPageSize;
@@ -1614,7 +2045,7 @@ function loadVulnerabilityDetail(id: string | null, preserveNotice = false) {
 function renderVulnerabilityDetail({ finding, audit, reviews, evidence }: VulnerabilityDetail) {
     const content = element('vuln-detail-content');
     const projectId = finding.projectId;
-    content.replaceChildren(el('h3', finding.title), el('p', [t(finding.status), finding.severity, finding.cwe].filter(Boolean).join(' · '), 'kind'));
+    content.replaceChildren(el('h3', finding.title), el('p', [t(finding.status), t(finding.severity), finding.cwe].filter(Boolean).join(' · '), 'kind'));
     if (finding.legacyImported) content.append(el('p', t('legacyVulnerability'), 'hint'));
     if (finding.detail) content.append(el('p', finding.detail));
     const links = el('div', '', 'change-actions');
@@ -1661,6 +2092,7 @@ function renderVulnerabilityDetail({ finding, audit, reviews, evidence }: Vulner
     }
     if (finding.status === 'SUSPECTED' || finding.status === 'CONFIRMED') {
         const reason = document.createElement('textarea');
+        reason.dataset.localeDraft = 'vulnerability-reason';
         reason.maxLength = 500;
         reason.rows = 2;
         const label = el('label');
@@ -1756,7 +2188,7 @@ function renderQueuePage(page: QueuePage) {
             event.preventDefault();
             navigate('review-queue', entry.projectId, params);
         });
-        return [checkbox, detail, entry.severity, t(entry.status), entry.claimedBy || '—'];
+        return [checkbox, detail, t(entry.severity), t(entry.status), entry.claimedBy || '—'];
     });
     content.replaceChildren(...(rows.length ? [qualityTable(['queueSelect', 'findingRule', 'findingSeverity', 'queueStatus', 'account'], rows)] : []));
     element<HTMLButtonElement>('queue-previous').disabled = page.page === 0;
@@ -1794,7 +2226,7 @@ function renderQueueDetail(detail: NonNullable<typeof queueDetail>) {
             + new URLSearchParams({ projectId: entry.projectId, format });
     }
     const content = element('queue-detail-content');
-    content.replaceChildren(el('h3', entry.ruleId), el('p', [t(entry.status), entry.severity, entry.claimedBy].filter(Boolean).join(' · '), 'kind'),
+    content.replaceChildren(el('h3', entry.ruleId), el('p', [t(entry.status), t(entry.severity), entry.claimedBy].filter(Boolean).join(' · '), 'kind'),
         el('p', [snapshot.codeVersion, snapshot.ruleVersion, snapshot.generatedAt].filter(Boolean).join(' · '), 'mono hint'));
     if (snapshot.legacyImported) content.append(el('p', t('legacyReport'), 'hint'));
     if (entry.vulnerabilityId) content.append(vulnerabilityLink(t('vulnOpen'), entry.vulnerabilityId, entry.projectId));
@@ -1806,7 +2238,8 @@ function renderQueueDetail(detail: NonNullable<typeof queueDetail>) {
         if (snapshot.legacyImported || frozen.decisionEvidence.length) {
             content.append(el('p', [t(frozen.verdict), new Intl.NumberFormat(language, { style: 'percent', maximumFractionDigits: 1 })
                 .format(frozen.confidence)].join(' · '), 'kind'));
-            for (const line of [frozen.developerSummary, ...frozen.reasons, ...frozen.missingInfo, frozen.remediation].filter(Boolean)) {
+            const details = [frozen.developerSummary, ...frozen.reasons.map(diagnostic), ...frozen.missingInfo.map(diagnostic), frozen.remediation];
+            for (const line of details.filter(Boolean)) {
                 content.append(el('p', line));
             }
             renderFindingDecisions(content, frozen);
@@ -1818,6 +2251,7 @@ function renderQueueDetail(detail: NonNullable<typeof queueDetail>) {
     if (frozen && entry.status === 'PENDING') content.append(resultButton('queueClaim', () => updateQueueEntry(entry, 'claim')));
     if (frozen && entry.status === 'IN_REVIEW') {
         const reason = document.createElement('textarea');
+        reason.dataset.localeDraft = 'queue-reason';
         reason.maxLength = 500;
         reason.required = true;
         reason.rows = 2;
@@ -1863,14 +2297,20 @@ function updateQueueEntry(entry: ReviewQueueEntry, action: ReviewAction, reason?
     });
 }
 
+function showWikiDocument(visible: boolean) {
+    const generate = element('wiki-generate');
+    const actions = element(visible ? 'wiki-action-items' : 'wiki-primary-action');
+    if (generate.parentElement !== actions) actions.append(generate);
+    element('wiki-document').hidden = !visible;
+}
+
 function resetWiki() {
+    wikiReader.clear();
     wikiSummary = undefined;
     wikiRun = undefined;
-    element('wiki-document').hidden = true;
+    showWikiDocument(false);
     element('wiki-run').hidden = true;
     element<HTMLButtonElement>('wiki-generate').disabled = false;
-    element('wiki-content').replaceChildren();
-    element('wiki-document-title').textContent = '';
     element('wiki-export').removeAttribute('href');
     element('wiki-steps').replaceChildren();
     select('wiki-select').replaceChildren();
@@ -1880,6 +2320,10 @@ function resetWiki() {
 function loadWiki(documentId: string | null) {
     const projectId = selected;
     if (!projectId) { report('wiki-status', 'pickFirst', '', 'warning'); return; }
+    if (documentId && documentId !== wikiSummary?.document.id) {
+        wikiReader.suspend();
+        showWikiDocument(false);
+    }
     void run('wiki', async signal => {
         const tree = await api<WikiNode[]>('/summaries/tree', { projectId }, { signal });
         const id = isUuid(documentId) ? documentId : tree[0]?.id;
@@ -1888,7 +2332,8 @@ function loadWiki(documentId: string | null) {
     }, ({ tree, document }) => {
         if (!document) {
             wikiSummary = undefined;
-            element('wiki-document').hidden = true;
+            wikiReader.clear();
+            showWikiDocument(false);
             report('wiki-status', 'wikiEmpty');
             return;
         }
@@ -1901,6 +2346,11 @@ function loadWiki(documentId: string | null) {
 const wikiFence = /^ {0,3}(`{3,}|~{3,})/;
 const wikiHeading = /^ {0,3}(#{1,6})\s+(.+)$/;
 const wikiItem = /^ {0,3}([-+*]|\d+[.)])\s+(.+)$/;
+const indexedWikiHeadings = new Map([
+    ['Overview', 'wikiFactOverview'], ['Modules', 'wikiFactModules'], ['Entry points and direct calls', 'wikiFactEntrypoints'],
+    ['Complexity hotspots', 'wikiFactHotspots'], ['Module facts', 'wikiFactModule'],
+    ['Cross-module dependencies', 'wikiFactDependencies'], ['Key symbols', 'wikiFactSymbols']
+]);
 
 function wikiInline(tag: string, value: string) {
     const node = el(tag);
@@ -1993,52 +2443,34 @@ function renderWiki(tree: WikiNode[], doc: SummaryDocument) {
     if (!tree.some(item => item.id === doc.id)) options.push(new Option(doc.title + ' · v' + doc.docVersion, doc.id));
     selector.replaceChildren(...options);
     selector.value = doc.id;
-    element('wiki-document-title').textContent = doc.title;
     element<HTMLAnchorElement>('wiki-export').href = '/api/v1/summaries/' + doc.id + '/export?' + new URLSearchParams({ projectId: doc.projectId });
-    const content = element('wiki-content');
     const format = new Intl.DateTimeFormat(language, { dateStyle: 'medium', timeStyle: 'short' });
-    content.replaceChildren(el('p', ['v' + doc.docVersion, format.format(new Date(doc.generatedAt)), t(doc.status), doc.model]
-        .filter(Boolean).join(' · '), 'hint mono'));
-    if (doc.legacyImported) content.append(el('p', t('legacyWiki'), 'hint'));
-    for (const section of doc.sections) {
-        const subsection = el('section');
-        const title = section.source === 'llm' && section.phase ? t('wikiPhase:' + section.phase) : section.title;
-        const heading = el('h3', title);
-        if (section.source === 'llm') heading.append(' ', el('span', t('wikiModelSection'), 'kind'));
-        subsection.append(heading);
-        renderWikiMarkdown(subsection, section.body);
-        content.append(subsection);
-    }
-    if (doc.citations.length) {
-        const references = el('section');
-        const list = el('ul');
-        for (const citation of doc.citations) {
-            const args = { file: citation.filePath, line: String(citation.startLine) };
-            const link = el('a', `${citation.qualifiedName} · ${citation.filePath}:${citation.startLine}`, 'mono') as HTMLAnchorElement;
-            link.href = route('graph', doc.projectId, args);
-            link.addEventListener('click', event => {
-                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
-                event.preventDefault();
-                navigate('graph', doc.projectId, args);
-            });
-            const item = el('li');
-            item.append(link);
-            list.append(item);
-        }
-        references.append(el('h3', t('wikiCitations')), el('p', t('wikiCurrentIndex'), 'hint'), list);
-        content.append(references);
-    }
+    const references = doc.citations.map(citation => readerSource(doc.projectId, citation.qualifiedName,
+        citation.filePath, citation.startLine, citation.endLine, citation.qualifiedName));
+    const locations = doc.citations.map(citation => new RegExp('(?:^|[^\\p{L}\\p{N}_./-])'
+        + (citation.filePath + ':' + citation.startLine).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?!\\d)', 'u'));
+    const sections = doc.sections.map(section => {
+        const content = el('div', '', 'wiki-body');
+        const title = section.source === 'llm' && section.phase ? t('wikiPhase:' + section.phase)
+            : !doc.legacyImported && section.source === 'facts' ? t(indexedWikiHeadings.get(section.title) ?? section.title) : section.title;
+        if (section.source === 'llm') content.append(el('p', t('wikiModelSection'), 'hint'));
+        renderWikiMarkdown(content, section.body);
+        const prose = content.textContent;
+        return { title, content, references: locations.flatMap((location, index) => location.test(prose) ? [index] : []) };
+    });
     if (doc.missingInfo.length) {
-        const notes = el('details');
         const list = el('ul');
         for (const reason of doc.missingInfo) {
             const [code, phase] = doc.legacyImported ? [reason] : reason.split(':', 2);
             list.append(el('li', phase ? t('wikiPhase:' + phase) + ' · ' + t(code) : t(code)));
         }
-        notes.append(el('summary', t('wikiNotes')), list);
-        content.append(notes);
+        sections.push({ title: t('wikiNotes'), content: list, references: [] });
     }
-    element('wiki-document').hidden = false;
+    showWikiDocument(true);
+    wikiReader.show({ id: doc.projectId + ':' + doc.id, title: doc.title, introduction: t('readerWikiIntroduction'),
+        metadata: ['v' + doc.docVersion, format.format(new Date(doc.generatedAt)), t(doc.status), doc.model, doc.legacyImported && t('legacyWiki')]
+            .filter(Boolean).join(' · '),
+        link: route('wiki', doc.projectId, { document: doc.id }), sections, references });
 }
 
 function renderWikiRun(run: AgentRun) {
@@ -2081,7 +2513,7 @@ async function trackWiki(id?: string) {
     }, result => {
         if (!result) { report('wiki-generation-status', 'wikiPending', '', 'warning'); return; }
         if (result.status === 'FAILED') {
-            report('wiki-generation-status', 'wikiFailedRun', t(result.statusReason ?? ''), 'error');
+            report('wiki-generation-status', 'wikiFailedRun', () => diagnostic(result.statusReason ?? ''), 'error');
             return;
         }
         report('wiki-generation-status', result.status === 'PARTIAL' ? 'wikiPartial' : 'wikiGenerated', '',
@@ -2490,26 +2922,26 @@ function renderDependencyScan(result: DependencyScanResult) {
             `${t('dependencyNew')} ${result.newFindings}`].join(' · '), 'hint'));
     if (result.preview.length) content.append(qualityTable(['dependencyAdvisory', 'dependencyCoordinate', 'findingSeverity'],
         result.preview.map(item => [vulnerabilityLink(item.advisoryId, item.id, result.projectId),
-            item.coordinate + '@' + item.version, item.severity])));
+            item.coordinate + '@' + item.version, t(item.severity)])));
     if (result.matchedFindings > result.preview.length) content.append(el('p', t('dependencyMore'), 'hint'));
     if (result.issues.length) {
         const list = el('ul');
-        list.append(...result.issues.map(issue => el('li', issue)));
+        list.append(...result.issues.map(issue => el('li', diagnostic(issue))));
         content.append(list);
     }
     report('dependency-scan-status', result.unverifiedComponents ? 'dependencyUnverified' : '',
-        String(result.unverifiedComponents), 'warning');
+        formatNumber(result.unverifiedComponents), 'warning');
 }
 
 function renderSbom(result: Sbom) {
     const content = element('sbom-content');
     const list = el('ul', '', 'mono');
     for (const component of result.components.slice(0, 50)) list.append(el('li', component.purl));
-    content.replaceChildren(el('p', `${t('sbomComponents')} · ${result.components.length} · CycloneDX ${result.specVersion}`, 'hint'));
+    content.replaceChildren(el('p', `${t('sbomComponents')} · ${formatNumber(result.components.length)} · CycloneDX ${result.specVersion}`, 'hint'));
     if (list.childElementCount) content.append(list);
     if (result.components.length > 50) content.append(el('p', t('sbomPreviewLimit'), 'hint'));
     for (const property of result.metadata.properties ?? []) {
-        if (property.name === 'repograph:inventoryIssue') content.append(el('p', property.value, 'hint'));
+        if (property.name === 'repograph:inventoryIssue') content.append(el('p', diagnostic(property.value), 'hint'));
     }
     element('sbom-download').hidden = false;
     report('sbom-status');
@@ -2517,8 +2949,11 @@ function renderSbom(result: Sbom) {
 
 function showLogin(key = '') {
     connected = false;
+    architectureReader?.clear();
+    architectureReader = undefined;
     indexRequest?.abort();
     indexRequest = undefined;
+    indexJob = undefined;
     archiveRequest?.abort();
     archiveRequest = undefined;
     element<HTMLFormElement>('archive-form').reset();
@@ -2529,6 +2964,11 @@ function showLogin(key = '') {
     controllers.clear();
     if (element<HTMLDialogElement>('source-dialog').open) element<HTMLDialogElement>('source-dialog').close();
     projects = [];
+    repositoryFilter = 'all';
+    select('repo-kind').value = 'all';
+    element<HTMLDialogElement>('index-section').close();
+    closeMenu();
+    input('repo-filter').value = '';
     account = undefined;
     administration = undefined;
     providers = [];
@@ -2561,9 +3001,13 @@ function showLogin(key = '') {
     renderWatch();
     resetSbom();
     element('overview-data').replaceChildren();
+    document.getElementById('overview-distributions')?.remove();
     element('overview-root').textContent = '';
     for (const panel of ['search', 'graph', 'evidence']) element(`${panel}-results`).replaceChildren();
     flowView = undefined;
+    graphView = undefined;
+    searchHits = [];
+    searchPreview = 0;
     for (const id of [...notes.keys()]) report(id);
     nextPage = undefined;
     element('next').hidden = true;
@@ -2576,13 +3020,12 @@ function showLogin(key = '') {
     report('login-status', key, '', key === 'passwordChanged' ? 'success' : key ? 'error' : undefined);
 }
 async function showWorkspace() {
-    const [current, result] = await Promise.all([api<Account>('/auth/me'), api<Project[]>('/projects')]);
+    const [current, result] = await Promise.all([api<Account>('/auth/me'), api<DashboardProject[]>('/projects', { summary: 'true' })]);
     account = current;
     projects = result;
     connected = true;
     element('admin-nav').hidden = current.role !== 'ADMIN';
-    element('index-section').hidden = current.role !== 'ADMIN';
-    element('index-section').parentElement?.classList.toggle('read-only', current.role !== 'ADMIN');
+    element('connect-repository').hidden = current.role !== 'ADMIN';
     element('login').hidden = true;
     element('workspace').hidden = false;
     readRoute();
@@ -2590,6 +3033,7 @@ async function showWorkspace() {
 }
 
 function showJob(status: IndexJob) {
+    indexJob = status;
     const node = element('index-status');
     notes.delete('index-status');
     const key = ({ running: 'indexing', done: 'done', partial: 'partial', error: 'indexError', idle: 'idle' } as Record<string, string>)[status.status];
@@ -2602,7 +3046,7 @@ function showJob(status: IndexJob) {
         }[status.stage]);
         const { done = 0, total = 0 } = status;
         if (total > 0) {
-            node.append(el('span', `${stage} · ${done} / ${total}`));
+            node.append(el('span', `${stage} · ${formatNumber(done)} / ${formatNumber(total)}`));
             const bar = document.createElement('progress');
             bar.max = total;
             bar.value = done;
@@ -2612,17 +3056,17 @@ function showJob(status: IndexJob) {
             node.append(el('span', stage));
         }
         if (status.stage === 'embedding' && status.totalFiles) {
-            node.append(el('span', `${t('indexProcessed')} · ${status.processedFiles ?? 0} / ${status.totalFiles}`));
+            node.append(el('span', `${t('indexProcessed')} · ${formatNumber(status.processedFiles ?? 0)} / ${formatNumber(status.totalFiles)}`));
         }
     }
     if (status.parsedFiles !== undefined) {
-        node.append(el('span', `${t('filesParsed')} ${status.parsedFiles} · ${t('filesSkipped')} ${status.skippedFiles ?? 0}`));
-        if (status.degradedFiles) node.append(el('span', `${t('filesDegraded')} ${status.degradedFiles}`));
-        node.append(el('span', `${status.totalUnits ?? 0} ${t('units')} · ${status.totalEdges ?? 0} ${t('relations')}`));
+        node.append(el('span', `${t('filesParsed')} ${formatNumber(status.parsedFiles)} · ${t('filesSkipped')} ${formatNumber(status.skippedFiles ?? 0)}`));
+        if (status.degradedFiles) node.append(el('span', `${t('filesDegraded')} ${formatNumber(status.degradedFiles)}`));
+        node.append(el('span', `${formatNumber(status.totalUnits ?? 0)} ${t('units')} · ${formatNumber(status.totalEdges ?? 0)} ${t('relations')}`));
     }
     if (status.errors?.length) {
         const errors = el('ul');
-        errors.append(...status.errors.slice(0, 15).map(error => el('li', error)));
+        errors.append(...status.errors.slice(0, 15).map(error => el('li', diagnostic(error))));
         node.append(errors);
     }
 }
@@ -2644,6 +3088,7 @@ async function startIndex() {
                 includeBytecode: String(input('index-bytecode').checked)
             }, { method: 'POST', signal: controller.signal });
             pollRoot = new URL(result.pollUrl, location.origin).searchParams.get('projectRoot') ?? root;
+            void refreshProjects();
         } catch (error) {
             if (!(error instanceof RequestError) || error.code !== 'INDEX_ALREADY_RUNNING') throw error;
         }
@@ -2719,7 +3164,7 @@ function renderArchiveProfile(asset: ArchiveAsset, profile?: ArchiveProfile) {
         ...(profile ? [
             ['archiveFiles', String(profile.totalFiles)],
             ['categories', Object.entries(profile.categoryDistribution).map(([category, count]) => `${t(category)} ${count}`).join(' · ')],
-            ['languageBreakdown', Object.entries(profile.languageDistribution).map(([language, count]) => `${language} ${count}`).join(' · ')],
+            ['languageBreakdown', Object.entries(profile.languageDistribution).map(([language, count]) => `${t(language)} ${formatNumber(count)}`).join(' · ')],
             ['buildSystems', profile.buildSystems.join(', ')],
             ['sbomComponents', profile.omittedReasons.includes('DEPENDENCY_INVENTORY_UNAVAILABLE') ? '' : String(profile.dependencies.length)],
             ['frameworks', profile.frameworks.join(', ')],
@@ -2761,9 +3206,9 @@ function renderArchiveProfile(asset: ArchiveAsset, profile?: ArchiveProfile) {
     }
     const errors = asset.indexResult?.errors ?? [];
     report('profile-status', asset.status === 'FAILED' ? 'archiveFailed' : errors.length ? 'archivePartial' : 'archiveReady',
-        [asset.error, ...errors.slice(0, 3)].filter(Boolean).join(' · '),
+        () => [asset.error, ...errors.slice(0, 3)].filter(Boolean).map(diagnostic).join(' · '),
         asset.status === 'FAILED' ? 'error' : errors.length ? 'warning' : 'success');
-    for (const issue of profile?.dependencyIssues ?? []) content.append(el('p', issue, 'hint'));
+    for (const issue of profile?.dependencyIssues ?? []) content.append(el('p', diagnostic(issue), 'hint'));
     if (profile?.omittedReasons.length) content.append(el('p', profile.omittedReasons.map(t).join(' · '), 'hint'));
 }
 
@@ -2782,11 +3227,12 @@ async function startArchive() {
             strategy: select('archive-strategy').value,
             includeBytecode: String(input('archive-bytecode').checked || /\.jar$/i.test(file.name))
         }, { method: 'POST', body, signal: controller.signal });
+        void refreshProjects();
         const asset = await waitArchive(started, controller.signal, 'archive-status');
         if (controller.signal.aborted) return;
         const errors = asset.indexResult?.errors ?? [];
         report('archive-status', asset.status === 'FAILED' ? 'archiveFailed' : errors.length ? 'archivePartial' : 'archiveReady',
-            [asset.originalFileName, asset.error, ...errors.slice(0, 3)].filter(Boolean).join(' · '),
+            () => [asset.originalFileName, ...[asset.error, ...errors.slice(0, 3)].filter(Boolean).map(diagnostic)].join(' · '),
             asset.status === 'FAILED' ? 'error' : errors.length ? 'warning' : 'success');
         element<HTMLFormElement>('archive-form').reset();
         await refreshProjects();
@@ -2806,7 +3252,7 @@ function showSource(unit: CodeUnit, project: string) {
     element('source-content').textContent = unit.rawSource;
     const location = unit.startLine > 0 ? indexedLocation(unit.filePath, unit.startLine, unit.metadata.archive_entry) : { target: unit.id };
     element<HTMLAnchorElement>('source-link').href = route('graph', project, location);
-    element('copy-status').textContent = '';
+    report('copy-status');
     if (!dialog.open) dialog.showModal();
 }
 function indexedLocation(file: string, line: number, archiveEntry?: string): Record<string, string> {
@@ -2829,7 +3275,7 @@ function card(hit: Hit) {
         resultButton('graph', () => navigate('graph', projectId, { target: unit.id })));
     header.append(label, actions);
     const score = hit.finalScore ?? hit.score;
-    article.append(header, el('span', [unit.kind, unit.language, hit.relation, score && score >= 0.001 ? score.toFixed(3) : '']
+    article.append(header, el('span', () => [t(unit.kind), t(unit.language), t(hit.relation ?? ''), score && score >= 0.001 ? formatNumber(score, 3) : '']
         .filter(Boolean).join(' · '), 'kind'));
     if (unit.signature) article.append(el('pre', unit.signature));
     return article;
@@ -2849,17 +3295,194 @@ function search(append = false) {
     if (!page) return;
     const params = { ...page.args };
     if (page.path.endsWith('/semantic') || page.path.endsWith('/code')) params.offset = String(page.offset);
-    if (!append) element('search-results').replaceChildren();
+    if (!append) {
+        searchHits = [];
+        searchPreview = 0;
+        renderSearchResults();
+    }
     element('next').hidden = true;
     void run('search', signal => api<Hit[] | { results: Hit[]; hasMore?: boolean }>(page.path, params, { signal }), result => {
         const hits = normalizeResults(result);
-        element('search-results').append(...hits.map(card));
+        searchHits.push(...hits);
+        renderSearchResults();
         nextPage = !Array.isArray(result) && result.hasMore ? { ...page, offset: page.offset + hits.length } : undefined;
         element('next').hidden = !nextPage;
-        if (hits.length) report('search-status', 'matches', String(element('search-results').childElementCount));
+        if (searchHits.length) report('search-status', 'matches', String(searchHits.length));
         else report('search-status', 'noResults');
     });
 }
+function previewCard(hit: Hit) {
+    const panel = card(hit);
+    const source = hit.unit.rawSource;
+    if (source) {
+        const excerpt = el('pre', source.split('\n', 18).join('\n'), 'source-preview');
+        excerpt.tabIndex = 0;
+        panel.append(excerpt);
+    }
+    return panel;
+}
+
+function renderSearchResults() {
+    const container = element('search-results');
+    if (!searchHits.length) {
+        container.replaceChildren();
+        return;
+    }
+    const list = el('div', '', 'surface search-match-list');
+    const detail = el('div', '', 'search-preview');
+    const buttons: HTMLButtonElement[] = [];
+    const show = (index: number) => {
+        searchPreview = index;
+        for (const [position, button] of buttons.entries()) {
+            button.setAttribute('aria-pressed', String(position === index));
+        }
+        detail.replaceChildren(previewCard(searchHits[index]));
+    };
+    searchHits.forEach((hit, index) => {
+        const button = el('button', '', 'search-match') as HTMLButtonElement;
+        button.type = 'button';
+        button.append(el('strong', hit.unit.qualifiedName),
+            el('span', locationLabel(hit.unit, hit.projectId, hit.unit.metadata.archive_entry), 'mono'));
+        button.addEventListener('click', () => show(index));
+        buttons.push(button);
+        list.append(button);
+    });
+    show(searchPreview);
+    container.replaceChildren(list, detail);
+}
+
+function graphSvg<K extends keyof SVGElementTagNameMap>(tag: K, attributes: Record<string, string | number>) {
+    const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, String(value));
+    return node;
+}
+
+function renderGraphDiagram(data: GraphDiagram, relation: string, projectId: string) {
+    const group = el('section', '', 'graph-diagram');
+    const frame = el('div', '', 'graph-viewport');
+    const details = el('div', '', 'graph-preview');
+    const units = new Map([data.root, ...data.members, ...data.results].map(unit => [unit.id, unit]));
+    const upstream = relation !== 'callees';
+    const levels: string[][] = [[data.root.id, ...data.members.map(unit => unit.id)]];
+    for (const edge of data.connections) {
+        (levels[edge.depth] ??= []).push(upstream ? edge.source : edge.target);
+    }
+    const width = Math.max(...levels.map(row => row.length)) * 172 + 24;
+    const height = levels.length * 84 + 16;
+    if (upstream) levels.reverse();
+    const points = new Map<string, [number, number]>();
+    levels.forEach((row, level) => row.forEach((id, column) => {
+        points.set(id, [(column + .5) * width / row.length, 50 + level * 84]);
+    }));
+
+    const svg = graphSvg('svg', { width, height, viewBox: `0 0 ${width} ${height}`, role: 'group', 'aria-label': t('graphDiagram') });
+    const defs = graphSvg('defs', {});
+    for (const name of ['normal', 'selected']) {
+        const arrow = graphSvg('marker', { id: `graph-arrow-${name}`, markerWidth: 7, markerHeight: 7, refX: 6, refY: 3.5, orient: 'auto' });
+        arrow.append(graphSvg('path', { d: 'M0 0L7 3.5L0 7Z', class: `graph-arrow-${name}` }));
+        defs.append(arrow);
+    }
+    svg.append(defs);
+    const paths = data.connections.map(({ source, target }) => {
+        const [x, y] = points.get(source)!;
+        const [dx, dy] = points.get(target)!;
+        const middle = (y + dy) / 2;
+        const line = graphSvg('path', { d: `M${x} ${y + 17} C${x} ${middle} ${dx} ${middle} ${dx} ${dy - 19}`, class: 'graph-edge' });
+        svg.append(line);
+        return { source, target, line };
+    });
+    const buttons = new Map<string, HTMLButtonElement>();
+    const show = (id: string) => {
+        for (const [key, button] of buttons) button.setAttribute('aria-pressed', String(key === id));
+        for (const { source, target, line } of paths) {
+            const active = source === id || target === id;
+            line.classList.toggle('selected', active);
+            line.setAttribute('marker-end', active ? 'url(#graph-arrow-selected)' : 'url(#graph-arrow-normal)');
+        }
+        details.replaceChildren(previewCard({ unit: units.get(id)!, projectId }));
+    };
+    for (const [id, [x, y]] of points) {
+        const unit = units.get(id)!;
+        const box = graphSvg('foreignObject', { x: x - 77, y: y - 18, width: 154, height: 36 });
+        const button = el('button', unit.simpleName || unit.qualifiedName, 'graph-node') as HTMLButtonElement;
+        button.type = 'button';
+        button.title = unit.qualifiedName;
+        button.setAttribute('aria-label', unit.qualifiedName);
+        button.addEventListener('click', () => show(id));
+        buttons.set(id, button);
+        box.append(button);
+        svg.append(box);
+    }
+    frame.tabIndex = 0;
+    frame.setAttribute('aria-label', t('graphDiagram'));
+    frame.append(svg);
+    const toolbar = el('header', '', 'graph-toolbar');
+    const tools = el('div', '', 'graph-tools');
+    const output = el('output', '100%');
+    const zoomButton = (label: string, icon: string, action: () => void) => {
+        const button = resultButton(label, action);
+        button.className = 'icon-button';
+        button.setAttribute('aria-label', t(label));
+        button.title = t(label);
+        button.replaceChildren(workbenchIcon(icon));
+        return button;
+    };
+    let scale = 1;
+    const zoom = (next: number) => {
+        scale = Math.max(.5, Math.min(2, next));
+        svg.setAttribute('width', String(width * scale));
+        svg.setAttribute('height', String(height * scale));
+        output.textContent = `${Math.round(scale * 100)}%`;
+        less.disabled = scale === .5;
+        more.disabled = scale === 2;
+    };
+    const less = zoomButton('graphZoomOut', 'zoom-out', () => zoom(scale - .25));
+    const more = zoomButton('graphZoomIn', 'zoom-in', () => zoom(scale + .25));
+    tools.append(less, output, more, zoomButton('graphZoomReset', 'refresh', () => {
+        zoom(1);
+        frame.scrollTo(0, 0);
+    }));
+    frame.addEventListener('wheel', event => {
+        if (!event.ctrlKey && !event.metaKey) return;
+        event.preventDefault();
+        zoom(scale - Math.sign(event.deltaY) * .05);
+    }, { passive: false });
+    let drag: { x: number; y: number; left: number; top: number } | undefined;
+    frame.addEventListener('pointerdown', event => {
+        if (event.pointerType !== 'mouse' || event.button !== 0 || (event.target as Element).closest('button')) return;
+        drag = { x: event.clientX, y: event.clientY, left: frame.scrollLeft, top: frame.scrollTop };
+        frame.setPointerCapture(event.pointerId);
+        frame.classList.add('panning');
+    });
+    frame.addEventListener('pointermove', event => {
+        if (drag) frame.scrollTo(drag.left + drag.x - event.clientX, drag.top + drag.y - event.clientY);
+    });
+    frame.addEventListener('lostpointercapture', () => {
+        drag = undefined;
+        frame.classList.remove('panning');
+    });
+    toolbar.append(el('h2', t('graphDiagram')), tools);
+    const map = el('div', '', 'surface graph-map');
+    map.append(toolbar, frame);
+    if (data.results.length > data.connections.length) map.append(el('p', t('graphDiagramLimit'), 'hint'));
+    group.append(map, details);
+    show(data.root.id);
+    return group;
+}
+
+function renderGraphResults(state: NonNullable<typeof graphView>) {
+    const { data, relation, target, projectId } = state;
+    const container = element('graph-results');
+    const list = el('details', '', 'surface relationship graph-relation-list') as HTMLDetailsElement;
+    const heading = el('summary', data.connections.length ? t('graphRelationshipList') : t('graphDiagram'));
+    const label = el('h2', `${t(relation)} ${relation === 'callees' ? '→' : '←'} ${data.root.qualifiedName || target}`, 'relationship-title');
+    const nodes = el('div', '', 'results');
+    nodes.append(card({ unit: data.root, projectId }), ...data.results.map(unit => card({ unit, projectId })));
+    list.append(heading, label, nodes);
+    list.open = window.matchMedia('(max-width: 980px)').matches || !data.connections.length;
+    container.replaceChildren(renderGraphDiagram(data, relation, projectId), list);
+}
+
 function trace() {
     const target = input('target').value.trim();
     if (!selected || !target) {
@@ -2870,20 +3493,16 @@ function trace() {
     const depth = select('depth').value;
     const projectId = selected;
     flowView = undefined;
+    graphView = undefined;
     element('graph-results').replaceChildren();
-    void run('graph', signal => api<CodeUnit[]>(`/graph/${relation}`, { target, depth, projectId }, { signal }), result => {
-        if (!result.length) {
+    void run('graph', signal => api<GraphDiagram | null>(`/graph/${relation}`, { target, depth, projectId, diagram: 'true' }, { signal }), data => {
+        if (!data) {
             report('graph-status', 'noResults');
             return;
         }
-        report('graph-status', 'matches', String(result.length));
-        const group = el('section', '', 'surface relationship');
-        const direction = relation === 'callers' ? '←' : '→';
-        group.append(el('h2', `${t(relation)} ${direction} ${target}`, 'relationship-title'));
-        const nodes = el('div', '', 'results');
-        nodes.append(...result.map(unit => card({ unit, projectId })));
-        group.append(nodes);
-        element('graph-results').append(group);
+        report('graph-status', data.results.length ? 'matches' : 'graphNoNeighbors', data.results.length ? String(data.results.length) : '');
+        graphView = { data, relation, target, projectId };
+        renderGraphResults(graphView);
     });
 }
 
@@ -2896,6 +3515,7 @@ function runFlow() {
         return;
     }
     flowView = undefined;
+    graphView = undefined;
     element('graph-results').replaceChildren();
     void run('graph', signal => api<FlowAnalysis>('/flow/analyze', { target, projectId }, { signal }), result => {
         flowView = { result, nodeId: result.controlFlowGraph.nodes[0].id, includeDependencies: false, projectId };
@@ -2995,10 +3615,9 @@ function buildPack() {
     void run('evidence', signal => api<Pack>('/context/pack', {
         q, projectId: selected, budgetChars: input('budget').value
     }, { signal }), result => {
-        const brief = result.omittedReasons.map(reason => messagesByCode[reason] ? t(messagesByCode[reason]) : reason);
-        report('evidence-status', 'excerptBudget',
-            `${result.usedBudgetChars}/${result.requestedBudgetChars}${brief.length ? ` · ${brief.join(' · ')}` : ''}`,
-            brief.length ? 'warning' : undefined);
+        report('evidence-status', 'excerptBudget', () => [
+            `${formatNumber(result.usedBudgetChars)}/${formatNumber(result.requestedBudgetChars)}`, ...result.omittedReasons.map(diagnostic)
+        ].join(' · '), result.omittedReasons.length ? 'warning' : undefined);
         element('evidence-results').replaceChildren(...result.evidence.map(evidence => {
             const item = el('article', '', 'surface result');
             const header = el('div', '', 'result-top');
@@ -3011,7 +3630,7 @@ function buildPack() {
                     ? indexedLocation(evidence.filePath, evidence.startLine, evidence.archiveEntry)
                     : { target: evidence.unitId ?? evidence.qualifiedName });
             }));
-            item.append(header, el('span', [evidence.kind, evidence.source, evidence.relation,
+            item.append(header, el('span', () => [t(evidence.kind), t(evidence.source), t(evidence.relation),
                 evidence.truncated ? t('truncated') : ''].filter(Boolean).join(' · '), 'kind'),
             el('pre', evidence.excerpt));
             return item;
@@ -3097,7 +3716,7 @@ function providerDraft() {
         inputUsdPerMillionTokens: amount('provider-input-price'), outputUsdPerMillionTokens: amount('provider-output-price') };
 }
 
-function renderAdministration(data: Administration) {
+function renderAdministration(data: Administration, preserveOwner = false) {
     const { accounts, organizations, projects, audit } = data;
     element('account-list').replaceChildren(...accounts.map(entry => {
         const row = el('div');
@@ -3107,7 +3726,7 @@ function renderAdministration(data: Administration) {
     element('audit-list').replaceChildren(...audit.map(event => {
         const row = el('div');
         const actor = accounts.find(entry => entry.id === event.actorId)?.username ?? event.actorId;
-        row.append(el('strong', event.action),
+        row.append(el('strong', t(event.action)),
             el('p', [new Date(event.createdAt).toLocaleString(language), actor, event.reason].filter(Boolean).join(' · ')));
         return row;
     }));
@@ -3117,7 +3736,7 @@ function renderAdministration(data: Administration) {
     options('member-account', accounts.map(entry => [entry.id, entry.username]), 'chooseAccount');
     options('owner-project', projects.map(entry => [entry.project.projectId, entry.project.projectName]), 'choose');
     showReviewOptions();
-    chooseOwnerProject();
+    chooseOwnerProject(preserveOwner);
 }
 
 function showReviewOptions() {
@@ -3141,7 +3760,7 @@ function selectOrganization() {
     void run('admin-members', signal => api<Account[]>(`/admin/organizations/${org.id}/members`, {}, { signal }), result => {
         organizationMembers = result;
         element('members-list').replaceChildren(el('p', result.length
-            ? result.map(entry => entry.username).join(', ') : t('noMembers'), 'hint'));
+            ? result.map(entry => entry.username).join(', ') : () => t('noMembers'), 'hint'));
         selectedMembership();
         report('admin-members-status');
     });
@@ -3151,15 +3770,15 @@ function selectedMembership() {
     input('member-present').checked = organizationMembers.some(entry => entry.id === select('member-account').value);
 }
 
-function chooseOwnerProject() {
+function chooseOwnerProject(preserveOwner = false) {
     const project = administration?.projects.find(item => item.project.projectId === select('owner-project').value);
     const owner = project?.owner;
     const name = owner?.ownerType === 'PERSONAL'
         ? administration?.accounts.find(entry => entry.id === owner.ownerId)?.username
         : administration?.organizations.find(entry => entry.id === owner?.ownerId)?.name;
     element('current-owner').textContent = !project ? '' : owner ? `${t('owner')} · ${name ?? owner.ownerId}` : t('unassigned');
-    if (owner) select('owner-type').value = owner.ownerType;
-    ownerOptions(owner?.ownerId);
+    if (!preserveOwner && owner) select('owner-type').value = owner.ownerType;
+    ownerOptions(preserveOwner ? select('owner-target').value : owner?.ownerId);
 }
 
 function ownerOptions(existing?: string) {
@@ -3249,25 +3868,85 @@ form('triage-form', () => {
 element('menu').addEventListener('click', () => {
     const opened = element('sidebar').classList.toggle('open');
     element('menu').setAttribute('aria-expanded', String(opened));
-    if (opened) document.querySelector<HTMLElement>('nav a[aria-current]')?.focus();
+    element('nav-scrim').hidden = !opened;
+    element('workspace-app').inert = opened;
+    if (opened) (document.querySelector<HTMLElement>('nav a[aria-current]') ?? element('sidebar').querySelector('a'))?.focus();
 });
-element('sidebar').addEventListener('keydown', event => {
+element('collapse-nav').addEventListener('click', () => {
+    sidebarCollapsed = !sidebarCollapsed;
+    preference('sidebar', sidebarCollapsed ? 'compact' : 'full');
+    renderSidebar();
+});
+element('nav-scrim').addEventListener('click', () => {
+    closeMenu();
+    element('menu').focus();
+});
+window.matchMedia('(max-width: 980px)').addEventListener('change', event => {
+    closeMenu();
+    const list = document.querySelector<HTMLDetailsElement>('.graph-relation-list');
+    if (event.matches && list) list.open = true;
+});
+document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && element('sidebar').classList.contains('open')) {
         closeMenu();
         element('menu').focus();
     }
 });
-element('language').addEventListener('click', () => {
-    language = language === 'en' ? 'zh' : 'en';
-    preference('language', language);
-    localize();
+document.addEventListener('click', event => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const repository = target.closest<HTMLAnchorElement>('#view-repositories a[data-open-repository]');
+    if (repository && !event.defaultPrevented && event.button === 0 && !(event.metaKey || event.ctrlKey || event.altKey || event.shiftKey)) {
+        event.preventDefault();
+        navigate('overview', repository.dataset.openRepository);
+    }
+    for (const menu of document.querySelectorAll<HTMLDetailsElement>('[data-dropdown][open]')) {
+        if (!menu.contains(target)) menu.open = false;
+        else if (target.closest('.popover-items button, .popover-items a')) {
+            const returnFocus = menu.contains(document.activeElement);
+            menu.open = false;
+            if (returnFocus) menu.querySelector('summary')?.focus();
+        }
+    }
 });
+document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && event.target instanceof Element) {
+        const menu = event.target.closest<HTMLDetailsElement>('[data-dropdown][open]');
+        if (menu) {
+            menu.open = false;
+            menu.querySelector('summary')?.focus();
+        }
+    }
+    if (event.altKey || event.shiftKey || !(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k') return;
+    const reader = view === 'wiki' ? wikiReader : view === 'overview' ? architectureReader : undefined;
+    if (reader?.openSearch()) event.preventDefault();
+});
+bindLanguageSwitch(next => { language = next; localize(); });
 element('theme').addEventListener('click', () => {
     theme = theme === 'dark' ? 'light' : 'dark';
     preference('theme', theme);
-    localize();
+    document.documentElement.dataset.theme = theme;
+    renderThemeControl();
 });
 element('refresh').addEventListener('click', () => void refreshProjects());
+input('repo-filter').addEventListener('input', renderRepositoryList);
+select('repo-kind').addEventListener('change', renderRepositoryList);
+for (const filter of document.querySelectorAll<HTMLButtonElement>('[data-repo-status]')) {
+    filter.addEventListener('click', () => {
+        repositoryFilter = filter.dataset.repoStatus ?? 'all';
+        renderRepositoryList();
+    });
+}
+element('connect-repository').addEventListener('click', () => openRepositoryDialog(
+    element('local-index').hidden ? 'archive' : 'local'));
+element('index-section').addEventListener('close', () => {
+    if (connected) (repositoryDialogOpener?.isConnected ? repositoryDialogOpener : element('connect-repository')).focus();
+    repositoryDialogOpener = undefined;
+});
+for (const tab of document.querySelectorAll<HTMLButtonElement>('[data-connect-source]')) {
+    tab.addEventListener('click', () => selectRepositorySource(tab.dataset.connectSource === 'archive' ? 'archive' : 'local'));
+}
+element('overview-wiki').addEventListener('click', () => navigate('wiki'));
 element('overview-search').addEventListener('click', () => {
     select('search-scope').value = 'current';
     navigate('search');
@@ -3278,6 +3957,8 @@ element('quality-form').addEventListener('submit', event => {
     const measure = select('quality-measure').value as QualityMeasure;
     if (!projectId || !Object.hasOwn(qualityPaths, measure)) return;
     quality = undefined;
+    architectureReader?.clear();
+    architectureReader = undefined;
     element('quality-content').replaceChildren();
     void run('quality', signal => measure === 'architecture' ? streamArchitecture(projectId, signal)
         : api(qualityPaths[measure], { projectId }, { signal }), result => {
@@ -3304,9 +3985,9 @@ form('findings-form', () => {
     }), result => {
         input('findings-file').value = '';
         const skipped = result.reported - result.imported - result.duplicates;
-        const summary = [`${t('findingImported')} ${result.imported}`, `${t('findingDuplicates')} ${result.duplicates}`,
-            `${t('findingSkipped')} ${skipped}`];
-        report('finding-import-status', summary[0], summary.slice(1).join(' · '), skipped ? 'warning' : 'success');
+        report('finding-import-status', 'findingImported', () => [formatNumber(result.imported),
+            `${t('findingDuplicates')} ${formatNumber(result.duplicates)}`, `${t('findingSkipped')} ${formatNumber(skipped)}`].join(' · '),
+        skipped ? 'warning' : 'success');
         loadFindings(0);
     });
 });
@@ -3341,8 +4022,9 @@ function scanInventory(kind: 'code' | 'taint') {
         return { checked, found, partial };
     }, ({ checked, found, partial }) => {
         const label = kind === 'code' ? 'codeScanComplete' : partial ? 'taintScanPartial' : 'taintScanComplete';
-        const units = t(kind === 'code' ? 'codeScanChecked' : 'taintScanChecked');
-        report('inventory-scan-status', label, `${units} ${checked} · ${t('codeScanNew')} ${found}`, partial ? 'warning' : 'success');
+        const units = kind === 'code' ? 'codeScanChecked' : 'taintScanChecked';
+        report('inventory-scan-status', label, () => `${t(units)} ${formatNumber(checked)} · ${t('codeScanNew')} ${formatNumber(found)}`,
+            partial ? 'warning' : 'success');
         loadVulnerabilities(0);
     }).finally(() => inventoryScanButtons.forEach(button => { button.disabled = false; }));
 }
@@ -3608,7 +4290,7 @@ element('provider-delete').addEventListener('click', () => {
 select('review-account').addEventListener('change', showReviewOptions);
 select('managed-org').addEventListener('change', selectOrganization);
 select('member-account').addEventListener('change', selectedMembership);
-select('owner-project').addEventListener('change', chooseOwnerProject);
+select('owner-project').addEventListener('change', () => chooseOwnerProject());
 select('owner-type').addEventListener('change', () => ownerOptions());
 form('review-form', () => saveAdministration(
     `/admin/accounts/${select('review-account').value}/review`, 'POST',
@@ -3630,6 +4312,18 @@ form('owner-form', () => saveAdministration(
 ));
 form('index-form', () => void startIndex());
 form('archive-form', () => void startArchive());
+for (const group of document.querySelectorAll<HTMLElement>('[data-query-modes]')) {
+    const field = select(group.dataset.queryModes!);
+    const buttons = group.querySelectorAll<HTMLButtonElement>('[data-query-option]');
+    for (const button of buttons) {
+        button.addEventListener('click', () => {
+            if (field.value === button.dataset.queryOption) return;
+            field.value = button.dataset.queryOption!;
+            for (const option of buttons) option.setAttribute('aria-pressed', String(option === button));
+            field.dispatchEvent(new Event('input'));
+        });
+    }
+}
 form('search-form', () => search());
 form('graph-form', trace);
 element('flow-analyze').addEventListener('click', runFlow);
@@ -3647,7 +4341,13 @@ for (const [panel, names] of [
         controllers.get(panel)?.abort();
         element(`${panel}-results`).replaceChildren();
         report(`${panel}-status`);
+        if (panel === 'graph') {
+            graphView = undefined;
+            flowView = undefined;
+        }
         if (panel === 'search') {
+            searchHits = [];
+            searchPreview = 0;
             nextPage = undefined;
             element('next').hidden = true;
         }
@@ -3664,12 +4364,11 @@ element('source-dialog').addEventListener('close', () => {
     element('source-content').textContent = '';
 });
 element('copy').addEventListener('click', async () => {
-    const message = element('copy-status');
     try {
         await navigator.clipboard.writeText(element('source-content').textContent ?? '');
-        message.textContent = t('copied');
+        report('copy-status', 'copied');
     } catch {
-        message.textContent = t('copyFailed');
+        report('copy-status', 'copyFailed');
     }
 });
 

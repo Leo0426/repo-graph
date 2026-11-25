@@ -273,7 +273,7 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
             return;
         }
         case `GET ${prefix}/projects`:
-            send(response, 200, repository.projects(visible()));
+            send(response, 200, repository.projects(visible(), flag(query, 'summary', false)));
             return;
         case `POST ${prefix}/summaries/generate`: {
             const id = requestedProject();
@@ -689,7 +689,11 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
             const operation = url.pathname.slice(`${prefix}/graph/`.length) as GraphQuery;
             const requestedDepth = value(query, 'depth') === '0' ? 0 : Math.min(int(query, 'depth', 3), 12);
             const depth = operation === 'subtypes' ? 1 : operation === 'impact' ? 12 : requestedDepth;
-            send(response, 200, repository.traverse(value(query, 'target', true), scopedProject(), operation, depth));
+            const target = value(query, 'target', true);
+            const project = scopedProject();
+            send(response, 200, flag(query, 'diagram', false)
+                ? repository.traverseView(target, project, operation, depth)
+                : repository.traverse(target, project, operation, depth));
             return;
         }
         case `POST ${prefix}/index/project`: {
