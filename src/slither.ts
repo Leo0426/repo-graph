@@ -4,7 +4,7 @@ import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 import type { ArchiveFile } from './archive.js';
 import { maxFindingBody, maxFindingRows, normalizeFindings } from './finding-import.js';
 import { readProjectFile, relativeEvidencePath } from './project-file.js';
-import { runScanner } from './scanner-process.js';
+import { runScanner, scannerWorkPrefix } from './scanner-process.js';
 import type { ScannerAdapter, ScannerResult } from './scanner-process.js';
 
 const maxSources = 2_000;
@@ -73,7 +73,7 @@ export class Slither implements ScannerAdapter {
             outputFormat: 'slither-json', prerequisites: ['Server-local Slither and Solidity compiler', 'Self-contained Solidity sources'] };
         const [slither, solc] = await Promise.all([this.executable(this.slither), this.executable(this.solc)]);
         if (!slither || !solc) return { capability, available: false, toolVersion: '', error: 'SLITHER_NOT_CONFIGURED' };
-        const work = await mkdtemp(join(await realpath(tmpdir()), 'repograph-slither-'));
+        const work = await mkdtemp(scannerWorkPrefix(await realpath(tmpdir()), 'repograph-slither-'));
         try {
             const { toolVersion, compilerVersion } = await this.versions(slither, solc, work, AbortSignal.timeout(5000));
             const available = !!(toolVersion && compilerVersion);
@@ -84,7 +84,7 @@ export class Slither implements ScannerAdapter {
     async scan(root: string, files: ArchiveFile[], signal: AbortSignal): Promise<ScannerResult> {
         const [slither, solc] = await Promise.all([this.executable(this.slither), this.executable(this.solc)]);
         if (!slither || !solc) return { status: 'UNAVAILABLE', exitCode: -1, toolVersion: '', error: 'SLITHER_NOT_CONFIGURED' };
-        const work = await mkdtemp(join(await realpath(tmpdir()), 'repograph-slither-'));
+        const work = await mkdtemp(scannerWorkPrefix(await realpath(tmpdir()), 'repograph-slither-'));
         try {
             const { toolVersion, compilerVersion } = await this.versions(slither, solc, work, AbortSignal.any([signal, AbortSignal.timeout(5000)]));
             if (!toolVersion || !compilerVersion) return { status: 'UNAVAILABLE', exitCode: -1, toolVersion, error: 'SCANNER_UNAVAILABLE' };

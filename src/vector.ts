@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { basename, extname } from 'node:path/posix';
 import type { DatabaseSync } from 'node:sqlite';
+import { HttpError } from './http-error.js';
 import type { CodeUnit, IndexedSource } from './source.js';
 
 const BATCH_SIZE = 16;
@@ -15,6 +16,7 @@ export type VectorMode = 'semantic' | 'code';
 
 export interface VectorSearchOptions {
     projectId: string | null;
+    snapshotId?: string;
     allowedProjects?: () => readonly string[] | null;
     language: string | null;
     kind: string | null;
@@ -162,11 +164,15 @@ export class OllamaEmbedding {
         } catch { return false; }
     }
 
-    async embed(inputs: string[], signal?: AbortSignal, onBatch?: (completedInputs: number) => void) {
+    async embed(inputs: string[], signal?: AbortSignal, onBatch?: (completedInputs: number) => void,
+        beforeSend?: (timeoutMs: number) => () => void) {
         const vectors: Buffer[] = [];
         for (let offset = 0; offset < inputs.length; offset += BATCH_SIZE) {
             const input = inputs.slice(offset, offset + BATCH_SIZE);
-            const deadline = AbortSignal.timeout(10_000);
+            const timeoutMs = 10_000;
+            signal?.throwIfAborted();
+            const settle = beforeSend?.(timeoutMs);
+            const deadline = AbortSignal.timeout(timeoutMs);
             try {
                 const response = await fetch(this.url, {
                     method: 'POST',
@@ -183,7 +189,7 @@ export class OllamaEmbedding {
                 for (const vector of body.embeddings) vectors.push(normalizedVector(vector, this.dimensions));
             } catch {
                 throw unavailable();
-            }
+            } finally { settle?.(); }
             onBatch?.(vectors.length);
         }
         return vectors;
@@ -208,6 +214,20 @@ export class VectorIndex {
                 position INTEGER NOT NULL, vector BLOB NOT NULL,
                 PRIMARY KEY(unit_id, position)
             ) WITHOUT ROWID;
+            CREATE TABLE IF NOT EXISTS knowledge_vector_profile (
+                snapshot_id TEXT PRIMARY KEY REFERENCES knowledge_snapshot(id) ON DELETE CASCADE,
+                retrieval_profile TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS knowledge_vector (
+                snapshot_id TEXT NOT NULL, unit_id TEXT NOT NULL, semantic BLOB NOT NULL, code BLOB NOT NULL,
+                PRIMARY KEY(snapshot_id, unit_id),
+                FOREIGN KEY(snapshot_id, unit_id) REFERENCES knowledge_unit(snapshot_id, id) ON DELETE CASCADE
+            ) WITHOUT ROWID;
+            CREATE TABLE IF NOT EXISTS knowledge_code_passage (
+                snapshot_id TEXT NOT NULL, unit_id TEXT NOT NULL, position INTEGER NOT NULL, vector BLOB NOT NULL,
+                PRIMARY KEY(snapshot_id, unit_id, position),
+                FOREIGN KEY(snapshot_id, unit_id) REFERENCES knowledge_vector(snapshot_id, unit_id) ON DELETE CASCADE
+            ) WITHOUT ROWID;
         `);
         db.function('vector_similarity', { deterministic: true }, (left, right) => {
             if (!(left instanceof Uint8Array) || !(right instanceof Uint8Array) || left.length !== right.length) {
@@ -229,7 +249,8 @@ export class VectorIndex {
             .all(projectId, this.embedding.profile).map(row => String(row.file_path)));
     }
 
-    async prepare(indexed: IndexedSource, signal?: AbortSignal, progress?: (done: number, total: number) => void): Promise<VectorEntry[]> {
+    async prepare(indexed: IndexedSource, signal?: AbortSignal, progress?: (done: number, total: number) => void,
+        beforeSend?: (timeoutMs: number) => () => void): Promise<VectorEntry[]> {
         if (!this.embedding) throw new EmbeddingUnavailable('EMBEDDING_DISABLED');
         const { units, documentation } = indexed;
         const byName = new Map(units.map(unit => [unit.qualifiedName, unit]));
@@ -256,7 +277,7 @@ export class VectorIndex {
         const vectors = await this.embedding.embed([...inputs.keys()], signal, done => {
             while (completedInputs < done) completedUnits += readyAt[completedInputs++];
             progress?.(completedUnits, units.length);
-        });
+        }, beforeSend);
         return unitsWithInputs.map(unit => ({ id: unit.id, semantic: vectors[unit.semantic], code: vectors[unit.code],
             passages: unit.passages.map(index => vectors[index]) }));
     }
@@ -272,43 +293,83 @@ export class VectorIndex {
         this.db.prepare('INSERT INTO embedded_file VALUES (?, ?, ?)').run(projectId, file, this.embedding.profile);
     }
 
+    freezeSnapshot(projectId: string, snapshotId: string) {
+        if (!this.embedding) return;
+        const { profile, dimensions } = this.embedding.retrievalProfile;
+        const bytes = dimensions * 4;
+        const missing = this.db.prepare(`
+            SELECT 1 FROM knowledge_unit u
+            LEFT JOIN embedded_file f ON f.project_id = ? AND f.file_path = u.file_path AND f.profile = ?
+            LEFT JOIN unit_vector v ON v.unit_id = u.id AND length(v.semantic) = ? AND length(v.code) = ?
+            WHERE u.snapshot_id = ? AND (f.project_id IS NULL OR v.unit_id IS NULL OR EXISTS (
+                SELECT 1 FROM unit_code_passage p WHERE p.unit_id = u.id AND length(p.vector) <> ?
+            )) LIMIT 1
+        `).get(projectId, this.embedding.profile, bytes, bytes, snapshotId, bytes);
+        if (missing) throw new HttpError(409, 'WIKI_SNAPSHOT_VECTOR_INCOMPLETE');
+        this.db.prepare(`
+            INSERT INTO knowledge_vector SELECT u.snapshot_id, v.unit_id, v.semantic, v.code
+            FROM knowledge_unit u JOIN unit_vector v ON v.unit_id = u.id WHERE u.snapshot_id = ?
+        `).run(snapshotId);
+        this.db.prepare(`
+            INSERT INTO knowledge_code_passage SELECT v.snapshot_id, p.unit_id, p.position, p.vector
+            FROM knowledge_vector v JOIN unit_code_passage p ON p.unit_id = v.unit_id WHERE v.snapshot_id = ?
+        `).run(snapshotId);
+        this.db.prepare('INSERT INTO knowledge_vector_profile VALUES (?, ?)').run(snapshotId, profile);
+    }
+
     async search(mode: VectorMode, query: string, options: VectorSearchOptions, signal?: AbortSignal) {
-        const { projectId, language, kind, noTest, entryOnly, limit, offset } = options;
+        const { projectId, snapshotId, language, kind, noTest, entryOnly, limit, offset } = options;
         if (options.allowedProjects?.()?.length === 0) return { results: [], offset, limit, hasMore: false };
+        if (snapshotId) {
+            const profile = this.db.prepare('SELECT retrieval_profile FROM knowledge_vector_profile WHERE snapshot_id = ?').get(snapshotId);
+            if (!profile || profile.retrieval_profile !== this.embedding?.retrievalProfile.profile) {
+                throw new HttpError(409, 'SNAPSHOT_VECTOR_INDEX_UNAVAILABLE');
+            }
+        }
         if (!this.embedding) throw new EmbeddingUnavailable('EMBEDDING_DISABLED');
         const embedding = await this.embedding.embedQuery(mode, query, signal);
         const allowed = options.allowedProjects?.() ?? null;
         const scope = allowed === null ? null : JSON.stringify(allowed);
+        const passages = snapshotId ? 'knowledge_code_passage p WHERE p.unit_id = v.unit_id AND p.snapshot_id = v.snapshot_id'
+            : 'unit_code_passage p WHERE p.unit_id = v.unit_id';
         const similarity = mode === 'semantic' ? `
             ${1 - SEMANTIC_SOURCE_WEIGHT} * vector_similarity(v.semantic, query.vector)
                 + ${SEMANTIC_SOURCE_WEIGHT} * vector_similarity(v.code, query.vector)
         ` : `
             max(vector_similarity(v.code, query.vector), coalesce(
-                (SELECT max(vector_similarity(p.vector, query.vector)) FROM unit_code_passage p WHERE p.unit_id = v.unit_id), -1
+                (SELECT max(vector_similarity(p.vector, query.vector)) FROM ${passages}), -1
             ))
+        `;
+        const subject = snapshotId ? 'knowledge_unit' : 'unit';
+        const source = snapshotId ? `
+                FROM knowledge_snapshot f
+                JOIN knowledge_unit u ON u.snapshot_id = f.id
+                JOIN knowledge_vector v ON v.snapshot_id = u.snapshot_id AND v.unit_id = u.id
+                CROSS JOIN query WHERE f.id = ? AND f.published_at IS NOT NULL
+        ` : `
+                FROM embedded_file f
+                JOIN unit u ON u.project_id = f.project_id AND u.file_path = f.file_path
+                JOIN unit_vector v ON v.unit_id = u.id
+                CROSS JOIN query WHERE f.profile = ?
         `;
         const rows = this.db.prepare(`
             WITH query(vector) AS (VALUES (?))
             SELECT u.payload, ranked.project_id, ranked.score
             FROM (
-                SELECT unit.id, unit.project_id, ${similarity} AS score
-                FROM embedded_file f
-                JOIN unit ON unit.project_id = f.project_id AND unit.file_path = f.file_path
-                JOIN unit_vector v ON v.unit_id = unit.id
-                CROSS JOIN query
-                WHERE f.profile = ? AND (? IS NULL OR unit.project_id = ?) AND (? IS NULL OR unit.language = ?)
-                    AND (? IS NULL OR unit.kind = ?) AND (? = 0 OR unit.is_test = 0)
-                    AND (? = 0 OR json_extract(unit.payload, '$.metadata.is_entry_point') = 'true')
-                    AND (? IS NULL OR unit.project_id IN (SELECT value FROM json_each(?)))
-                ORDER BY score DESC, unit.id LIMIT ? OFFSET ?
-            ) ranked JOIN unit u ON u.id = ranked.id
+                SELECT u.rowid AS rowId, u.id, f.project_id, ${similarity} AS score ${source}
+                    AND (? IS NULL OR f.project_id = ?) AND (? IS NULL OR u.language = ?)
+                    AND (? IS NULL OR u.kind = ?) AND (? = 0 OR ${snapshotId ? "json_extract(u.payload, '$.metadata.is_test') IS NOT 'true'" : 'u.is_test = 0'})
+                    AND (? = 0 OR json_extract(u.payload, '$.metadata.is_entry_point') = 'true')
+                    AND (? IS NULL OR f.project_id IN (SELECT value FROM json_each(?)))
+                ORDER BY score DESC, u.id LIMIT ? OFFSET ?
+            ) ranked JOIN ${subject} u ON u.rowid = ranked.rowId
             ORDER BY ranked.score DESC, ranked.id
-        `).all(embedding, this.embedding.profile, projectId, projectId, language, language, kind, kind,
+        `).all(embedding, snapshotId ?? this.embedding.profile, projectId, projectId, language, language, kind, kind,
             Number(noTest), Number(entryOnly), scope, scope, limit + 1, offset);
         const results = rows.slice(0, limit).map(row => ({
             unit: JSON.parse(String(row.payload)) as CodeUnit,
             score: Math.max(0, Math.min(1, Number(row.score))),
-            projectId: String(row.project_id)
+            projectId: String(row.project_id), ...(snapshotId ? { snapshotId } : {})
         }));
         return { results, offset, limit, hasMore: rows.length > limit };
     }

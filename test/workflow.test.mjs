@@ -1,17 +1,49 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { promisify } from 'node:util';
 import test from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { parse, readIndexedFile } from '../dist/source.js';
 
 const projectId = root => createHash('sha256').update(root).digest('hex').slice(0, 12);
+
+test('stdio clients negotiate new scope operations with older services before submitting them', { timeout: 10_000 }, async t => {
+    const requests = [];
+    const service = createServer((request, response) => {
+        const path = new URL(request.url, 'http://localhost').pathname;
+        requests.push(path);
+        response.setHeader('Content-Type', 'application/json');
+        if (path === '/api/v1/search/keyword') response.end('[]');
+        else response.writeHead(404).end('{"error":"NOT_FOUND"}');
+    }).listen(0, '127.0.0.1');
+    await once(service, 'listening');
+    t.after(() => new Promise(resolve => service.close(resolve)));
+    const client = new Client({ name: 'old-service', version: '1.0.0' });
+    try {
+        await client.connect(new StdioClientTransport({ command: process.execPath, args: ['dist/mcp.js'], stderr: 'pipe',
+            env: { REPOGRAPH_BASE_URL: 'http://127.0.0.1:' + service.address().port, REPOGRAPH_ACCESS_TOKEN: randomBytes(24).toString('hex') } }));
+        const unsupported = await client.callTool({ name: 'search_scoped', arguments: {
+            query: 'symbol', scopes: [{ projectId: 'a'.repeat(12) }, { projectId: 'b'.repeat(12) }]
+        } });
+        assert.equal(unsupported.isError, true);
+        assert.deepEqual(unsupported.structuredContent.body, { error: 'SERVICE_CAPABILITY_UNAVAILABLE', feature: 'scopedSearch' });
+        const unsupportedWrite = await client.callTool({ name: 'update_project_space', arguments: {
+            spaceId: '01234567-89ab-4def-8123-456789abcdef', revision: 0, maxRepositories: 4
+        } });
+        assert.deepEqual(unsupportedWrite.structuredContent.body, { error: 'SERVICE_CAPABILITY_UNAVAILABLE', feature: 'spaceAdministration' });
+        const existing = await client.callTool({ name: 'search_keyword', arguments: { query: 'symbol' } });
+        assert.equal(existing.isError, false);
+        assert.deepEqual(requests, ['/api/v1/capabilities', '/api/v1/capabilities', '/api/v1/search/keyword']);
+    } finally { await client.close(); }
+});
 
 test('source parsing preserves stable IDs, line locations and Markdown sections', () => {
     const units = parse('example', 'source.ts', 'typescript',
@@ -132,10 +164,12 @@ test('REST and stdio MCP share an isolated and persistent repository index', { t
     }
 
     let server = await startServer();
-    async function api(path, parameters = {}, method = 'GET', authorized = true) {
+    async function api(path, parameters = {}, method = 'GET', authorized = true, input) {
         const response = await fetch(`${server.base}/api/v1${path}?${new URLSearchParams(parameters)}`, {
             method,
-            headers: authorized ? { Authorization: `Bearer ${env.REPOGRAPH_ACCESS_TOKEN}` } : undefined
+            headers: { ...(authorized ? { Authorization: `Bearer ${env.REPOGRAPH_ACCESS_TOKEN}` } : {}),
+                ...(input === undefined ? {} : { 'Content-Type': 'application/json' }) },
+            body: JSON.stringify(input)
         });
         return { status: response.status, body: await response.json() };
     }
@@ -196,6 +230,11 @@ test('REST and stdio MCP share an isolated and persistent repository index', { t
     }
     const alphaId = projectId(alpha);
     const betaId = projectId(beta);
+    const contract = await api('/capabilities');
+    assert.equal(contract.status, 200);
+    assert.equal(contract.body.apiVersion, 1);
+    assert.equal(contract.body.features.scopedSearch, true);
+    assert.ok(contract.body.scopes.includes('publishedSnapshot'));
     const overview = await api(`/projects/${alphaId}/stats`);
     assert.equal(overview.status, 200);
     assert.equal(overview.body.totalFiles, 5);
@@ -261,6 +300,62 @@ test('REST and stdio MCP share an isolated and persistent repository index', { t
         for (const name of ['find_callers', 'find_callees', 'find_subtypes', 'get_impact']) {
             assert.ok(catalog.tools.some(tool => tool.name === name), name);
         }
+        const discovery = await client.callTool({ name: 'get_service_capabilities' });
+        assert.deepEqual(discovery.structuredContent.body, contract.body);
+        const wiki = await client.callTool({ name: 'submit_wiki', arguments: { projectId: alphaId, key: 'stdio-wiki' } });
+        assert.equal(wiki.structuredContent.status, 202);
+        const { agentRunId } = wiki.structuredContent.body;
+        const replay = await client.callTool({ name: 'submit_wiki', arguments: { projectId: alphaId, key: 'stdio-wiki' } });
+        assert.equal(replay.structuredContent.body.agentRunId, agentRunId);
+        let complete;
+        for (let attempt = 0; attempt < 100; attempt++) {
+            complete = (await api('/agent-runs/' + agentRunId, { projectId: alphaId })).body;
+            if (!['RUNNING', 'QUEUED'].includes(complete.status)) break;
+            await delay(20);
+        }
+        assert.equal(complete.status, 'COMPLETED');
+        const [snapshot] = (await api('/knowledge-snapshots', { projectId: alphaId })).body;
+        const scope = { projectId: alphaId, snapshotId: snapshot.id };
+        const source = await client.callTool({ name: 'read_snapshot_source', arguments: { ...scope, file: 'shared.ts' } });
+        assert.deepEqual(source.structuredContent.body, (await api('/knowledge-snapshots/' + snapshot.id + '/source',
+            { projectId: alphaId, file: 'shared.ts' })).body);
+        const scoped = await client.callTool({ name: 'search_scoped', arguments: { query: 'greet', method: 'keyword', scopes: [scope] } });
+        assert.equal(scoped.structuredContent.status, 200);
+        assert.ok(scoped.structuredContent.body.results.some(hit => hit.snapshotId === snapshot.id));
+        const knowledgeArgs = { query: 'greet', method: 'keyword', scopes: [{ kind: 'repository', ...scope }] };
+        const knowledge = await client.callTool({ name: 'search_knowledge', arguments: knowledgeArgs });
+        assert.equal(knowledge.structuredContent.status, 200);
+        assert.ok(knowledge.structuredContent.body.results.some(hit => hit.snapshotId === snapshot.id && hit.kind === 'SOURCE'));
+        const cliKnowledge = await promisify(execFile)(process.execPath, ['dist/cli.js', 'search_knowledge', JSON.stringify(knowledgeArgs)],
+            { env: { ...env, REPOGRAPH_BASE_URL: server.base } });
+        assert.deepEqual(JSON.parse(cliKnowledge.stdout), knowledge.structuredContent.body);
+        const space = await api('/spaces', {}, 'POST', true, { name: 'CLI space' });
+        assert.equal(space.status, 201);
+        const generated = await client.callTool({ name: 'generate_space_document', arguments: { spaceId: space.body.id,
+            target: { name: 'Notes.md' }, instruction: 'Write notes', key: 'disabled-space-generation' } });
+        assert.equal(generated.structuredContent.status, 409);
+        assert.equal(generated.structuredContent.body.error, 'GENERATION_DISABLED');
+        const spaceId = space.body.id;
+        const settings = await client.callTool({ name: 'update_project_space', arguments: { spaceId, revision: 0, maxRepositories: 3 } });
+        assert.equal(settings.structuredContent.status, 200);
+        assert.equal(settings.structuredContent.body.maxRepositories, 3);
+        const linked = await client.callTool({ name: 'link_space_repository', arguments: { spaceId, ...scope,
+            revision: settings.structuredContent.body.revision } });
+        assert.equal(linked.structuredContent.status, 200);
+        const removeArgs = { spaceId, projectId: alphaId, revision: linked.structuredContent.body.revision };
+        const cliDetach = await promisify(execFile)(process.execPath, ['dist/cli.js', 'unlink_space_repository', JSON.stringify(removeArgs)],
+            { env: { ...env, REPOGRAPH_BASE_URL: server.base } });
+        const detach = JSON.parse(cliDetach.stdout);
+        const memberships = await client.callTool({ name: 'list_detached_space_repositories', arguments: { spaceId } });
+        assert.deepEqual(memberships.structuredContent.body, [scope]);
+        const relinked = await client.callTool({ name: 'restore_space_repository', arguments: { ...removeArgs, revision: detach.revision } });
+        assert.equal(relinked.structuredContent.status, 200);
+        assert.deepEqual((await api('/spaces/' + spaceId)).body.repositories, [scope]);
+        const dropped = await client.callTool({ name: 'unlink_space_repository', arguments: { ...removeArgs, revision: relinked.structuredContent.body.revision } });
+        assert.equal(dropped.structuredContent.status, 200);
+        const cli = await promisify(execFile)(process.execPath, ['dist/cli.js', 'read_snapshot_source', JSON.stringify({ ...scope, file: 'shared.ts' })],
+            { env: { ...env, REPOGRAPH_BASE_URL: server.base } });
+        assert.deepEqual(JSON.parse(cli.stdout), source.structuredContent.body);
         const result = await client.callTool({ name: 'search_keyword', arguments: { query: 'greet', projectId: betaId } });
         assert.equal(result.isError, false);
         assert.deepEqual(JSON.parse(result.content[0].text).map(hit => hit.projectId), [betaId]);
@@ -317,8 +412,14 @@ test('REST and stdio MCP share an isolated and persistent repository index', { t
     assert.equal((await api('/search/keyword', { projectId: alphaId, q: 'instructions' })).body.length, 0);
     assert.equal((await api('/search/keyword', { projectId: alphaId, q: 'replacement' })).body.length, 1);
     assert.equal((await api('/index/project', { projectId: alphaId }, 'DELETE')).status, 200);
-    assert.equal((await api('/search/keyword', { projectId: alphaId, q: 'replacement' })).body.length, 0);
-    assert.equal((await finish(alpha)).status, 'idle');
+    assert.equal((await api('/search/keyword', { projectId: alphaId, q: 'replacement' })).status, 404);
+    assert.deepEqual((await api('/search/keyword', { q: 'replacement' })).body, []);
+    assert.equal((await api('/index/project/status', { projectRoot: alpha })).status, 404);
+    const retirement = '/projects/' + alphaId + '/lifecycle';
+    const rejectedPurge = await fetch(server.base + '/api/v1' + retirement, { method: 'POST',
+        headers: { Authorization: 'Bearer ' + env.REPOGRAPH_ACCESS_TOKEN, 'Content-Type': 'application/json', 'Idempotency-Key': 'purge-too-soon' },
+        body: JSON.stringify({ action: 'purge', revision: 1 }) });
+    assert.equal((await rejectedPurge.json()).error, 'PROJECT_RETENTION_ACTIVE');
     assert.equal((await api('/symbol/greet', { projectId: betaId })).status, 200);
     const betaFile = { projectRoot: beta, file: join(beta, 'shared.ts') };
     const heuristic = await api('/index/file', { ...betaFile, strategy: 'HEURISTIC' }, 'POST');

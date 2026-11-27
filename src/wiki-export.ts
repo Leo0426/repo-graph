@@ -1,4 +1,7 @@
 import type { SummaryDocument } from './wiki.js';
+import { HttpError } from './http-error.js';
+
+export const wikiArtifactFormats = ['markdown', 'pdf', 'docx'] as const;
 
 const markup = (value: string) => value.replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const inline = (value: string) => markup(value.replace(/[\x00-\x1f\x7f]/g, ' '))
@@ -22,9 +25,12 @@ function bodyMarkdown(text: string) {
 }
 
 export function wikiMarkdown(document: SummaryDocument) {
+    if (document.markdown !== undefined) return document.markdown;
     const lines = ['# ' + inline(document.title), '', '- Version ' + document.docVersion,
         '- Generated ' + document.generatedAt, '- Status ' + document.status];
+    if (document.perspective) lines.push('- Perspective ' + document.perspective);
     if (document.model) lines.push('- Model ' + inline(document.model));
+    if (document.knowledgeSnapshotId) lines.push('- Published snapshot ' + document.knowledgeSnapshotId);
     if (document.legacyImported) lines.push('- Document migrated from the legacy instance');
     for (const section of document.sections) {
         lines.push('', '## ' + inline(section.title), '');
@@ -35,4 +41,11 @@ export function wikiMarkdown(document: SummaryDocument) {
         ...document.citations.map(item => '- ' + inline(item.qualifiedName) + ' · ' + inline(item.filePath) + ':' + item.startLine + '–' + item.endLine));
     if (document.missingInfo.length) lines.push('', '## Missing information', '', ...document.missingInfo.map(item => '- ' + inline(item)));
     return lines.join('\n') + '\n';
+}
+
+export function wikiExportText(page: SummaryDocument, section: number | undefined) {
+    if (section === undefined) return wikiMarkdown(page);
+    const selected = page.sections[section];
+    if (!selected) throw new HttpError(404, 'WIKI_SECTION_NOT_FOUND');
+    return selected.body;
 }

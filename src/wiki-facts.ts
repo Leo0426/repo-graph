@@ -19,13 +19,16 @@ interface ModuleFacts {
     outgoing: Map<string, number>;
     references: Map<FactUnit, number>;
 }
-export type SummarySection = { title: string; body: string } & ({ source: 'facts' } | { source: 'llm'; phase?: string });
+export const wikiPerspectives = ['technical', 'business'] as const;
+export type WikiPerspective = typeof wikiPerspectives[number];
+export type SummarySection = { title: string; body: string } & ({ source: 'facts' | 'manual' } | { source: 'llm'; phase?: string });
 export interface SummaryDraft {
     level: 'PROJECT' | 'PACKAGE';
     scopeId: string;
     title: string;
     sections: SummarySection[];
     citations: SummaryCitation[];
+    perspective?: WikiPerspective;
 }
 
 function scopeFor(language: string, qualifiedName: string, file: string) {
@@ -93,6 +96,7 @@ export function wikiFacts(db: DatabaseSync, graph: CodeGraph, metrics: CodeMetri
     if (packages.size > MAX_MODULES) omissions.push('WIKI_MODULE_LIMIT');
     if (db.prepare('SELECT 1 FROM index_dirty WHERE project_id = ? LIMIT 1').get(projectId)) omissions.push('WIKI_INDEX_HAS_PENDING_FILES');
     const callExamples: { from: FactUnit; to: FactUnit }[] = [];
+    const workflows = new Map<string, { from: FactUnit; to: FactUnit }[]>();
     let scannedCalls = 0;
     let crossModuleCalls = 0;
     for (const call of graph.callPairs(projectId)) {
@@ -100,6 +104,11 @@ export function wikiFacts(db: DatabaseSync, graph: CodeGraph, metrics: CodeMetri
         const from = units.get(String(call.source_id)), to = units.get(String(call.target_id));
         if (!from || !to) continue;
         if (from.entry && callExamples.length < 10) callExamples.push({ from, to });
+        if (from.entry || from.scope !== to.scope) {
+            const paths = workflows.get(from.scope) ?? [];
+            if (paths.length < 10) paths.push({ from, to });
+            workflows.set(from.scope, paths);
+        }
         if (from.scope === to.scope) continue;
         crossModuleCalls++;
         increment(packages.get(from.scope)!.outgoing, to.scope);
@@ -138,6 +147,24 @@ export function wikiFacts(db: DatabaseSync, graph: CodeGraph, metrics: CodeMetri
             section('Key symbols', references.map(location)),
             section('Complexity hotspots', hotspots.map(({ unit, value }) => location(unit) + ' · CC ' + value))
         ], citations: listings([...references, ...hotspots.map(item => item.unit)]) });
+    }
+    body.push({ perspective: 'business', level: 'PROJECT', scopeId: PROJECT_SCOPE, title: projectName + ' Structure', sections: [
+        section('Observed entry points', entries.map(location), 'No public entry point was detected in the indexed source.'),
+        section('Observed workflow', callExamples.map(({ from, to }) => location(from) + ' → ' + location(to)),
+            'No direct call from an indexed entry point was detected.'),
+        section('Modules for investigation', modules.slice(0, 20).map(module => `${plain(module.name)} · ${countLabel(module.entries, 'detected entry point')}`)),
+        section('Coverage', ['These observations describe code entry points and direct handoffs. Product behavior requires confirmation from other evidence.'])
+    ], citations: listings([...entries, ...callExamples.flatMap(({ from, to }) => [from, to])]) });
+    for (const module of modules) {
+        const entryPoints = module.units.filter(unit => unit.entry).slice(0, 8);
+        const steps = workflows.get(module.name) ?? [];
+        const candidates = module.units.filter(unit => unit.root).slice(0, 4);
+        body.push({ perspective: 'business', level: 'PACKAGE', scopeId: module.name, title: module.name, sections: [
+            section('Observed entry points', entryPoints.map(location), 'No public entry point was detected in this module.'),
+            section('Observed workflow', steps.map(({ from, to }) => location(from) + ' → ' + location(to)),
+                'The available index contains no direct entry-point or cross-module handoff for this module.'),
+            section('Code locations for review', candidates.map(location))
+        ], citations: listings([...entryPoints, ...steps.flatMap(({ from, to }) => [from, to]), ...candidates]) });
     }
     return { body, omissions };
 }

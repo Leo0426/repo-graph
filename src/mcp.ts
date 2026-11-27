@@ -2,18 +2,11 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { findingFormats, maxFindingBody } from './finding-import.js';
+import { mcpServiceRequest, registerServiceTools } from './mcp-service-tools.js';
+import { RepoGraphClient } from './service-client.js';
 import { feedbackStatus } from './triage-policy.js';
 
-const token = process.env.REPOGRAPH_ACCESS_TOKEN;
-const username = process.env.REPOGRAPH_USERNAME;
-const password = process.env.REPOGRAPH_PASSWORD;
-if (!!username !== !!password || (!token && !username)) {
-    throw new Error('Configure REPOGRAPH_USERNAME and REPOGRAPH_PASSWORD, or REPOGRAPH_ACCESS_TOKEN');
-}
-const app = new URL(process.env.REPOGRAPH_BASE_URL ?? 'http://127.0.0.1:8080');
-if (!['http:', 'https:'].includes(app.protocol) || app.username || app.password || app.search || app.hash) {
-    throw new Error('REPOGRAPH_BASE_URL must be an HTTP(S) URL without credentials, query or fragment');
-}
+const client = new RepoGraphClient();
 
 const server = new McpServer({ name: 'repograph', version: '0.1.0' });
 const projectId = z.string().regex(/^[0-9a-f]{12}$/).optional();
@@ -21,86 +14,8 @@ const requiredProject = projectId.unwrap();
 const fingerprint = z.string().regex(/^[a-f0-9]{16}$/);
 const triageVersion = z.string().trim().max(256).optional();
 const text = z.string().trim().min(1).max(4096);
-const apiPath = (path: string) => new URL(`${app.pathname.replace(/\/$/, '')}/api/v1${path}`, app);
-interface Session { cookie: string; csrf: string }
-let session: Session | undefined;
-let signingIn: Promise<Session> | undefined;
-
-function readCookie(response: Response, name: string) {
-    const pair = response.headers.getSetCookie().map(value => value.split(';', 1)[0])
-        .find(value => value.startsWith(`${name}=`));
-    if (!pair) throw new Error('Account sign-in failed');
-    return pair;
-}
-
-async function signIn() {
-    const deadline = AbortSignal.timeout(8_000);
-    const options = { redirect: 'error', signal: deadline } as const;
-    const preflight = await fetch(apiPath('/auth/csrf'), options);
-    if (!preflight.ok) throw new Error('Account sign-in failed');
-    const nonce = readCookie(preflight, 'repograph_csrf');
-    const { token: csrf } = await preflight.json();
-    const login = await fetch(apiPath('/auth/login'), {
-        ...options, method: 'POST', body: JSON.stringify({ username, password }),
-        headers: { Cookie: nonce, Origin: app.origin, 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }
-    });
-    if (!login.ok) {
-        await login.body?.cancel();
-        throw new Error('Account sign-in failed');
-    }
-    const cookie = readCookie(login, 'repograph_session');
-    await login.body?.cancel();
-    const current = await fetch(apiPath('/auth/csrf'), { ...options, headers: { Cookie: cookie } });
-    if (!current.ok) throw new Error('Account sign-in failed');
-    const ready = await current.json();
-    if (typeof ready.token !== 'string') throw new Error('Account sign-in failed');
-    return { cookie, csrf: ready.token };
-}
-
-function getSession() {
-    if (session) return session;
-    signingIn ??= signIn().then(result => { session = result; return result; })
-        .finally(() => { signingIn = undefined; });
-    return signingIn;
-}
-
-async function request(
-    path: string, parameters: Record<string, string | number | boolean | undefined> = {},
-    signal?: AbortSignal, method = 'GET', payload?: string
-) {
-    const url = apiPath(path);
-    for (const [key, value] of Object.entries(parameters)) {
-        if (value !== undefined) url.searchParams.set(key, String(value));
-    }
-    const deadline = AbortSignal.timeout(15_000);
-    try {
-        const requestSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
-        const send = (active: Session | undefined) => fetch(url, {
-            method, signal: requestSignal, redirect: 'error', body: payload,
-            headers: {
-                ...(active ? { Cookie: active.cookie, Origin: app.origin, 'X-CSRF-Token': active.csrf } : { Authorization: `Bearer ${token}` }),
-                ...(payload === undefined ? {} : { 'Content-Type': 'application/json' })
-            }
-        });
-        const active = username ? await getSession() : undefined;
-        let response = await send(active);
-        if (response.status === 401 && active) {
-            await response.body?.cancel();
-            if (session === active) session = undefined;
-            response = await send(await getSession());
-        }
-        const body: unknown = await response.json();
-        return {
-            content: [{ type: 'text' as const, text: JSON.stringify(body) }],
-            isError: !response.ok
-        };
-    } catch {
-        return {
-            content: [{ type: 'text' as const, text: 'RepoGraph application request failed or timed out.' }],
-            isError: true
-        };
-    }
-}
+const request = mcpServiceRequest(client);
+registerServiceTools(server, request);
 
 server.registerTool('triage_finding', {
     description: 'Review an imported finding by fingerprint or preview supplied Semgrep, SARIF, CodeQL, or Slither JSON with available evidence.',

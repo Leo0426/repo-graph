@@ -1,8 +1,10 @@
-import { mkdir, lstat, opendir, realpath } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, lstat, opendir, realpath, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { SQLInputValue } from 'node:sqlite';
 import { AgentRuns } from './agent-runs.js';
+import { AskConversations } from './ask-conversations.js';
 import { Assets } from './assets.js';
 import { springAuthorizationEvidence } from './authorization-evidence.js';
 import { ChangeReviews } from './change-review.js';
@@ -11,10 +13,12 @@ import { CodeGraph } from './graph.js';
 import { checkCode } from './code-checks.js';
 import type { CodeCheckMatch } from './code-checks.js';
 import { CodeMetrics } from './code-metrics.js';
-import { DependencyAdvisories } from './dependency-advisories.js';
+import { captureDependencyInventory, DependencyAdvisories } from './dependency-advisories.js';
 import { DetectionRules } from './detection-rules.js';
+import { DurableJobs } from './durable-jobs.js';
 import { GenerationGateway } from './generation.js';
 import { ExternalFindings } from './external-findings.js';
+import { GitSources } from './git-sources.js';
 import { analyzeFlow } from './flow-analysis.js';
 import { traceParameterFlow } from './parameter-flow.js';
 import { ReviewQueue } from './review-queue.js';
@@ -26,19 +30,36 @@ import type { TaintMatch } from './taint-scan.js';
 import { TriagePolicy } from './triage-policy.js';
 import { VulnerabilityInventory } from './vulnerability-inventory.js';
 import { HttpError } from './http-error.js';
+import { HostedEntitlements } from './hosted-entitlements.js';
+import { CollaborationIngress } from './collaboration.js';
 import { IdentityDirectory } from './identity.js';
+import type { Account } from './identity.js';
+import { DeviceAuthorization } from './device-authorization.js';
 import { IndexWatches } from './index-watch.js';
+import { IsolatedVerifications } from './isolated-verifications.js';
+import { ChangePatches } from './change-patches.js';
+import { KnowledgeSnapshots } from './knowledge-snapshots.js';
 import { MAX_JAR_BYTES } from './java-bytecode.js';
 import { readJsAliasTargets } from './js-path-aliases.js';
+import { LocalIndexJobs, localIndexPlaybook } from './local-index-jobs.js';
+import type { FrozenIndexInput } from './local-index-jobs.js';
 import { ModelProviders } from './model-providers.js';
-import { readProjectFile } from './project-file.js';
+import { ModelUsage } from './model-usage.js';
+import { Operability } from './operability.js';
+import { readProjectFile, relativeEvidencePath } from './project-file.js';
+import { availableProject, ProjectRetirement } from './project-retirement.js';
+import { ReviewRuleProposals } from './review-rule-proposals.js';
+import { ProjectSpaces } from './project-spaces.js';
+import { SnapshotRetirement } from './snapshot-retirement.js';
 import type { GraphQuery } from './graph.js';
 import { digest, isJar, languageOf, readIndexedFile, sourceLanguages } from './source.js';
+import { isDependencyManifest } from './sbom.js';
 import type { CodeUnit, IndexedSource, IndexLanguage, IndexStrategy } from './source.js';
 import { EmbeddingUnavailable, VectorIndex } from './vector.js';
 import type { OllamaEmbedding, VectorEntry, VectorMode, VectorSearchOptions } from './vector.js';
 import { findVulnerabilityVariants } from './vulnerability-variants.js';
 import { WikiSummaries } from './wiki.js';
+import type { WikiJobInput } from './wiki.js';
 
 interface IndexResult {
     totalFiles: number;
@@ -59,12 +80,14 @@ interface IndexProgress {
     totalFiles: number;
 }
 
-type IndexStatus = { status: 'idle' | 'running' | 'done' | 'partial' | 'error' }
+export type IndexStatus = { status: 'idle' | 'running' | 'done' | 'partial' | 'error' }
     & Partial<IndexResult & IndexProgress> & { indexedAt?: string; message?: string; pct?: number };
 
 const MAX_FILE_BYTES = 1024 * 1024;
 const MAX_INDEX_JOBS = 2;
 const MAX_FILES = 20_000;
+const MAX_FROZEN_INDEX_BYTES = 1024 * 1024 * 1024;
+const MAX_INDEX_CONFIG_FILES = 4096;
 const MAX_CODE_CHECK_UNITS = 20_000;
 const MAX_CODE_CHECK_BYTES = 32 * 1024 * 1024;
 const MAX_CODE_CHECK_MATCHES = 1_000;
@@ -80,7 +103,7 @@ const HEURISTIC_FORMAT = 'heuristic-1';
 const RECOVERY_FORMAT = 'recovered-1';
 const IGNORED_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage', 'vendor']);
 const ERROR_MESSAGES = new Set(['FILE_TOO_LARGE', 'SYNTAX_ERROR', 'SYNTAX_LIMIT', 'PARSE_TIMEOUT', 'FILE_CHANGED', 'PATH_CHANGED',
-    'INVALID_CLASS_FILE', 'DUPLICATE_JAVA_CLASS', 'BYTECODE_SYMBOL_LIMIT', 'INVALID_JAVA_ARCHIVE', 'JAVA_ARCHIVE_LIMIT']);
+    'INVALID_CLASS_FILE', 'DUPLICATE_JAVA_CLASS', 'BYTECODE_SYMBOL_LIMIT', 'INVALID_JAVA_ARCHIVE', 'JAVA_ARCHIVE_LIMIT', 'INDEX_INPUT_BYTES_CHANGED']);
 const MISSING_PATH = new Set(['ENOENT', 'ENOTDIR']);
 
 function isMissing(error: unknown) {
@@ -98,6 +121,12 @@ interface IndexScope {
     rememberStrategy?: boolean;
     strategy?: IndexStrategy;
     register?: (projectId: string) => void;
+    logicalRoot?: string;
+    guard?: () => void;
+    fence?: () => void;
+    frozen?: { inputs: ReadonlyMap<string,string>; retained: ReadonlySet<string>; errors: string[] };
+    complete?: (result: IndexStatus) => void;
+    beforeEmbedding?: (timeoutMs: number) => () => void;
 }
 
 export class RepositoryIndex {
@@ -107,6 +136,8 @@ export class RepositoryIndex {
     private readonly vectors: VectorIndex;
     private readonly databaseFiles: Set<string>;
     readonly identity: IdentityDirectory;
+    readonly devices?: DeviceAuthorization;
+    readonly spaces: ProjectSpaces;
     readonly assets: Assets;
     readonly watches: IndexWatches;
     readonly metrics: CodeMetrics;
@@ -123,13 +154,26 @@ export class RepositoryIndex {
     readonly detectionRules: DetectionRules;
     readonly agentRuns: AgentRuns;
     readonly wiki: WikiSummaries;
+    readonly verifications: IsolatedVerifications;
+    readonly changePatches: ChangePatches;
+    readonly reviewRuleProposals: ReviewRuleProposals;
+    readonly knowledgeSnapshots: KnowledgeSnapshots;
+    readonly snapshotRetirement: SnapshotRetirement;
+    readonly projectRetirement: ProjectRetirement;
+    readonly ask: AskConversations;
     readonly modelProviders: ModelProviders;
+    readonly modelUsage: ModelUsage;
+    readonly entitlements: HostedEntitlements;
+    readonly collaboration?: CollaborationIngress;
     readonly generation: GenerationGateway;
+    readonly gitSources: GitSources;
+    readonly operations: Operability;
+    readonly localIndexes: LocalIndexJobs;
 
     private constructor(
         private readonly db: DatabaseSync, private readonly root: string, assetsRoot: string, database: string, embedding?: OllamaEmbedding
     ) {
-        this.databaseFiles = new Set(database === ':memory:' ? [] : ['', '-wal', '-shm', '-journal', '-provider-key'].map(suffix => database + suffix));
+        this.databaseFiles = new Set(database === ':memory:' ? [] : ['', '-wal', '-shm', '-journal', '-provider-key', '-git-key'].map(suffix => database + suffix));
         db.exec(`
             PRAGMA journal_mode=WAL;
             PRAGMA foreign_keys=ON;
@@ -183,22 +227,57 @@ export class RepositoryIndex {
         this.reviewQueue = new ReviewQueue(db, this.vulnerabilities);
         this.scanHistory = new ScanHistory(db);
         this.changeReviews = new ChangeReviews(db, this, this.externalFindings, this.vulnerabilities);
-        this.agentRuns = new AgentRuns(db);
-        this.vectors = new VectorIndex(db, embedding);
+        const durableJobs = new DurableJobs<WikiJobInput>(db);
         this.identity = new IdentityDirectory(db);
+        this.entitlements = new HostedEntitlements(db, this.identity, process.env);
+        this.agentRuns = new AgentRuns(db, true, this.entitlements);
+        this.vectors = new VectorIndex(db, embedding);
+        this.knowledgeSnapshots = new KnowledgeSnapshots(db,
+            (projectId, snapshotId) => this.vectors.freezeSnapshot(projectId, snapshotId),
+            (projectId, snapshotId) => this.gitSources.origin(projectId) ?? this.assets.bindSnapshot(projectId, snapshotId));
+        if (process.env.REPOGRAPH_DEVICE_AUTH === '1') this.devices = new DeviceAuthorization(db, this.identity);
+        this.snapshotRetirement = new SnapshotRetirement(db, this.identity);
+        this.gitSources = new GitSources(db, join(assetsRoot, '.git-sources'), database === ':memory:' ? null : database + '-git-key',
+            this.identity, this.agentRuns, (root, logicalRoot, signal, guard, fence) =>
+                this.startResolved(root, new Set(sourceLanguages), true, { logicalRoot, signal, guard, fence }),
+            (projectId, name, actor, key, verify) => this.wiki.submit(projectId, name, actor, key, undefined, 'incremental', verify));
         this.modelProviders = new ModelProviders(db, this.identity, database === ':memory:' ? null : database + '-provider-key');
-        this.generation = new GenerationGateway(this.modelProviders);
-        this.changeReviewAgent = new ChangeReviewAgent(this.agentRuns, this.generation);
-        this.sastTriageAgent = new SastTriageAgent(this, this.agentRuns, this.generation);
-        this.wiki = new WikiSummaries(db, this.agentRuns, this.graph, this.metrics, this.generation);
+        this.modelUsage = new ModelUsage(db, this.identity, this.entitlements);
+        this.generation = new GenerationGateway(this.modelProviders, this.modelUsage);
+        this.spaces = new ProjectSpaces(db, this.identity, (actor, projectId, snapshotId) => {
+            this.identity.requireProjectReader(actor, projectId);
+            this.projectRoot(projectId);
+            if (snapshotId && this.knowledgeSnapshots.get(snapshotId)?.projectId !== projectId) {
+                throw new HttpError(404, 'SNAPSHOT_NOT_FOUND');
+            }
+        }, this.generation);
+        this.changeReviewAgent = new ChangeReviewAgent(db, this);
+        this.sastTriageAgent = new SastTriageAgent(db, this);
+        this.wiki = new WikiSummaries(db, this.agentRuns, this.graph, this.metrics, this.generation,
+            this.knowledgeSnapshots, durableJobs, this.identity);
+        this.ask = new AskConversations(db, this);
+        this.changePatches = new ChangePatches(db, this);
+        this.reviewRuleProposals = new ReviewRuleProposals(db, this);
+        this.verifications = new IsolatedVerifications(db, this, process.env, database === ':memory:' ? assetsRoot : database);
+        if (process.env.REPOGRAPH_COLLABORATION === '1') this.collaboration = new CollaborationIngress(db, this);
         this.assets = new Assets(db, assetsRoot, {
             start: (root, languages, incremental, strategy, register) =>
                 this.startResolved(root, languages, incremental, { register, strategy, rememberStrategy: true }),
-            remove: (id, mark) => this.deleteResolved(id, null, mark),
+            claim: (actor, id) => this.identity.claimCreatedProject(actor, id),
             frameworks: id => this.projectStats(id).frameworkDistribution,
             vulnerabilityCounts: id => this.vulnerabilities.activeCounts(id)
         });
-        this.scans = new ScanTasks(this.scanHistory, this.externalFindings, this.assets);
+        this.scans = new ScanTasks(db, this);
+        this.localIndexes = new LocalIndexJobs(db, this, {
+            builder: digest(JSON.stringify([INDEX_FORMAT, sourceIndexFormats, HEURISTIC_FORMAT, RECOVERY_FORMAT, embedding?.profile ?? null])),
+            capacity: () => MAX_INDEX_JOBS - this.jobs.size,
+            capture: (id, root, stage, options, signal) => this.captureLocalIndex(id, root, stage, new Set(options.languages), signal),
+            register: (id, root, input) => this.registerLocalIndex(id, root, input),
+            execute: (id, staged, input, signal, guard, complete, beforeEmbedding) =>
+                this.executeLocalIndex(id, staged, input, signal, guard, complete, beforeEmbedding),
+            status: (id, status) => this.saveStatus(id, status)
+        });
+        this.operations = new Operability(db);
         this.watches = new IndexWatches(db, async (id, root, signal) => {
             if (signal.aborted || this.projectRoot(id) !== root) return;
             const languages = new Set<IndexLanguage>(sourceLanguages);
@@ -207,12 +286,23 @@ export class RepositoryIndex {
         }, (root, filename) => {
             const path = relative(root, resolve(root, filename));
             const absolute = join(root, path);
-            return this.relativeSourceAllowed(path, this.watchesBytecode(digest(root).slice(0, 12)))
+            return this.relativeSourceAllowed(path, this.watchesBytecode(this.projectIdForRoot(root)))
                 && !this.assets.ownsPath(absolute) && !this.databaseFiles.has(absolute);
         });
+        this.projectRetirement = new ProjectRetirement(db, this.identity, id => this.scans.active(id) || this.gitSources.activeProject(id)
+            || this.wiki.activeProject(id) || this.changeReviewAgent.activeProject(id) || this.sastTriageAgent.activeProject(id), async cleanup => {
+            if (!cleanup.sourceId) throw new HttpError(409, 'PROJECT_STORAGE_CHANGED');
+            if (cleanup.source === 'ARCHIVE') await this.assets.removeRetiredSource(cleanup.sourceId);
+            else if (cleanup.source === 'GIT') await this.gitSources.removeRetiredBinding(cleanup.sourceId);
+        }, (id, active) => {
+            if (!active) { void this.watches.detach(id); return; }
+            const watched = this.db.prepare('SELECT p.root FROM index_watch w JOIN project p ON p.id = w.project_id WHERE p.id = ?').get(id);
+            if (watched) this.watches.attach(id, String(watched.root));
+        });
         const interrupted: IndexStatus = { status: 'error', message: 'INTERRUPTED' };
-        db.prepare("UPDATE index_status SET status = 'error', payload = ? WHERE status = 'running'")
-            .run(JSON.stringify(interrupted));
+        db.prepare(`UPDATE index_status SET status = 'error', payload = ? WHERE status = 'running' AND NOT EXISTS (
+            SELECT 1 FROM durable_job WHERE project_id = index_status.project_id AND kind = ? AND state IN ('QUEUED','RUNNING','PAUSED'))`)
+            .run(JSON.stringify(interrupted), localIndexPlaybook);
     }
 
     static async open(database: string, permittedRoot: string, embedding?: OllamaEmbedding, storage = `${database}-assets`) {
@@ -244,9 +334,12 @@ export class RepositoryIndex {
     }
 
     async close() {
-        await this.watches.close();
+        this.snapshotRetirement.close();
+        await this.projectRetirement.close();
+        await Promise.all([this.watches.close(), this.gitSources.close(), this.assets.close(), this.ask.close(), this.verifications.close(), this.localIndexes.close()]);
         await Promise.all(this.jobs);
         await Promise.all([this.wiki.close(), this.changeReviewAgent.close(), this.sastTriageAgent.close(), this.scans.close()]);
+        this.operations.metrics.close();
         this.db.close();
     }
 
@@ -295,6 +388,89 @@ export class RepositoryIndex {
         return root;
     }
 
+    async submitIndex(input: string, languages: Set<IndexLanguage>, incremental: boolean, strategy: IndexStrategy,
+        actor: Account, key: string | undefined, signal: AbortSignal) {
+        const root = await this.resolveProject(input, true);
+        if (this.assets.ownsPath(root)) throw new HttpError(403, 'MANAGED_SOURCE_REQUIRES_ASSET_IMPORT');
+        const projectId = this.projectIdForRoot(root);
+        const agentRunId = await this.localIndexes.submit(actor, projectId, root, { languages: [...languages].sort(), strategy, incremental }, key, signal);
+        return { root, agentRunId, projectId };
+    }
+
+    private async captureLocalIndex(projectId: string, root: string, stage: { id: string; path: string },
+        languages: Set<IndexLanguage>, signal: AbortSignal): Promise<FrozenIndexInput> {
+        const files: FrozenIndexInput['files'] = [];
+        const errors: string[] = [];
+        const retained = new Set<string>();
+        const directories = new Set([stage.path]);
+        let sourceCount = 0, configCount = 0, remainingBytes = MAX_FROZEN_INDEX_BYTES;
+        for await (const absolute of this.walk(root, languages.has('class'), 0, false, true)) {
+            signal.throwIfAborted();
+            const path = relative(root, absolute).split(sep).join('/');
+            if (relativeEvidencePath(path) !== path) continue;
+            const language = languageOf(path);
+            if (language && !languages.has(language)) continue;
+            if (language ? ++sourceCount > MAX_FILES : ++configCount > MAX_INDEX_CONFIG_FILES) throw new HttpError(413, 'INDEX_INPUT_FILE_LIMIT');
+            retained.add(path);
+            const limit = isJar(path) ? MAX_JAR_BYTES : !language && /(?:lock|shrinkwrap)/.test(path) ? 4 * MAX_FILE_BYTES : MAX_FILE_BYTES;
+            let bytes: Buffer;
+            try { bytes = await readProjectFile(absolute, limit); }
+            catch (error) {
+                const reason = error instanceof Error && ERROR_MESSAGES.has(error.message) ? error.message : 'INDEX_FILE_FAILED';
+                if (language || isDependencyManifest(path) || basename(path) === 'tsconfig.json') errors.push(`${path}: ${reason}`);
+                continue;
+            }
+            remainingBytes -= bytes.byteLength;
+            if (remainingBytes < 0) throw new HttpError(413, 'INDEX_INPUT_TOO_LARGE');
+            const target = join(stage.path, path);
+            const parent = dirname(target);
+            if (!directories.has(parent)) {
+                await mkdir(parent, { recursive: true, mode: 0o700 });
+                directories.add(parent);
+            }
+            await writeFile(target, bytes, { flag: 'wx', mode: 0o400, signal });
+            files.push([path, digest(bytes)]);
+        }
+        for (const row of this.db.prepare('SELECT path FROM indexed_file WHERE project_id = ?').all(projectId)) {
+            signal.throwIfAborted();
+            const path = String(row.path);
+            if (retained.has(path)) continue;
+            try { if (!await this.confirmRemoved(root, join(root, path))) retained.add(path); }
+            catch { retained.add(path); errors.push(`${path}: FILE_CHECK_FAILED`); }
+        }
+        files.sort(([a], [b]) => a < b ? -1 : 1);
+        const retainedPaths = [...retained].sort();
+        return { stage: stage.id, files, retainedPaths, errors, sourceVersion: digest(JSON.stringify([files, retainedPaths, errors])) };
+    }
+
+    private registerLocalIndex(id: string, root: string, input: FrozenIndexInput & { languages: IndexLanguage[]; strategy: IndexStrategy; incremental: boolean }) {
+        if (this.projectIdForRoot(root) !== id || this.db.prepare('SELECT status FROM index_status WHERE project_id = ?').get(id)?.status === 'running') {
+            throw new HttpError(409, 'INDEX_ALREADY_RUNNING');
+        }
+        this.registerProject(id, root);
+        this.identity.requireAvailableProject(id);
+        this.saveStatus(id, { status: 'running' });
+        if (input.languages.includes('class')) this.db.prepare('INSERT OR IGNORE INTO index_bytecode VALUES (?)').run(id);
+        else this.db.prepare('DELETE FROM index_bytecode WHERE project_id = ?').run(id);
+        if (input.strategy === 'auto') this.db.prepare('DELETE FROM index_strategy WHERE project_id = ?').run(id);
+        else this.db.prepare(`INSERT INTO index_strategy VALUES (?,?) ON CONFLICT(project_id) DO UPDATE SET strategy = excluded.strategy`).run(id, input.strategy);
+        const mark = this.db.prepare('INSERT OR IGNORE INTO index_dirty VALUES (?,?)');
+        if (!input.incremental) for (const [path] of input.files) if (languageOf(path)) mark.run(id, path);
+    }
+
+    private executeLocalIndex(id: string, staged: string, input: FrozenIndexInput & { languages: IndexLanguage[]; strategy: IndexStrategy },
+        signal: AbortSignal, guard: () => void, complete: (result: IndexStatus) => void, beforeEmbedding: NonNullable<IndexScope['beforeEmbedding']>) {
+        if (this.jobs.size >= MAX_INDEX_JOBS) throw new HttpError(503, 'INDEX_CAPACITY_EXHAUSTED');
+        const job = this.indexFiles(id, staged, new Set(input.languages), true, { strategy: input.strategy, signal,
+            guard, fence: guard, complete, beforeEmbedding,
+            frozen: { inputs: new Map(input.files), retained: new Set(input.retainedPaths), errors: input.errors } });
+        this.jobs.add(job);
+        return job.finally(() => {
+            this.indexProgress.delete(id);
+            this.jobs.delete(job);
+        });
+    }
+
     async indexFile(input: string, file: string, incremental: boolean, authorize: () => void, strategy: IndexStrategy = 'auto') {
         const root = await this.resolveProject(input, true);
         if (this.assets.ownsPath(root)) throw new HttpError(403, 'MANAGED_SOURCE_REQUIRES_ASSET_IMPORT');
@@ -307,7 +483,7 @@ export class RepositoryIndex {
         const absolute = join(root, path);
         if (this.assets.ownsPath(absolute)) throw new HttpError(403, 'MANAGED_SOURCE_REQUIRES_ASSET_IMPORT');
         if (this.databaseFiles.has(absolute)) throw new HttpError(403, 'SOURCE_OUTSIDE_INDEX_SCOPE');
-        if (!language && !['tsconfig.json', 'package.json'].includes(basename(path))) throw new HttpError(400, 'UNSUPPORTED_LANGUAGE');
+        if (!language && basename(path) !== 'tsconfig.json' && !isDependencyManifest(path)) throw new HttpError(400, 'UNSUPPORTED_LANGUAGE');
         try {
             if (await realpath(absolute) !== absolute) throw new HttpError(403, 'SOURCE_OUTSIDE_INDEX_SCOPE');
             if (!(await lstat(absolute)).isFile()) throw new HttpError(400, 'SOURCE_NOT_REGULAR_FILE');
@@ -329,9 +505,17 @@ export class RepositoryIndex {
         return this.db.prepare('SELECT 1 FROM index_bytecode WHERE project_id = ?').get(projectId) !== undefined;
     }
 
+    private projectIdForRoot(root: string) {
+        const stored = this.db.prepare('SELECT id FROM project WHERE root = ?').get(root);
+        if (stored) return String(stored.id);
+        let id = digest(root).slice(0, 12);
+        for (let next = 1; this.projectRetirement.isPurged(id); next++) id = digest(JSON.stringify([root, next])).slice(0, 12);
+        return id;
+    }
+
     async startWatch(id: string, input: string, authorize: () => void) {
         const root = await this.resolveProject(input, true);
-        if (digest(root).slice(0, 12) !== id) throw new HttpError(400, 'PROJECT_ROOT_MISMATCH');
+        if (this.projectIdForRoot(root) !== id) throw new HttpError(400, 'PROJECT_ROOT_MISMATCH');
         if (this.assets.ownsPath(root)) throw new HttpError(403, 'MANAGED_SOURCE_REQUIRES_ASSET_IMPORT');
         authorize();
         this.transaction(() => {
@@ -342,6 +526,7 @@ export class RepositoryIndex {
     }
 
     private registerProject(id: string, root: string) {
+        this.identity.requireAvailableProject(id);
         this.db.prepare('INSERT OR IGNORE INTO project(id, root) VALUES (?, ?)').run(id, root);
         if (this.db.prepare('SELECT root FROM project WHERE id = ?').get(id)?.root !== root) {
             throw new HttpError(409, 'PROJECT_ID_CONFLICT');
@@ -349,14 +534,16 @@ export class RepositoryIndex {
     }
 
     private startResolved(root: string, languages: Set<IndexLanguage>, incremental: boolean, scope: IndexScope = {}) {
-        const id = digest(root).slice(0, 12);
+        const logicalRoot = scope.logicalRoot ?? root;
+        const id = this.projectIdForRoot(logicalRoot);
         const storedStrategy = this.db.prepare('SELECT strategy FROM index_strategy WHERE project_id = ?').get(id)?.strategy;
         const strategy = scope.strategy ?? (storedStrategy === 'heuristic' || storedStrategy === 'precise' ? storedStrategy : 'auto');
         this.transaction(() => {
+            scope.guard?.();
             const previous = this.db.prepare('SELECT status FROM index_status WHERE project_id = ?').get(id);
             if (previous?.status === 'running') throw new HttpError(409, 'INDEX_ALREADY_RUNNING');
             if (this.jobs.size >= MAX_INDEX_JOBS) throw new HttpError(503, 'INDEX_CAPACITY_EXHAUSTED');
-            this.registerProject(id, root);
+            this.registerProject(id, logicalRoot);
             this.saveStatus(id, { status: 'running' });
             if (scope.rememberBytecode) {
                 if (languages.has('class')) this.db.prepare('INSERT OR IGNORE INTO index_bytecode VALUES (?)').run(id);
@@ -372,7 +559,10 @@ export class RepositoryIndex {
         const job = this.indexFiles(id, root, languages, incremental, { ...scope, strategy }).catch(() => {
             const failed: IndexStatus = { status: 'error', message: 'INDEX_PERSISTENCE_FAILED' };
             try {
-                this.saveStatus(id, failed);
+                this.transaction(() => {
+                    scope.fence?.();
+                    this.saveStatus(id, failed);
+                });
             } catch {
                 console.error('Unable to persist indexing result');
             }
@@ -388,7 +578,7 @@ export class RepositoryIndex {
 
     async status(input: string, authorize?: (projectId: string) => void): Promise<IndexStatus> {
         const root = await this.resolveProject(input, false);
-        const id = digest(root).slice(0, 12);
+        const id = this.projectIdForRoot(root);
         authorize?.(id);
         const row = this.db.prepare(`
             SELECT s.payload FROM index_status s JOIN project p ON p.id = s.project_id WHERE p.root = ?
@@ -398,43 +588,32 @@ export class RepositoryIndex {
         return progress ? { ...status, ...progress, pct: progress.total ? Math.round(progress.done * 100 / progress.total) : 0 } : status;
     }
 
-    async delete(id: string, input: string | null) {
-        const managed = this.assets.forProject(id);
-        if (managed) return this.assets.delete(managed, input);
-        const root = input === null ? null : await this.resolveProject(input, false);
-        this.deleteResolved(id, root);
+    async trashProject(actor: Account, id: string, input: string | null = null) {
+        if (input !== null) {
+            const expected = this.assets.forProject(id) ? resolve(input) : await this.resolveProject(input, false);
+            if (!isAbsolute(input) || this.db.prepare('SELECT root FROM project WHERE id = ?').get(id)?.root !== expected) {
+                throw new HttpError(400, 'PROJECT_ROOT_MISMATCH');
+            }
+        }
+        const state = this.projectRetirement.describe(actor, id);
+        if (state.state === 'ACTIVE') return this.projectRetirement.change(actor, id, 'trash', state.revision, randomUUID());
+        return state;
     }
 
-    private deleteResolved(id: string, root: string | null, mark?: () => void) {
-        this.transaction(() => {
-            const active = this.db.prepare(`
-                SELECT s.status, p.root FROM project p LEFT JOIN index_status s ON p.id = s.project_id WHERE p.id = ?
-            `).get(id);
-            if (active?.status === 'running') throw new HttpError(409, 'INDEX_ALREADY_RUNNING');
-            if (this.scans.active(id)) throw new HttpError(409, 'SCAN_ALREADY_RUNNING');
-            if (active && root !== null && active.root !== root) throw new HttpError(400, 'PROJECT_ROOT_MISMATCH');
-            mark?.();
-            this.db.prepare('DELETE FROM project WHERE id = ?').run(id);
-        });
-        this.wiki.cancelProject(id);
-        this.changeReviewAgent.cancelProject(id);
-        this.sastTriageAgent.cancelProject(id);
-        void this.watches.detach(id);
-    }
-
-    private async *walk(folder: string, includeBytecode: boolean, depth = 0, bytecodeOnly = false): AsyncGenerator<string> {
+    private async *walk(folder: string, includeBytecode: boolean, depth = 0, bytecodeOnly = false, config = false): AsyncGenerator<string> {
         if (depth > 64 || await realpath(folder) !== folder) throw new Error('UNSAFE_DIRECTORY');
         for await (const entry of await opendir(folder)) {
             if (entry.name.startsWith('.')) continue;
             const absolute = join(folder, entry.name);
             if (this.databaseFiles.has(absolute)) continue;
             if (entry.isDirectory() && absolute !== this.assets.root) {
-                if (!IGNORED_DIRS.has(entry.name)) yield* this.walk(absolute, includeBytecode, depth + 1, bytecodeOnly);
-                else if (includeBytecode && entry.name === 'build') yield* this.walk(absolute, true, depth + 1, true);
+                if (!IGNORED_DIRS.has(entry.name)) yield* this.walk(absolute, includeBytecode, depth + 1, bytecodeOnly, config);
+                else if (includeBytecode && entry.name === 'build') yield* this.walk(absolute, true, depth + 1, true, config);
             }
             if (entry.isFile()) {
                 const language = languageOf(entry.name);
                 if (language && (language === 'class' ? includeBytecode : !bytecodeOnly)) yield absolute;
+                else if (config && !bytecodeOnly && (entry.name.endsWith('.json') || isDependencyManifest(entry.name))) yield absolute;
             }
         }
     }
@@ -444,10 +623,12 @@ export class RepositoryIndex {
         const started = Date.now();
         const result: IndexResult = {
             totalFiles: 0, parsedFiles: 0, skippedFiles: 0, degradedFiles: 0,
-            totalUnits: 0, totalEdges: 0, durationMs: 0, errors: []
+            totalUnits: 0, totalEdges: 0, durationMs: 0, errors: [...(scope.frozen?.errors ?? [])]
         };
         const status: IndexStatus = { status: 'running' };
         const file = scope.file ?? null;
+        const refreshDependency = !file || isDependencyManifest(file);
+        let dependencyCapture: Awaited<ReturnType<typeof captureDependencyInventory>> | undefined;
         const signal = scope.signal;
         const markDirty = this.db.prepare('INSERT OR IGNORE INTO index_dirty VALUES (?, ?)');
         const candidates: { absolute: string; path: string; language: IndexLanguage }[] = [];
@@ -457,8 +638,11 @@ export class RepositoryIndex {
         };
         progress('scanning');
         try {
-            const cached = new Map(this.db.prepare('SELECT path, hash FROM indexed_file WHERE project_id = ? AND (? IS NULL OR path = ?)')
-                .all(id, file, file).map(row => [String(row.path), String(row.hash)]));
+            const cached = new Map(this.db.prepare(`
+                SELECT f.path, f.hash, s.hash IS NOT NULL AS retained
+                FROM indexed_file f LEFT JOIN indexed_source s USING (project_id, path)
+                WHERE f.project_id = ? AND (? IS NULL OR f.path = ?)
+            `).all(id, file, file).map(row => [String(row.path), { hash: String(row.hash), retained: Boolean(row.retained) }]));
             const dirty = new Set(this.db.prepare('SELECT path FROM index_dirty WHERE project_id = ? AND (? IS NULL OR path = ?)')
                 .all(id, file, file).map(row => String(row.path)));
             const remaining = new Set([...cached.keys(), ...dirty]);
@@ -467,7 +651,9 @@ export class RepositoryIndex {
 
             let scanFailure: Error | undefined;
             try {
-                for await (const absolute of file ? [join(root, file)] : this.walk(root, languages.has('class'))) {
+                const inputs = file ? [join(root, file)] : scope.frozen ? [...scope.frozen.inputs.keys()].map(path => join(root, path))
+                    : this.walk(root, languages.has('class'));
+                for await (const absolute of inputs) {
                     signal?.throwIfAborted();
                     const path = relative(root, absolute).split(sep).join('/');
                     const language = languageOf(path);
@@ -483,8 +669,10 @@ export class RepositoryIndex {
             progress('parsing', 0, candidates.length);
             for (const { absolute, path, language } of candidates) {
                 signal?.throwIfAborted();
+                scope.guard?.();
                 result.totalFiles++;
-                const cachedHash = cached.get(path);
+                const previous = cached.get(path);
+                const cachedHash = previous?.hash;
                 remaining.delete(path);
                 try {
                     const maxBytes = isJar(path) ? MAX_JAR_BYTES : MAX_FILE_BYTES;
@@ -493,8 +681,13 @@ export class RepositoryIndex {
                     const explicitHeuristic = scope.strategy === 'heuristic' && language !== 'class' && language !== 'doc';
                     const format = explicitHeuristic ? HEURISTIC_FORMAT : (sourceIndexFormats[language] ?? INDEX_FORMAT);
                     const contentHash = digest(bytes);
+                    if (scope.frozen && contentHash !== scope.frozen.inputs.get(path)) throw new Error('INDEX_INPUT_BYTES_CHANGED');
                     const hash = `${format}:${contentHash}`;
-                    if (incremental && !dirty.has(path) && cachedHash === hash && (!this.vectors.enabled || embedded.has(path))) {
+                    if (incremental && !dirty.has(path) && previous?.hash === hash && (!this.vectors.enabled || embedded.has(path))) {
+                        if (!previous.retained) this.transaction(() => {
+                            scope.guard?.();
+                            this.knowledgeSnapshots.remember(id, path, contentHash, bytes);
+                        });
                         result.skippedFiles++;
                         continue;
                     }
@@ -505,7 +698,7 @@ export class RepositoryIndex {
                     let vectors: VectorEntry[] | undefined;
                     if (this.vectors.enabled && (!providerUnavailable || indexed.units.length === 0)) {
                         try {
-                            vectors = await this.vectors.prepare(indexed, signal, (done, total) => progress('embedding', done, total));
+                            vectors = await this.vectors.prepare(indexed, signal, (done, total) => progress('embedding', done, total), scope.beforeEmbedding);
                         } catch (error) {
                             signal?.throwIfAborted();
                             if (!(error instanceof EmbeddingUnavailable)) throw error;
@@ -518,13 +711,15 @@ export class RepositoryIndex {
                         result.errors.push(`${path}: EMBEDDING_UNAVAILABLE`);
                         if (cachedHash === hash) continue;
                     }
-                    this.replaceFile(id, path, indexed.degradedFrom ? RECOVERY_FORMAT + ':' + contentHash : hash, indexed, vectors);
+                    this.replaceFile(id, path, indexed.degradedFrom ? RECOVERY_FORMAT + ':' + contentHash : hash,
+                        contentHash, bytes, indexed, vectors, scope.guard);
                     if (indexed.degradedFrom) {
                         result.degradedFiles++;
                         result.errors.push(`${path}: ${indexed.degradedFrom}`);
                     }
                 } catch (error) {
                     signal?.throwIfAborted();
+                    scope.guard?.();
                     markDirty.run(id, path);
                     const reason = error instanceof Error && ERROR_MESSAGES.has(error.message) ? error.message : 'INDEX_FILE_FAILED';
                     result.errors.push(`${path}: ${reason}`);
@@ -539,13 +734,14 @@ export class RepositoryIndex {
                 signal?.throwIfAborted();
                 let removed: boolean;
                 try {
-                    removed = await this.confirmRemoved(root, join(root, path));
+                    removed = scope.frozen ? !scope.frozen.retained.has(path) : await this.confirmRemoved(root, join(root, path));
                 } catch {
                     result.errors.push(`${path}: FILE_CHECK_FAILED`);
                     continue;
                 }
                 signal?.throwIfAborted();
                 if (removed) this.transaction(() => {
+                    scope.guard?.();
                     this.db.prepare('DELETE FROM indexed_file WHERE project_id = ? AND path = ?').run(id, path);
                     this.db.prepare('DELETE FROM index_dirty WHERE project_id = ? AND path = ?').run(id, path);
                 });
@@ -553,8 +749,12 @@ export class RepositoryIndex {
             signal?.throwIfAborted();
             const { aliases, issues } = await readJsAliasTargets(root, this.graph.jsAliasReferences(id), signal,
                 languages.size === 0 ? file ?? undefined : undefined);
+            if (refreshDependency) dependencyCapture = await captureDependencyInventory(root);
             signal?.throwIfAborted();
-            this.transaction(() => this.graph.syncJsAliases(id, aliases));
+            this.transaction(() => {
+                scope.guard?.();
+                this.graph.syncJsAliases(id, aliases);
+            });
             result.errors.push(...issues);
             status.status = result.errors.length ? 'partial' : 'done';
             status.indexedAt = new Date().toISOString();
@@ -568,8 +768,14 @@ export class RepositoryIndex {
         result.totalEdges = this.graph.count(id, file);
         result.durationMs = Date.now() - started;
         this.transaction(() => {
+            scope.fence?.();
+            if (refreshDependency && !signal?.aborted) {
+                this.knowledgeSnapshots.saveDependencyCheck(id, dependencyCapture && this.dependencyAdvisories.reviewCheck(dependencyCapture,
+                    this.knowledgeSnapshots.indexedDependencyCheck(id)));
+            }
             if (status.indexedAt) this.db.prepare('UPDATE project SET indexed_at = ? WHERE id = ?').run(status.indexedAt, id);
             this.saveStatus(id, { ...status, ...result });
+            scope.complete?.({ ...status, ...result });
         });
         return { ...status, ...result };
     }
@@ -592,10 +798,13 @@ export class RepositoryIndex {
         }
     }
 
-    private replaceFile(projectId: string, path: string, hash: string, indexed: IndexedSource, vectors?: VectorEntry[]) {
+    private replaceFile(projectId: string, path: string, indexHash: string, contentHash: string, bytes: Uint8Array,
+        indexed: IndexedSource, vectors?: VectorEntry[], guard?: () => void) {
         this.transaction(() => {
+            guard?.();
             this.db.prepare('DELETE FROM indexed_file WHERE project_id = ? AND path = ?').run(projectId, path);
-            this.db.prepare('INSERT INTO indexed_file VALUES (?, ?, ?)').run(projectId, path, hash);
+            this.db.prepare('INSERT INTO indexed_file VALUES (?, ?, ?)').run(projectId, path, indexHash);
+            this.knowledgeSnapshots.remember(projectId, path, contentHash, bytes);
             const putUnit = this.db.prepare('INSERT INTO unit VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
             const putSearch = this.db.prepare('INSERT INTO unit_search(rowid, name, signature, source) VALUES (?, ?, ?, ?)');
             for (const unit of indexed.units) {
@@ -618,24 +827,28 @@ export class RepositoryIndex {
     projects(allowed: readonly string[] | null = null, summary = false) {
         const scope = allowed === null ? null : JSON.stringify(allowed);
         const dashboard = summary ? `,
-            a.filename AS archiveName,
+            COALESCE(n.display_name, a.filename) AS archiveName,
             (SELECT count(*) FROM indexed_file WHERE project_id = p.id) AS fileCount,
             (SELECT language FROM unit WHERE project_id = p.id AND language <> 'doc'
                 GROUP BY language ORDER BY count(*) DESC, language LIMIT 1) AS mainLanguage,
             (SELECT status FROM index_status WHERE project_id = p.id) AS indexStatus
         ` : '';
         const rows = this.db.prepare(`
-            SELECT p.id AS projectId, p.root AS projectRoot, p.indexed_at AS indexedAt, count(u.id) AS nodeCount, a.id AS assetId
+            SELECT p.id AS projectId, p.root AS projectRoot, p.indexed_at AS indexedAt, count(u.id) AS nodeCount, a.id AS assetId,
+                g.name AS gitName, g.branch AS gitBranch, c.url AS gitUrl
             ${dashboard}
             FROM project p LEFT JOIN unit u ON u.project_id = p.id
             LEFT JOIN managed_asset a ON a.project_id = p.id AND a.deleting = 0
-            WHERE ? IS NULL OR p.id IN (SELECT value FROM json_each(?))
+            LEFT JOIN managed_asset_name n ON n.asset_id = a.id
+            LEFT JOIN git_repository g ON g.project_id = p.id LEFT JOIN git_connection c ON c.id = g.connection_id
+            WHERE ${availableProject('p.id')} AND (? IS NULL OR p.id IN (SELECT value FROM json_each(?)))
             GROUP BY p.id ORDER BY p.id
         `).all(scope, scope);
         return rows.map(row => ({
-            projectId: String(row.projectId), projectName: basename(String(row.projectRoot)) || String(row.projectId),
+            projectId: String(row.projectId), projectName: row.gitName ? String(row.gitName) : basename(String(row.projectRoot)) || String(row.projectId),
             projectRoot: String(row.projectRoot), indexedAt: String(row.indexedAt), nodeCount: Number(row.nodeCount),
             ...(row.assetId ? { assetId: String(row.assetId) } : {}),
+            ...(row.gitUrl ? { git: { url: String(row.gitUrl), branch: String(row.gitBranch) } } : {}),
             ...(summary ? {
                 fileCount: Number(row.fileCount),
                 mainLanguage: row.mainLanguage ?? null,
@@ -672,8 +885,11 @@ export class RepositoryIndex {
     }
 
     projectRoot(projectId: string) {
+        this.identity.requireAvailableProject(projectId);
         const project = this.db.prepare('SELECT root FROM project WHERE id = ?').get(projectId);
         if (!project) throw new HttpError(404, 'PROJECT_NOT_FOUND');
+        const remoteTree = this.gitSources.location(projectId);
+        if (remoteTree) return remoteTree;
         const path = String(project.root);
         const asset = this.assets.forProject(projectId);
         if (asset) this.assets.validateSource(asset, path);
@@ -785,6 +1001,7 @@ export class RepositoryIndex {
     symbol(name: string, projectId: string | null) {
         return this.lookup(`
             SELECT payload FROM unit WHERE qualified_name = ? AND (? IS NULL OR project_id = ?)
+                AND ${availableProject('unit.project_id')}
             ORDER BY json_extract(payload, '$.metadata.is_declaration') IS 'true', project_id, file_path, start_line
         `, [name, projectId, projectId], projectId !== null);
     }
@@ -793,6 +1010,7 @@ export class RepositoryIndex {
         const rows = this.db.prepare(`
             SELECT payload, project_id FROM unit
             WHERE (qualified_name = ? OR id = ?) AND (? IS NULL OR project_id = ?)
+                AND ${availableProject('unit.project_id')}
                 AND kind IN ('METHOD','CONSTRUCTOR','FUNCTION')
                 AND language IN ('java','c','python') AND (? = 0 OR language = 'java')
                 AND json_extract(payload, '$.metadata.bytecode') IS NOT 'true'
@@ -844,35 +1062,39 @@ export class RepositoryIndex {
             load, unit => this.flowFields(unit, projectId), deadline);
     }
 
-    private graphTarget(target: string, projectId: string | null) {
+    private graphTarget(target: string, projectId: string | null, snapshotId?: string) {
+        const table = snapshotId ? 'knowledge_unit' : 'unit';
+        const scope = snapshotId ? 'snapshot_id' : 'project_id';
+        const id = snapshotId ?? projectId;
         const rows = this.db.prepare(`
-            SELECT candidate.id FROM unit candidate WHERE (candidate.qualified_name = ? OR candidate.id = ?)
-                AND (? IS NULL OR candidate.project_id = ?)
+            SELECT candidate.id FROM ${table} candidate WHERE (candidate.qualified_name = ? OR candidate.id = ?)
+                AND (? IS NULL OR candidate.${scope} = ?)
+                ${snapshotId ? '' : `AND ${availableProject('candidate.project_id')}`}
                 AND (candidate.id = ? OR json_extract(candidate.payload, '$.metadata.is_declaration') IS NOT 'true'
                     OR NOT EXISTS (
-                        SELECT 1 FROM unit definition WHERE definition.project_id = candidate.project_id
+                        SELECT 1 FROM ${table} definition WHERE definition.${scope} = candidate.${scope}
                         AND definition.qualified_name = candidate.qualified_name
                         AND definition.language = candidate.language AND definition.kind = candidate.kind
                         AND json_extract(definition.payload, '$.metadata.is_declaration') IS NOT 'true'
                     ))
                 LIMIT 2
-        `).all(target, target, projectId, projectId, target);
+        `).all(target, target, id, id, target);
         if (rows.length > 1) throw new HttpError(409, 'AMBIGUOUS_GRAPH_TARGET');
         return rows[0] ? String(rows[0].id) : undefined;
     }
 
-    traverse(target: string, projectId: string | null, query: GraphQuery, depth: number) {
-        const id = this.graphTarget(target, projectId);
-        return id ? this.graph.traverse(id, query, depth) : [];
+    traverse(target: string, projectId: string | null, query: GraphQuery, depth: number, snapshotId?: string) {
+        const id = this.graphTarget(target, projectId, snapshotId);
+        return id ? this.graph.traverse(id, query, depth, undefined, undefined, snapshotId) : [];
     }
 
-    traverseView(target: string, projectId: string | null, query: GraphQuery, depth: number) {
-        const id = this.graphTarget(target, projectId);
-        return id ? this.graph.traverseView(id, query, depth) : null;
+    traverseView(target: string, projectId: string | null, query: GraphQuery, depth: number, snapshotId?: string) {
+        const id = this.graphTarget(target, projectId, snapshotId);
+        return id ? this.graph.traverseView(id, query, depth, snapshotId) : null;
     }
 
-    graphNeighbors(unitId: string, query: GraphQuery, depth: number, limit: number) {
-        return this.graph.traverse(unitId, query, depth, limit);
+    graphNeighbors(unitId: string, query: GraphQuery, depth: number, limit: number, snapshotId?: string) {
+        return this.graph.traverse(unitId, query, depth, limit, undefined, snapshotId);
     }
 
     authorizationEvidence(projectId: string, depth: number) {
@@ -882,6 +1104,7 @@ export class RepositoryIndex {
     graphSymbols(query: string, projectId: string | null, limit: number) {
         return this.db.prepare(`
             SELECT payload FROM unit WHERE (? IS NULL OR project_id = ?)
+                AND ${availableProject('unit.project_id')}
                 AND instr(lower(qualified_name), lower(?)) > 0
             ORDER BY instr(lower(qualified_name), lower(?)), length(qualified_name),
                 qualified_name, project_id, file_path, start_line, id
@@ -893,6 +1116,7 @@ export class RepositoryIndex {
         return this.db.prepare(`
             SELECT payload FROM unit WHERE json_extract(payload, '$.metadata.is_entry_point') = 'true'
                 AND (? IS NULL OR project_id = ?) AND (? IS NULL OR language = ?)
+                AND ${availableProject('unit.project_id')}
             ORDER BY project_id, file_path, start_line, id LIMIT ? OFFSET ?
         `).all(projectId, projectId, language, language, limit, offset).map(readUnit);
     }
@@ -900,6 +1124,7 @@ export class RepositoryIndex {
     locate(path: string, line: number, projectId: string | null, archiveEntry: string | null = null) {
         return this.lookup(`
             SELECT payload FROM unit WHERE file_path = ? AND (? IS NULL OR project_id = ?)
+                AND ${availableProject('unit.project_id')}
                 AND start_line <= ? AND end_line >= ?
                 AND json_extract(payload, '$.metadata.archive_entry') IS ?
             ORDER BY end_line - start_line, length(json_extract(payload, '$.rawSource')), kind, id
@@ -914,26 +1139,33 @@ export class RepositoryIndex {
 
     search(
         query: string, projectId: string | null, language: string | null, kind: string | null, limit: number,
-        noTest: boolean, allowed: readonly string[] | null = null
+        noTest: boolean, allowed: readonly string[] | null = null, snapshotId?: string
     ) {
         const terms = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [])].slice(0, 24);
         if (!terms.length) return [];
         const match = terms.map(term => `"${term}"`).join(' OR ');
         const scope = allowed === null ? null : JSON.stringify(allowed);
+        const tables = snapshotId
+            ? { fts: 'knowledge_unit_search', unit: 'knowledge_unit', project: 's.project_id',
+                join: 'JOIN knowledge_snapshot s ON s.id = u.snapshot_id AND s.published_at IS NOT NULL',
+                version: 'AND u.snapshot_id = ?', test: "json_extract(u.payload, '$.metadata.is_test') IS 'true'" }
+            : { fts: 'unit_search', unit: 'unit', project: 'u.project_id', join: '', version: '', test: 'u.is_test' };
         const rows = this.db.prepare(`
-            SELECT u.project_id, u.payload, bm25(unit_search, 8.0, 4.0, 1.0) AS rank
-            FROM unit_search JOIN unit u ON unit_search.rowid = u.rowid
-            WHERE unit_search MATCH ? AND (? IS NULL OR u.project_id = ?) AND (? IS NULL OR u.language = ?)
-                AND (? IS NULL OR u.kind = ?) AND (? = 0 OR u.is_test = 0)
-                AND (? IS NULL OR u.project_id IN (SELECT value FROM json_each(?)))
+            SELECT ${tables.project} AS project_id, u.payload, bm25(${tables.fts}, 8.0, 4.0, 1.0) AS rank
+            FROM ${tables.fts} JOIN ${tables.unit} u ON ${tables.fts}.rowid = u.rowid ${tables.join}
+            WHERE ${tables.fts} MATCH ? ${tables.version} AND (? IS NULL OR ${tables.project} = ?) AND (? IS NULL OR u.language = ?)
+                AND (? IS NULL OR u.kind = ?) AND (? = 0 OR NOT (${tables.test}))
+                AND ${availableProject(tables.project)}
+                AND (? IS NULL OR ${tables.project} IN (SELECT value FROM json_each(?)))
             ORDER BY rank, u.id LIMIT ?
-        `).all(match, projectId, projectId, language, language, kind, kind, Number(noTest), scope, scope, limit);
+        `).all(match, ...(snapshotId ? [snapshotId] : []), projectId, projectId, language, language, kind, kind,
+            Number(noTest), scope, scope, limit);
         return rows.map(row => {
             const unit = readUnit(row);
             const tokens = new Set(`${unit.qualifiedName} ${unit.signature} ${unit.rawSource}`.toLowerCase().match(/[\p{L}\p{N}_]+/gu));
             const rank = Math.max(0, -Number(row.rank));
             return {
-                projectId: String(row.project_id), unit, score: rank / (1 + rank),
+                projectId: String(row.project_id), unit, score: rank / (1 + rank), ...(snapshotId ? { snapshotId } : {}),
                 matchedTerms: terms.filter(term => tokens.has(term))
             };
         });

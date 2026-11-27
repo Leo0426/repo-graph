@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
+import type { HostedEntitlements } from './hosted-entitlements.js';
 
 export const agentRunIdPattern = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
-type RunStatus = 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'PARTIAL' | 'FAILED' | 'CANCELLED' | 'WAITING_FOR_REVIEW';
+type RunStatus = 'QUEUED' | 'RUNNING' | 'PAUSED' | 'COMPLETED' | 'PARTIAL' | 'FAILED' | 'CANCELLED' | 'WAITING_FOR_REVIEW';
 
 export interface AgentStepResult {
     subjectReference: string;
@@ -49,7 +50,7 @@ export interface AgentRun {
 }
 
 export class AgentRuns {
-    constructor(private readonly db: DatabaseSync) {
+    constructor(private readonly db: DatabaseSync, durableJobsRegistered = false, private readonly entitlements?: HostedEntitlements) {
         db.exec(`
             CREATE TABLE IF NOT EXISTS agent_run (
                 id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
@@ -59,17 +60,31 @@ export class AgentRuns {
             CREATE UNIQUE INDEX IF NOT EXISTS agent_run_active ON agent_run(project_id, playbook)
                 WHERE status IN ('QUEUED', 'RUNNING');
         `);
-        for (const row of db.prepare("SELECT payload FROM agent_run WHERE status IN ('QUEUED', 'RUNNING')").all()) {
+        const unmanaged = durableJobsRegistered ? 'AND NOT EXISTS (SELECT 1 FROM durable_job j WHERE j.id = agent_run.id)' : '';
+        for (const row of db.prepare(`SELECT payload FROM agent_run WHERE status IN ('QUEUED', 'RUNNING') ${unmanaged}`).all()) {
             const run = JSON.parse(String(row.payload)) as AgentRun;
             this.fail(run, 'INTERRUPTED');
         }
     }
 
-    create(projectId: string, playbook: string, inputReference: string, outputReference: string | null = null): AgentRun {
+    create(projectId: string, playbook: string, inputReference: string, outputReference: string | null = null, retryFrom?: string): AgentRun {
         const now = new Date().toISOString();
         const run: AgentRun = { id: randomUUID(), projectId, playbook, playbookVersion: '1', status: 'QUEUED',
             inputReference, outputReference, statusReason: null, createdAt: now, updatedAt: now, completedAt: null, steps: [] };
-        this.insert(run);
+        if (!this.entitlements?.enabled) {
+            this.insert(run);
+            return run;
+        }
+        const ownTransaction = !this.db.isTransaction;
+        if (ownTransaction) this.db.exec('BEGIN IMMEDIATE');
+        try {
+            this.entitlements.task(run.id, [projectId], playbook, retryFrom);
+            this.insert(run);
+            if (ownTransaction) this.db.exec('COMMIT');
+        } catch (error) {
+            if (ownTransaction) this.db.exec('ROLLBACK');
+            throw error;
+        }
         return run;
     }
 

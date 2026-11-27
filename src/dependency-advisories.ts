@@ -1,8 +1,12 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { basename, dirname } from 'node:path/posix';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import type { DependencyInventory } from './sbom.js';
+import { dependencyInventory } from './sbom.js';
+import { redactReviewText } from './review-redaction.js';
+import { digest } from './source.js';
 
 const coordinate = z.string().max(214).regex(/^[a-zA-Z0-9][\w.-]*$/);
 export const dependencyAdvisory = z.object({
@@ -70,6 +74,36 @@ export function restoreDependencyAdvisories(db: DatabaseSync, entries: Dependenc
 const maxMatches = 5000;
 const maxCatalogRowsPerPackage = 2500;
 const maxComparisons = 100_000;
+const maxCatalogRows = 100_000;
+const maxReviewMatches = 100;
+
+export async function captureDependencyInventory(root: string) {
+    const manifests = new Map<string, string>();
+    let changed = false;
+    const inventory = await dependencyInventory(root, (path, bytes) => {
+        const hash = digest(bytes);
+        const previous = manifests.get(path);
+        if (previous && previous !== hash) changed = true;
+        manifests.set(path, hash);
+    });
+    return { inventory, manifests, changed };
+}
+
+export type DependencyReviewCheck = {
+    tool: 'offline-maven-advisories';
+    provenance: 'FROZEN_INDEX_INPUT' | 'UNRECORDED';
+    status: 'COMPLETED' | 'PARTIAL' | 'FAILED' | 'NOT_APPLICABLE' | 'UNAVAILABLE';
+    catalogDigest: string | null; manifestDigest: string | null;
+    manifestCount: number; comparableComponents: number; unverifiedComponents: number;
+    unsupportedComponents: number; findingCount: number; reasons: string[];
+    preview: { id: string; coordinate: string; version: string; severity: DependencyAdvisory['severity']; manifests: string[] }[];
+};
+
+export function missingDependencyCheck(): DependencyReviewCheck {
+    return { tool: 'offline-maven-advisories', provenance: 'UNRECORDED', status: 'UNAVAILABLE', catalogDigest: null, manifestDigest: null,
+        manifestCount: 0, comparableComponents: 0, unverifiedComponents: 0, unsupportedComponents: 0, findingCount: 0,
+        reasons: ['DEPENDENCY_INPUT_NOT_CAPTURED'], preview: [] };
+}
 
 export class DependencyAdvisories {
     constructor(private readonly db: DatabaseSync) {
@@ -90,6 +124,38 @@ export class DependencyAdvisories {
             }
             db.exec('COMMIT');
         } catch (error) { db.exec('ROLLBACK'); throw error; }
+    }
+
+    reviewCheck(capture: Awaited<ReturnType<typeof captureDependencyInventory>>, previous?: DependencyReviewCheck): DependencyReviewCheck {
+        const { inventory, manifests, changed } = capture;
+        const recorded = { ...missingDependencyCheck(), provenance: 'FROZEN_INDEX_INPUT' as const, manifestCount: manifests.size,
+            manifestDigest: digest(JSON.stringify([...manifests].sort(([a], [b]) => a < b ? -1 : 1))), reasons: [] as string[] };
+        if (changed) return { ...recorded, status: 'FAILED', reasons: ['DEPENDENCY_MANIFEST_CHANGED_DURING_CAPTURE'] };
+        const catalog = createHash('sha256');
+        let count = 0;
+        for (const row of this.db.prepare('SELECT * FROM dependency_advisory ORDER BY id,group_id,artifact_id LIMIT ?').iterate(maxCatalogRows + 1)) {
+            if (++count > maxCatalogRows) return { ...recorded, status: 'UNAVAILABLE', reasons: ['ADVISORY_CATALOG_LIMIT'] };
+            catalog.update(JSON.stringify(row) + '\n');
+        }
+        const catalogDigest = catalog.digest('hex');
+        if (!count) return { ...recorded, catalogDigest, status: 'UNAVAILABLE', reasons: ['ADVISORY_CATALOG_EMPTY'] };
+        if (!inventory.issues.length && previous?.status === 'COMPLETED' && previous.catalogDigest === catalogDigest
+            && previous.manifestDigest === recorded.manifestDigest) return previous;
+        const result = this.match(inventory);
+        const unsupportedComponents = inventory.components.filter(item => item.ecosystem !== 'maven' && item.scope !== 'excluded').length;
+        const issues = result.issues.slice(0, 50).map(issue => redactReviewText(issue));
+        if (unsupportedComponents) issues.push('ADVISORY_ECOSYSTEM_UNSUPPORTED');
+        if (result.unverifiedComponents) issues.push('DEPENDENCY_VERSION_UNVERIFIED');
+        if (result.matches.length > maxReviewMatches) issues.push('ADVISORY_PREVIEW_LIMIT');
+        const comparableComponents = result.scannedComponents - result.unverifiedComponents;
+        const status = issues.length ? comparableComponents || result.matches.length ? 'PARTIAL'
+            : unsupportedComponents && !inventory.issues.length && !result.scannedComponents ? 'UNAVAILABLE' : 'FAILED'
+            : result.scannedComponents ? 'COMPLETED' : 'NOT_APPLICABLE';
+        return { ...recorded, catalogDigest, status, comparableComponents, unsupportedComponents, unverifiedComponents: result.unverifiedComponents,
+            findingCount: result.matches.length, reasons: issues, preview: result.matches.slice(0, maxReviewMatches).map(({ advisory, dependency }) => ({
+                id: advisory.id, coordinate: dependency.coordinate, version: dependency.version, severity: advisory.severity,
+                manifests: dependency.manifests.slice(0, 8).map(path => redactReviewText(path))
+            })) };
     }
 
     match(inventory: DependencyInventory) {

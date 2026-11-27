@@ -240,6 +240,15 @@ function sarif(result: ObjectValue, run: ObjectValue, rules: Map<string, ObjectV
         ...sarifTrace(result, run, root) };
 }
 
+export function findingIntakeStatus(format: FindingFormat, body: ObjectValue): 'FAILED' | 'PARTIAL' | undefined {
+    if (format === 'semgrep') return array(body.errors).length ? 'PARTIAL' : undefined;
+    if (format === 'slither') return undefined;
+    const invocations = array(body.runs).flatMap(run => array(object(run).invocations));
+    const errors = invocations.filter(value => object(value).executionSuccessful === false);
+    if (!errors.length) return undefined;
+    return errors.length === invocations.length ? 'FAILED' : 'PARTIAL';
+}
+
 export function normalizeFindings(format: FindingFormat, body: ObjectValue, root: string, limit: number,
     versions: { codeVersion: string; ruleVersion: string }) {
     const findings: ExternalFinding[] = [];

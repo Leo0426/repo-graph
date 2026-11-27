@@ -58,7 +58,7 @@ async function legacyFixture(t) {
     });
     const env = { ...process.env, REPOGRAPH_ACCESS_TOKEN: undefined, REPOGRAPH_ADMIN_PASSWORD: undefined,
         REPOGRAPH_PROVIDER_ENCRYPTION_KEY: undefined, REPOGRAPH_LEGACY_PROVIDER_ENCRYPTION_KEY: undefined,
-        REPOGRAPH_EMBEDDING_MODEL: undefined, REPOGRAPH_PORT: '0', REPOGRAPH_PROJECTS_ROOT: root };
+        REPOGRAPH_EMBEDDING_MODEL: undefined, REPOGRAPH_PORT: '0', REPOGRAPH_PROJECTS_ROOT: root, REPOGRAPH_PROJECT_RETENTION_SECONDS: '0' };
     async function migrate(...args) {
         const { stdout } = await run(process.execPath, ['dist/migrate-legacy.js', '--source', source,
             '--output', output, '--projects-root', root, ...args], { env });
@@ -90,15 +90,28 @@ async function login(base, username, supplied = password) {
         headers: { 'Content-Type': 'application/json', Origin: base, 'X-CSRF-Token': token, Cookie: cookie },
         body: JSON.stringify({ username, password: supplied }) });
     cookie = result.headers.getSetCookie().map(value => value.split(';', 1)[0]).join('; ');
-    return { status: result.status, request: (path, method = 'GET', csrf, input) => fetch(base + '/api/v1' + path, {
+    return { status: result.status, request: (path, method = 'GET', csrf, input, extraHeaders = {}) => fetch(base + '/api/v1' + path, {
         method, headers: { Cookie: cookie, Origin: base, ...(csrf ? { 'X-CSRF-Token': csrf } : {}),
-            ...(input ? { 'Content-Type': 'application/json' } : {}) }, body: JSON.stringify(input)
+            ...(input ? { 'Content-Type': 'application/json' } : {}), ...extraHeaders }, body: JSON.stringify(input)
     }) };
 }
 
 test('the offline converter preserves identity, project rights and legacy password login in a fresh database', { timeout: 20_000 }, async t => {
-    const { source, output, projectId, projectRoot, migrate, start } = await legacyFixture(t);
+    const { root, source, output, projectId, projectRoot, migrate, start } = await legacyFixture(t);
+    const reviewPlans = ['conflicting', 'unclaimed', 'unknown'].map(name => {
+        const path = join(root, name);
+        return { projectId: createHash('sha256').update(path).digest('hex').slice(0, 12), path };
+    });
+    await Promise.all(reviewPlans.map(item => mkdir(item.path)));
+    const [conflicting, unclaimed, unknown] = reviewPlans;
+    const inaccessible = '000000000001';
     const legacy = new DatabaseSync(source);
+    for (const item of reviewPlans) legacy.prepare('INSERT INTO index_history VALUES (?, ?, ?)').run(item.path, 'done', timestamp);
+    const ownerClaim = legacy.prepare('INSERT INTO enterprise_project_owners VALUES (?, ?, ?, ?)');
+    ownerClaim.run(conflicting.projectId, 'PERSONAL', 'legacy-analyst', timestamp);
+    ownerClaim.run(conflicting.projectId, 'ORGANIZATION', 'legacy-team', timestamp);
+    ownerClaim.run(unknown.projectId, 'PERSONAL', 'missing-account', timestamp);
+    ownerClaim.run(inaccessible, 'PERSONAL', 'legacy-analyst', timestamp);
     legacy.exec('CREATE TABLE advisories (id, summary, severity, cwe, group_id, artifact_id, introduced, fixed, source)');
     legacy.prepare('INSERT INTO advisories VALUES (?,?,?,?,?,?,?,?,?)').run(
         'fixture-warning', 'Fixture advisory', 'LOW', null, 'fixture.group', 'core', null, '2.0', 'imported');
@@ -112,9 +125,15 @@ test('the offline converter preserves identity, project rights and legacy passwo
     assert.equal(preview.migrated.projectOwners, 1);
     assert.equal(preview.migrated.dependencyAdvisories, 1);
     assert.equal(preview.skipped.file_cache, 1);
+    const outstanding = {
+        [conflicting.projectId]: 'CONFLICTING_OWNER_EVIDENCE', [unclaimed.projectId]: 'MISSING_OWNER_EVIDENCE',
+        [unknown.projectId]: 'UNKNOWN_LEGACY_OWNER', [inaccessible]: 'LEGACY_PROJECT_UNAVAILABLE'
+    };
+    assert.deepEqual(Object.fromEntries(preview.ownershipReview.map(entry => [entry.projectId, entry.reason])), outstanding);
     await assert.rejects(readFile(join(output, 'index.db')), { code: 'ENOENT' });
     const imported = await migrate();
     assert.deepEqual(imported.migrated, preview.migrated);
+    assert.deepEqual(imported.ownershipReview, preview.ownershipReview);
     await assert.rejects(migrate(), /DESTINATION_EXISTS/);
     assert.deepEqual(await readFile(source), sourceBytes);
 
@@ -138,6 +157,14 @@ test('the offline converter preserves identity, project rights and legacy passwo
     assert.equal(admin.status, 200);
     const audit = await (await admin.request('/admin/audit')).json();
     assert.ok(audit.some(event => event.id === 42 && event.actorId === 'builtin-admin' && event.targetId === projectId));
+    assert.deepEqual(Object.fromEntries(audit.filter(event => event.action === 'LEGACY_OWNER_REVIEW_REQUIRED')
+        .map(event => [event.targetId, event.reason])), outstanding);
+    const { token: adminCsrf } = await (await admin.request('/auth/csrf')).json();
+    assert.equal((await admin.request('/admin/projects/' + conflicting.projectId + '/owner', 'PUT', adminCsrf,
+        { ownerType: 'PERSONAL', ownerId: 'legacy-analyst' })).status, 200);
+    await assert.rejects(migrate(), /DESTINATION_EXISTS/);
+    const repaired = await (await analyst.request('/projects')).json();
+    assert.deepEqual(repaired.map(entry => entry.projectId).sort(), [projectId, conflicting.projectId].sort());
     const benchmarkReport = { projectLabel: 'Archived corpus', generatedAt: timestamp, semantic: {
         title: 'SEMANTIC SEARCH', total: 0, threshold: .65, hit1Rate: 0, hit3Rate: 0, hit5Rate: 0, hit10Rate: 0,
         mrr10: 0, passed: false, cases: []
@@ -1056,6 +1083,13 @@ test('legacy managed archives rebuild a private copy and keep assigned project r
     assert.equal((await admin.request(assetRoute, 'DELETE', token)).status, 200);
     assert.equal((await admin.request('/scans/' + scanId)).status, 404);
     assert.equal((await admin.request('/scan-tasks/' + taskId)).status, 404);
+    assert.equal((await stat(targetRoot)).isDirectory(), true);
+    const lifecycle = '/projects/' + project + '/lifecycle';
+    assert.equal((await admin.request(lifecycle, 'POST', token, { action: 'purge', revision: 1 },
+        { 'Idempotency-Key': 'purge-migrated-archive' })).status, 202);
+    async function collected() { return (await (await admin.request(lifecycle)).json()).state === 'PURGED'; }
+    for (let i = 0; i < 100 && !await collected(); i++) await delay(25);
+    assert.equal(await collected(), true);
     await assert.rejects(stat(targetRoot), { code: 'ENOENT' });
     assert.equal(await readFile(join(original, 'main.ts'), 'utf8'), contents);
     assert.equal(await readFile(join(removed, 'old.ts'), 'utf8'), 'export const old = true;');

@@ -76,7 +76,7 @@ export async function handleProviders(request: IncomingMessage, response: Server
         } else if (!action && request.method === 'DELETE') send(response, 200, providers.remove(actor, id));
         else if (action === 'select' && request.method === 'POST') send(response, 200, providers.select(actor, id));
         else if (action === 'test' && request.method === 'POST') {
-            const result = await gateway.test(id, cancelOnClose());
+            const result = await gateway.test(id, cancelOnClose(), actor);
             if (!response.destroyed) { authorizeAdmin(); send(response, 200, result); }
         } else return false;
     } else return false;

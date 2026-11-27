@@ -126,7 +126,7 @@ test('single-file indexing and persisted watches share the index lifecycle', { t
     assert.equal((await api('/index/project', { projectRoot: root, projectId }, 'DELETE')).status, 200);
     await writeFile(renamed, 'export function afterDelete() {}');
     await delay(650);
-    assert.equal((await api('/watch/' + projectId)).body.watching, false);
+    assert.equal((await api('/watch/' + projectId)).status, 404);
     assert.deepEqual((await api('/projects')).body, []);
 });
 
@@ -160,6 +160,7 @@ test('stopping a watch cancels in-flight work and retains dirty files for the ne
         REPOGRAPH_EMBEDDING_DIMENSIONS: '2'
     });
     let repository = await RepositoryIndex.open(database, temp, provider);
+    await repository.identity.initializeAdmin();
     t.after(async () => {
         await repository?.close();
         upstream.closeAllConnections();
@@ -173,7 +174,7 @@ test('stopping a watch cancels in-flight work and retains dirty files for the ne
     await writeFile(file, 'export function pendingEdit() { return 2; }');
     await held.promise;
     assert.equal((await repository.status(root)).status, 'running');
-    await assert.rejects(repository.delete(projectId, root), { message: 'INDEX_ALREADY_RUNNING' });
+    await assert.rejects(repository.trashProject(repository.identity.account('builtin-admin'), projectId, root), { message: 'PROJECT_WORK_PENDING' });
     await repository.watches.stop(projectId);
     assert.equal(repository.watches.has(projectId), false);
     assert.ok((await repository.status(root)).errors.includes('INDEX_CANCELLED'));

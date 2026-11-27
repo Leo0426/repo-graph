@@ -79,7 +79,8 @@ function parse(text: string, allowed: ReadonlyMap<string, ArchitectureEvidence>)
 }
 
 export async function architectureReview(index: Pick<RepositoryIndex, 'assets' | 'metrics' | 'projectStats' | 'projectRoot'>,
-    gateway: GenerationGateway, id: string, signal: AbortSignal, authorize: () => void, onEvidence?: () => void): Promise<ArchitectureReview> {
+    gateway: GenerationGateway, id: string, signal: AbortSignal, authorize: () => void, onEvidence?: () => void,
+    actorId?: string): Promise<ArchitectureReview> {
     const root = index.projectRoot(id);
     const session = gateway.session();
     const churn = index.assets.forProject(id) ? new Map<string, number>() : await gitChurn(root, signal);
@@ -113,7 +114,7 @@ export async function architectureReview(index: Pick<RepositoryIndex, 'assets' |
                 + 'Each candidate has priority (integer 1–5), title, problem, suggestion, benefit, cost, risk, methodology, and citations (array of provided evidence IDs). '
                 + 'Include at least one supplied citation per candidate. Describe missing evidence explicitly. Return JSON only.',
             user: 'Review indexed architecture facts.\n' + JSON.stringify(sent), schema: z.toJSONSchema(modelResponse),
-            maxOutputTokens: 4096, maxEstimatedCostUsd: 0.05, signal
+            maxOutputTokens: 4096, maxEstimatedCostUsd: 0.05, signal, attribution: { capability: 'ARCHITECTURE', projectId: id, actorId }
         });
         const allowed = new Map(evidence.slice(0, sent.length).map(item => [item.citationId, item]));
         const review = parse(completion.text, allowed);

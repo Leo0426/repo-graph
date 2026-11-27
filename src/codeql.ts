@@ -4,7 +4,7 @@ import { dirname, extname, isAbsolute, join, sep } from 'node:path';
 import type { ArchiveFile } from './archive.js';
 import { maxFindingBody, maxFindingRows, normalizeFindings } from './finding-import.js';
 import { readProjectFile, relativeEvidencePath } from './project-file.js';
-import { runScanner } from './scanner-process.js';
+import { runScanner, scannerWorkPrefix } from './scanner-process.js';
 import type { ScannerAdapter, ScannerResult } from './scanner-process.js';
 
 const languageGroups = [
@@ -88,7 +88,7 @@ export class CodeQl implements ScannerAdapter {
             outputFormat: 'sarif-2.1.0', prerequisites: ['Server-local CodeQL CLI bundle', 'One supported source language'] };
         const binary = await this.executablePath();
         if (!binary) return { capability, available: false, toolVersion: '', error: 'CODEQL_NOT_CONFIGURED' };
-        const work = await mkdtemp(join(await realpath(tmpdir()), 'repograph-codeql-'));
+        const work = await mkdtemp(scannerWorkPrefix(await realpath(tmpdir()), 'repograph-codeql-'));
         try {
             const toolVersion = await this.version(binary, work, AbortSignal.timeout(5000));
             return { capability, available: !!toolVersion, toolVersion, error: toolVersion ? '' : 'SCANNER_UNAVAILABLE' };
@@ -98,7 +98,7 @@ export class CodeQl implements ScannerAdapter {
     async scan(root: string, files: ArchiveFile[], signal: AbortSignal): Promise<ScannerResult> {
         const binary = await this.executablePath();
         if (!binary) return { status: 'UNAVAILABLE', exitCode: -1, toolVersion: '', error: 'CODEQL_NOT_CONFIGURED' };
-        const work = await mkdtemp(join(await realpath(tmpdir()), 'repograph-codeql-'));
+        const work = await mkdtemp(scannerWorkPrefix(await realpath(tmpdir()), 'repograph-codeql-'));
         try {
             const toolVersion = await this.version(binary, work, AbortSignal.any([signal, AbortSignal.timeout(5000)]));
             if (!toolVersion) return { status: 'UNAVAILABLE', exitCode: -1, toolVersion, error: 'SCANNER_UNAVAILABLE' };

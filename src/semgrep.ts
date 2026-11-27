@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { isAbsolute, join, sep } from 'node:path';
 import { maxFindingBody, maxFindingRows, normalizeFindings } from './finding-import.js';
 import type { ArchiveFile } from './archive.js';
-import { runScanner } from './scanner-process.js';
+import { runScanner, scannerWorkPrefix } from './scanner-process.js';
 import type { ScannerAdapter, ScannerResult } from './scanner-process.js';
 
 export const semgrepLanguages = [
@@ -48,7 +48,7 @@ export class Semgrep implements ScannerAdapter {
         const capability = { scanner: 'SEMGREP', languages: semgrepLanguages, requiredCommand: 'semgrep',
             outputFormat: 'semgrep-json', prerequisites: ['Readable managed source', 'Server-local Semgrep executable and rules file'] };
         if (!await this.rulesPath()) return { capability, available: false, toolVersion: '', error: 'SCANNER_NOT_CONFIGURED' };
-        const work = await mkdtemp(join(tmpdir(), 'repograph-semgrep-'));
+        const work = await mkdtemp(scannerWorkPrefix(tmpdir(), 'repograph-semgrep-'));
         try {
             const toolVersion = await this.version(work, AbortSignal.timeout(5000));
             return { capability, available: !!toolVersion, toolVersion, error: toolVersion ? '' : 'SCANNER_UNAVAILABLE' };
@@ -58,7 +58,7 @@ export class Semgrep implements ScannerAdapter {
     async scan(root: string, _files: ArchiveFile[], signal: AbortSignal): Promise<ScannerResult> {
         const rules = await this.rulesPath();
         if (!rules) return { status: 'UNAVAILABLE', exitCode: -1, toolVersion: '', error: 'SCANNER_NOT_CONFIGURED' };
-        const work = await mkdtemp(join(tmpdir(), 'repograph-semgrep-'));
+        const work = await mkdtemp(scannerWorkPrefix(tmpdir(), 'repograph-semgrep-'));
         try {
             const toolVersion = await this.version(work, AbortSignal.any([signal, AbortSignal.timeout(5000)]));
             if (!toolVersion) return { status: 'UNAVAILABLE', exitCode: -1, toolVersion, error: 'SCANNER_UNAVAILABLE' };

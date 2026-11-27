@@ -1,9 +1,11 @@
 import type { RepositoryIndex } from './index.js';
 import type { CodeUnit } from './source.js';
 import { EmbeddingUnavailable } from './vector.js';
+import { HttpError } from './http-error.js';
 
 export interface GraphRagOptions {
     projectId: string | null;
+    snapshotId?: string;
     allowedProjects?: () => readonly string[] | null;
     language: string | null;
     noTest: boolean;
@@ -12,10 +14,12 @@ export interface GraphRagOptions {
     callGraph: boolean;
     impactExpansion: boolean;
     rerank: boolean;
+    trackIndexRanks?: boolean;
 }
 
 export interface RankedUnit {
     projectId: string;
+    snapshotId?: string;
     unit: CodeUnit;
     vectorScore: number;
     securityScore: number;
@@ -23,6 +27,7 @@ export interface RankedUnit {
     source: 'VECTOR' | 'KEYWORD' | 'CALL_GRAPH' | 'IMPACT' | 'CHANGE' | 'FINDING';
     relation: 'SEED' | 'CALLER' | 'CALLEE' | 'IMPACT';
     securitySignals: string[];
+    indexRanks?: Partial<Record<'KEYWORD' | 'VECTOR', number>>;
 }
 
 const MAX_RESULTS = 60;
@@ -50,7 +55,7 @@ export function securitySignals(unit: CodeUnit) {
 }
 
 export async function graphRag(repository: RepositoryIndex, query: string, options: GraphRagOptions, signal?: AbortSignal) {
-    const { projectId, language, noTest, limit, depth, rerank } = options;
+    const { projectId, snapshotId, language, noTest, limit, depth, rerank } = options;
     const omittedReasons: string[] = [];
     const candidates = new Map<string, RankedUnit>();
     const securityWeight = rerank ? 0.5 : 0;
@@ -65,6 +70,7 @@ export async function graphRag(repository: RepositoryIndex, query: string, optio
         if (source === 'IMPACT' && !security.score) return false;
         candidates.set(unit.id, {
             unit, projectId: project, source, relation, vectorScore, securityScore: security.score,
+            ...(snapshotId ? { snapshotId } : {}),
             finalScore: relevance + security.score * securityWeight,
             securitySignals: [...security.matches, ...extraSignals]
         });
@@ -74,16 +80,21 @@ export async function graphRag(repository: RepositoryIndex, query: string, optio
     let seedCount = 0;
     try {
         const page = await repository.vectorSearch('semantic', query, {
-            projectId, language, noTest, limit, kind: null, entryOnly: false, offset: 0,
+            projectId, snapshotId, language, noTest, limit, kind: null, entryOnly: false, offset: 0,
             allowedProjects: options.allowedProjects
         }, signal);
         seedCount = page.results.length;
-        for (const result of page.results) {
-            add(result.unit, result.projectId, 'VECTOR', 'SEED', result.score, result.score);
+        for (const [index, result] of page.results.entries()) {
+            if (add(result.unit, result.projectId, 'VECTOR', 'SEED', result.score, result.score) && options.trackIndexRanks) {
+                candidates.get(result.unit.id)!.indexRanks = { VECTOR: index + 1 };
+            }
         }
     } catch (error) {
-        if (!(error instanceof EmbeddingUnavailable) || signal?.aborted) throw error;
-        omittedReasons.push(error.code);
+        if (signal?.aborted) throw error;
+        if (error instanceof EmbeddingUnavailable) omittedReasons.push(error.code);
+        else if (snapshotId && error instanceof HttpError && error.message === 'SNAPSHOT_VECTOR_INDEX_UNAVAILABLE') {
+            omittedReasons.push(error.message);
+        } else throw error;
     }
     const allowed = options.allowedProjects?.() ?? null;
     if (allowed !== null) {
@@ -93,7 +104,7 @@ export async function graphRag(repository: RepositoryIndex, query: string, optio
         }
         seedCount = candidates.size;
     }
-    const keywords = repository.search(query, projectId, language, null, limit, noTest, allowed);
+    const keywords = repository.search(query, projectId, language, null, limit, noTest, allowed, snapshotId);
     for (const [index, result] of keywords.entries()) {
         const relevance = 0.70 / (1 + index * 0.10);
         const keywordSignals = result.matchedTerms.map(term => `keyword:${term}`);
@@ -103,8 +114,11 @@ export async function graphRag(repository: RepositoryIndex, query: string, optio
                 existing.finalScore = Math.max(existing.finalScore, relevance + existing.securityScore * securityWeight);
             }
             existing.securitySignals.push(...keywordSignals);
+            if (options.trackIndexRanks) existing.indexRanks = { ...existing.indexRanks, KEYWORD: index + 1 };
         } else {
-            add(result.unit, result.projectId, 'KEYWORD', 'SEED', 0, relevance, keywordSignals);
+            if (add(result.unit, result.projectId, 'KEYWORD', 'SEED', 0, relevance, keywordSignals) && options.trackIndexRanks) {
+                candidates.get(result.unit.id)!.indexRanks = { KEYWORD: index + 1 };
+            }
         }
     }
 
@@ -116,13 +130,13 @@ export async function graphRag(repository: RepositoryIndex, query: string, optio
         if (candidates.size >= MAX_RESULTS) break;
         if (options.callGraph) {
             for (const [direction, relation] of [['callers', 'CALLER'], ['callees', 'CALLEE']] as const) {
-                for (const neighbor of repository.graphNeighbors(seed.unit.id, direction, depth, 12)) {
+                for (const neighbor of repository.graphNeighbors(seed.unit.id, direction, depth, 12, snapshotId)) {
                     if (add(neighbor, seed.projectId, 'CALL_GRAPH', relation, 0, seed.finalScore * 0.65)) callGraphExpanded++;
                 }
             }
         }
         if (options.impactExpansion) {
-            for (const neighbor of repository.graphNeighbors(seed.unit.id, 'impact', depth, 12)) {
+            for (const neighbor of repository.graphNeighbors(seed.unit.id, 'impact', depth, 12, snapshotId)) {
                 if (add(neighbor, seed.projectId, 'IMPACT', 'IMPACT', 0, seed.finalScore * 0.5)) impactExpanded++;
             }
         }
@@ -133,7 +147,7 @@ export async function graphRag(repository: RepositoryIndex, query: string, optio
     if (!results.length) omittedReasons.push('NO_MATCHING_EVIDENCE');
     if (results.length === MAX_RESULTS) omittedReasons.push('CANDIDATE_LIMIT_REACHED');
     return {
-        results, seedCount, keywordSeedCount: keywords.length, callGraphExpanded, impactExpanded,
+        results, seedCount, keywordSeedCount: keywords.length, callGraphExpanded, impactExpanded, ...(snapshotId ? { snapshotId } : {}),
         securityHighlightCount: results.filter(item => item.securityScore > 0.3).length, omittedReasons
     };
 }
@@ -165,6 +179,7 @@ export function contextPack(
         used += excerpt.length;
         evidence.push({
             citationId: `C${evidence.length + 1}`, unitId: id, projectId: item.projectId, qualifiedName,
+            ...(item.snapshotId ? { snapshotId: item.snapshotId } : {}),
             kind, language, filePath, startLine, endLine, source: item.source, relation: item.relation,
             ...(item.unit.metadata.archive_entry ? { archiveEntry: item.unit.metadata.archive_entry } : {}),
             ...(item.unit.metadata.bytecode === 'true' ? { bytecode: true } : {}),
@@ -172,7 +187,7 @@ export function contextPack(
         });
     }
     return {
-        query, taskType: taskType.trim() || 'detail', evidence, omittedReasons,
+        query, taskType: taskType.trim() || 'detail', evidence, omittedReasons, ...(retrieval.snapshotId ? { snapshotId: retrieval.snapshotId } : {}),
         requestedBudgetChars: budget, usedBudgetChars: used, seedCount, keywordSeedCount, callGraphExpanded, impactExpanded
     };
 }

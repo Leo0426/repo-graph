@@ -8,6 +8,11 @@ import type { Dependency, PackageIdentity } from './sbom-manifests.js';
 
 const MIB = 1024 * 1024;
 export const requirementsName = /^requirements[\w.-]*\.txt$/;
+const dependencyManifestNames = /^(?:pom\.xml|build\.gradle(?:\.kts)?|settings\.gradle(?:\.kts)?|gradle\.lockfile|libs\.versions\.toml|package\.json|package-lock\.json|npm-shrinkwrap\.json|pyproject\.toml)$/;
+export function isDependencyManifest(file: string) {
+    const name = basename(file);
+    return dependencyManifestNames.test(name) || requirementsName.test(name);
+}
 const maxRequirements = 32;
 const maxRootEntries = 50_000;
 const maxComponents = 10_000;
@@ -120,7 +125,7 @@ function purl(identity: PackageIdentity) {
     }
 }
 
-export async function dependencyInventory(root: string) {
+export async function dependencyInventory(root: string, observe?: (path: string, bytes: Uint8Array) => void) {
     const components = new Map<string, Component>();
     const issues = new Set<string>();
     const dependencies: Dependency[] = [];
@@ -134,6 +139,7 @@ export async function dependencyInventory(root: string) {
             const budget = /(?:lock|shrinkwrap)/.test(path) ? 4 * MIB : MIB;
             const bytes = await readProjectFile(join(root, path), Math.min(budget, remainingBytes));
             remainingBytes -= bytes.length;
+            observe?.(path, bytes);
             return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code !== 'ENOENT') issues.add(path + ': READ_FAILED');

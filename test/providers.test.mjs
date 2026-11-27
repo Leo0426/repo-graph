@@ -6,7 +6,82 @@ import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
+import { localTimeWindowInput, localTimeWindowOpen } from '../dist/calendar-schedule.js';
+import { GenerationGateway } from '../dist/generation.js';
+import { DEFAULT_PROVIDER, ModelProviders } from '../dist/model-providers.js';
+import { ModelUsage } from '../dist/model-usage.js';
+
+test('model permits enforce live pool capacity and credential revocation across SQLite connections', async t => {
+    const root = await mkdtemp(join(tmpdir(), 'repograph-model-pool-'));
+    const database = join(root, 'state.db');
+    const keyPath = join(root, 'model-key');
+    const first = new DatabaseSync(database);
+    const second = new DatabaseSync(database);
+    t.after(async () => { first.close(); second.close(); await rm(root, { force: true, recursive: true }); });
+    const directory = { owner: () => undefined, record: () => {} };
+    const providers = new ModelProviders(first, directory, keyPath);
+    const settings = { name: 'Fixture endpoint', protocol: 'OPENAI_COMPATIBLE', baseUrl: 'http://127.0.0.1:1/v1', model: 'fixture',
+        enabled: true, maxOutputTokens: 800, timeoutMillis: 10_000, clearApiKey: false };
+    providers.save('admin', DEFAULT_PROVIDER, { ...settings, apiKey: 'training-fixture-first', pool: { maxConcurrent: 2, reservedAsk: 1 } });
+    const frozen = providers.freeze();
+    const current = new ModelUsage(first, directory);
+    const remote = new ModelUsage(second, directory);
+    const gateway = new GenerationGateway(providers, current);
+    const wiki = () => current.send(frozen.config, frozen.encryptedKey, { capability: 'WIKI' });
+    const ask = () => remote.send(frozen.config, frozen.encryptedKey, { capability: 'ASK' });
+    const firstAsk = ask();
+    assert.ok(firstAsk.id);
+    const background = wiki();
+    assert.ok(background.id, 'Ask uses the reserved slot without reducing the background limit');
+    assert.deepEqual(wiki(), { reason: 'PROVIDER_POOL_BUSY' });
+    assert.deepEqual(ask(), { reason: 'PROVIDER_POOL_BUSY' });
+    assert.equal(current.list(20, 0).records.length, 2);
+    remote.settle(firstAsk.id, null, { inputTokens: 10, outputTokens: 3, costUsd: null });
+    assert.deepEqual(wiki(), { reason: 'PROVIDER_POOL_BUSY' });
+    const secondAsk = ask();
+    assert.ok(secondAsk.id);
+    remote.settle(secondAsk.id, 'PROVIDER_CANCELLED');
+    first.prepare('UPDATE model_invocation SET deadline_at = 0 WHERE id = ?').run(background.id);
+    const resumedBackground = wiki();
+    assert.ok(resumedBackground.id);
+    assert.equal(current.list(20, 0).records.find(row => row.id === background.id).status, 'UNKNOWN');
+
+    const rotated = providers.save('admin', DEFAULT_PROVIDER, { ...settings, apiKey: 'training-fixture-next' });
+    assert.deepEqual(rotated.pool, { maxConcurrent: 2, reservedAsk: 1 });
+    const stale = gateway.resume(frozen).complete({ system: 'Fixture', user: 'No request should be sent.' });
+    await assert.rejects(stale, { message: 'PROVIDER_ACCESS_CHANGED' });
+    assert.deepEqual(ask(), { reason: 'PROVIDER_ACCESS_CHANGED' });
+    current.settle(resumedBackground.id, null);
+    const newCredentials = providers.freeze();
+    const newest = remote.send(newCredentials.config, newCredentials.encryptedKey, { capability: 'WIKI' });
+    assert.ok(newest.id);
+    remote.settle(newest.id, null);
+    const tomorrow = (new Date().getUTCDay() + 1) % 7;
+    providers.save('admin', DEFAULT_PROVIDER, { ...settings, apiKey: '', pool: { maxConcurrent: 2, reservedAsk: 1,
+        backgroundWindow: { timeZone: 'UTC', start: '00:00', end: '23:59', weekdays: [tomorrow] } } });
+    assert.deepEqual(current.closedBackgroundPools(), [DEFAULT_PROVIDER]);
+    assert.deepEqual(remote.send(newCredentials.config, newCredentials.encryptedKey, { capability: 'WIKI' }), { reason: 'PROVIDER_POOL_WINDOW_CLOSED' });
+    assert.ok(remote.send(newCredentials.config, newCredentials.encryptedKey, { capability: 'ASK' }).id);
+    assert.equal(remote.send(newCredentials.config, newCredentials.encryptedKey, { capability: 'FINDING_REVIEW' }).reason, 'PROVIDER_POOL_WINDOW_CLOSED');
+    providers.save('admin', DEFAULT_PROVIDER, { ...settings, enabled: false, apiKey: '' });
+    await assert.rejects(gateway.resume(newCredentials).complete({ system: 'Fixture', user: 'No request should be sent.' }),
+        { message: 'PROVIDER_ACCESS_CHANGED' });
+});
+
+test('background model windows use local weekdays and continue through midnight', () => {
+    const window = localTimeWindowInput.parse({ timeZone: 'Asia/Kolkata', weekdays: [1], start: '22:00', end: '02:00' });
+    assert.equal(localTimeWindowOpen(window, Date.parse('2026-11-23T16:29:59Z')), false);
+    assert.equal(localTimeWindowOpen(window, Date.parse('2026-11-23T16:30:00Z')), true);
+    assert.equal(localTimeWindowOpen(window, Date.parse('2026-11-23T20:29:59Z')), true);
+    assert.equal(localTimeWindowOpen(window, Date.parse('2026-11-23T20:30:00Z')), false);
+    assert.equal(localTimeWindowOpen(window, Date.parse('2026-11-24T16:30:00Z')), false);
+    const repeated = localTimeWindowInput.parse({ timeZone: 'America/New_York', weekdays: [0], start: '01:30', end: '03:00' });
+    assert.equal(localTimeWindowOpen(repeated, Date.parse('2026-11-01T05:45:00Z')), true);
+    assert.equal(localTimeWindowOpen(repeated, Date.parse('2026-11-01T06:45:00Z')), true);
+    assert.equal(localTimeWindowInput.safeParse({ ...window, end: window.start }).success, false);
+});
 
 test('administrator provider drafts and connection tests preserve credential and selection boundaries', { timeout: 20_000 }, async t => {
     const tmp = await mkdtemp(join(tmpdir(), 'repograph-providers-'));
@@ -16,6 +91,7 @@ test('administrator provider drafts and connection tests preserve credential and
     const received = [];
     let advisoryOutput = 'valid';
     let advisoryGate;
+    let spaceGate;
     let held = false, beginHold, releaseHold;
     const reviewStarted = new Promise(resolve => { beginHold = resolve; });
     const reviewReleased = new Promise(resolve => { releaseHold = resolve; });
@@ -24,10 +100,20 @@ test('administrator provider drafts and connection tests preserve credential and
         for await (const chunk of req) chunks.push(chunk);
         const input = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : null;
         received.push({ path: req.url, method: req.method, headers: req.headers, input });
+        if (req.url === '/v1/chat/completions' && input.messages[0].content.startsWith('Write the complete Markdown document')) {
+            if (spaceGate) { spaceGate.started(); await spaceGate.released; }
+            const prompt = JSON.parse(input.messages.at(-1).content);
+            const content = prompt.markdown ? '# Revised handoff\n\nPrepared from the authorized version.\n' : '# Generated handoff\n\nReady for handoff.\n';
+            return res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({
+                choices: [{ message: { content }, finish_reason: 'stop' }], usage: { prompt_tokens: 34, completion_tokens: 18 }
+            }));
+        }
         if (req.url === '/redirect/models') return res.writeHead(302, { Location: '/unexpected' }).end();
         if (req.url === '/hang/chat/completions') return res.writeHead(200).write('{');
         if (req.url === '/v1/chat/completions' && input.messages.at(-1).content.startsWith('Review reported finding evidence.')) {
-            if (advisoryGate) { advisoryGate.started(); await advisoryGate.released; }
+            if (advisoryGate && (!advisoryGate.contains || input.messages.at(-1).content.includes(advisoryGate.contains))) {
+                advisoryGate.started(); await advisoryGate.released;
+            }
             const citations = advisoryOutput === 'unsupported' ? ['UNREGISTERED_EVIDENCE'] : ['C1', 'C1', 'UNREGISTERED_EVIDENCE'];
             const invalidFinding = advisoryOutput === 'partial' && input.messages.at(-1).content.includes('fixture.fail-review');
             const content = advisoryOutput === 'invalid' || invalidFinding ? '{}' : JSON.stringify({
@@ -77,14 +163,15 @@ test('administrator provider drafts and connection tests preserve credential and
             });
         });
     }
-    async function stop() {
+    async function stop(signal = 'SIGTERM') {
         if (!child || child.exitCode !== null || child.signalCode !== null) return;
         const stopped = once(child, 'exit');
-        child.kill('SIGTERM');
+        child.kill(signal);
         await stopped;
     }
     t.after(async () => {
         advisoryGate?.release();
+        spaceGate?.release();
         releaseHold();
         await stop();
         fixture.closeAllConnections();
@@ -92,10 +179,10 @@ test('administrator provider drafts and connection tests preserve credential and
         await rm(tmp, { recursive: true, force: true });
     });
     const path = '/admin/model-providers';
-    async function request(path, method = 'GET', input, auth = true) {
+    async function request(path, method = 'GET', input, auth = true, headers = {}) {
         const response = await fetch(base + '/api/v1' + path, { method,
             headers: { ...(auth ? { Authorization: 'Bearer ' + accessToken } : {}),
-                ...(input ? { 'Content-Type': 'application/json' } : {}) },
+                ...(input ? { 'Content-Type': 'application/json' } : {}), ...headers },
             body: input ? JSON.stringify(input) : undefined });
         const body = await response.json();
         assert.ok(!JSON.stringify(body).includes(apiKey));
@@ -200,6 +287,10 @@ test('administrator provider drafts and connection tests preserve credential and
     assert.ok(assessment.body.missingInfo.includes('ADVISORY_UNKNOWN_CITATIONS'));
     assert.doesNotMatch(JSON.stringify(assessment.body), /fixture-model-output-secret|UNREGISTERED_EVIDENCE/);
     assert.deepEqual(assessment.body.usage, { inputTokens: 40, outputTokens: 15, costUsd: null });
+    const recorded = (await request('/admin/model-usage')).body.records[0];
+    assert.deepEqual([recorded.capability, recorded.status, recorded.inputTokens, recorded.outputTokens, recorded.costUsd],
+        ['FINDING_REVIEW', 'COMPLETED', 40, 15, null]);
+    assert.doesNotMatch(JSON.stringify(recorded), /fixture-model-output-secret|fixture-source-secret|Review reported finding/);
     const prompt = received.at(-1).input.messages.at(-1).content;
     assert.match(prompt, /return qty/);
     assert.doesNotMatch(prompt, /fixture-(source-secret|alert-secret|raw-tool-payload|fabricated-evidence)/);
@@ -233,19 +324,19 @@ test('administrator provider drafts and connection tests preserve credential and
     assert.equal((await request(path + '/' + id + '/select', 'POST')).status, 200);
 
     const agentPath = '/agent-runs/sast-triage' + project;
-    async function pollRun(id) {
-        for (let attempt = 0; attempt < 150; attempt++) {
+    async function pollRun(id, limit = 150) {
+        for (let attempt = 0; attempt < limit; attempt++) {
             const current = (await request('/agent-runs/' + id + project)).body;
             if (!['RUNNING', 'QUEUED'].includes(current.status)) return current;
             await new Promise(resolve => setTimeout(resolve, 15));
         }
         assert.fail('SAST triage did not reach a terminal state');
     }
-    function holdAdvisory() {
+    function holdAdvisory(contains) {
         let started, release;
         const reached = new Promise(resolve => { started = resolve; });
         const released = new Promise(resolve => { release = resolve; });
-        advisoryGate = { started, released, release };
+        advisoryGate = { started, released, release, contains };
         return reached;
     }
     const batchScan = { results: [...scan.results, { ...scan.results[0], check_id: 'fixture.fail-review' }] };
@@ -260,6 +351,7 @@ test('administrator provider drafts and connection tests preserve credential and
     assert.deepEqual([running.status, runningStep.capability, runningStep.status, runningStep.finishedAt], ['RUNNING', 'LLM_ADVISORY', 'RUNNING', null]);
     assert.equal((await request(agentPath, 'POST', { fingerprints: [fingerprint] })).status, 409);
     assert.equal((await request(path + '/' + id, 'PUT', { ...config, apiKey: '', enabled: false })).status, 200);
+    const sent = received.length;
     advisoryGate.release();
     advisoryGate = undefined;
     const reviewedAgent = await pollRun(startedAgent.body.id);
@@ -267,7 +359,8 @@ test('administrator provider drafts and connection tests preserve credential and
     const finishedStep = reviewedAgent.steps.find(item => item.id === runningStep.id);
     assert.equal(finishedStep.status, 'PARTIAL');
     assert.ok(finishedStep.finishedAt);
-    assert.ok(finishedStep.missingInfo.includes('INVALID_ADVISORY_OUTPUT'));
+    assert.ok(finishedStep.missingInfo.includes('PROVIDER_ACCESS_CHANGED'));
+    assert.equal(received.length, sent);
     const [advice] = finishedStep.results;
     assert.deepEqual([advice.baseline, advice.recommendation, advice.advisoryOnly, advice.citationIds], ['NEEDS_REVIEW', 'LIKELY_FALSE_POSITIVE', true, ['C1']]);
     assert.equal(advice.usage.costUsd, null);
@@ -292,7 +385,44 @@ test('administrator provider drafts and connection tests preserve credential and
     assert.equal(cancelled.steps.at(-1).error, 'CANCELLED');
     assert.equal((await request(cancelAddress, 'POST')).body.status, 'CANCELLED');
 
+    const recoveryHeld = holdAdvisory('fixture.interrupted');
+    const recoveryInput = { results: ['fixture.retained', 'fixture.interrupted', 'fixture.remaining']
+        .map(check_id => ({ ...scan.results[0], check_id })) };
+    const recoveryRoute = agentPath + '&format=semgrep';
+    const recoveryHeaders = { 'Idempotency-Key': 'recover-triage' };
+    const recoveryRun = await request(recoveryRoute, 'POST', recoveryInput, true, recoveryHeaders);
+    assert.equal(recoveryRun.status, 202);
+    await recoveryHeld;
+    const recoveryAddress = '/agent-runs/' + recoveryRun.body.id;
+    const beforeCrash = (await request(recoveryAddress + project)).body.steps.find(step => step.capability === 'LLM_ADVISORY');
+    assert.equal(beforeCrash.results.length, 1);
+    await stop('SIGKILL');
+    advisoryGate.release();
+    advisoryGate = undefined;
+    const originalSource = await readFile(file, 'utf8');
+    await writeFile(file, 'export function dispatch(qty: number) { return 917; }');
+    await start();
+    const refresh = '/index/file?' + new URLSearchParams({ file, projectRoot: root });
+    assert.equal((await request(refresh, 'POST')).status, 200);
+    assert.equal((await request(recoveryRoute, 'POST', recoveryInput, true, recoveryHeaders)).body.id, recoveryRun.body.id);
+    const afterCrash = await pollRun(recoveryRun.body.id, 430);
+    assert.equal(afterCrash.status, 'PARTIAL');
+    const recoveredStep = afterCrash.steps.find(step => step.capability === 'LLM_ADVISORY');
+    assert.equal(recoveredStep.id, beforeCrash.id);
+    assert.equal(recoveredStep.results.length, 2);
+    assert.deepEqual(recoveredStep.results[0], beforeCrash.results[0]);
+    assert.ok(recoveredStep.missingInfo.includes('ADVISORY_RESPONSE_UNCONFIRMED'));
+    const attempts = (await request(recoveryAddress + '/execution/attempts' + project)).body;
+    assert.deepEqual(attempts.map(attempt => attempt.outcome), ['LEASE_EXPIRED', 'FINISHED']);
+    const frozenAfter = (await request('/review-queue/snapshots/' + afterCrash.outputReference.split(':')[1] + '/export' + project + '&format=json')).body;
+    assert.ok(frozenAfter.reports.every(report => report.pack.evidence.some(evidence => /return qty/.test(evidence.excerpt))));
+    assert.doesNotMatch(JSON.stringify(frozenAfter), /return 917/);
+    assert.equal(received.filter(item => item.input?.messages?.at(-1).content?.includes('fixture.interrupted')).length, 1);
+    await writeFile(file, originalSource);
+    assert.equal((await request(refresh, 'POST')).status, 200);
+
     const calls = received.length;
+    const lastInvocation = (await request('/admin/model-usage')).body.records[0].id;
     assert.equal((await request(path + '/' + id, 'PUT', { ...config, apiKey: '',
         inputUsdPerMillionTokens: 1_000_000, outputUsdPerMillionTokens: 1_000_000 })).status, 200);
     const tooExpensive = (await request(architecture + project, 'POST')).body;
@@ -303,6 +433,7 @@ test('administrator provider drafts and connection tests preserve credential and
     assert.equal(overBudget.modelUsed, false);
     assert.deepEqual(overBudget.heuristicReport, baseline);
     assert.equal(received.length, calls);
+    assert.equal((await request('/admin/model-usage')).body.records[0].id, lastInvocation);
     assert.equal((await request(path + '/' + id, 'PUT', { ...config, apiKey: '' })).status, 200);
 
     held = true;
@@ -320,4 +451,55 @@ test('administrator provider drafts and connection tests preserve credential and
     assert.equal(disabled.status, 'DISABLED');
     assert.equal(disabled.modelUsed, false);
     assert.deepEqual(disabled.heuristicReport, baseline);
+
+    const space = await request('/spaces', 'POST', { name: 'Generated delivery' });
+    assert.equal(space.status, 201);
+    const spacePath = '/spaces/' + space.body.id;
+    const generate = (input, auth = true) => request(spacePath + '/documents/generate', 'POST', input, auth);
+    const firstGeneration = { target: { name: 'Handoff.md' }, instruction: 'Draft the handoff checklist.', key: 'space-document-create' };
+    assert.equal((await generate(firstGeneration)).body.error, 'GENERATION_DISABLED');
+    assert.equal((await generate(firstGeneration, false)).status, 401);
+    assert.equal((await request(path + '/' + id, 'PUT', { ...config, apiKey: '' })).status, 200);
+    const firstDocument = await generate(firstGeneration);
+    assert.equal(firstDocument.status, 201);
+    assert.match(firstDocument.body.markdown, /^# Generated handoff/);
+    const firstVersion = firstDocument.body.version.id;
+    const item = spacePath + '/documents/' + firstDocument.body.id;
+    const callsAfterCreate = received.length;
+    assert.deepEqual(await generate(firstGeneration), firstDocument);
+    assert.equal((await generate({ ...firstGeneration, instruction: 'Use a changed instruction.' })).body.error, 'IDEMPOTENCY_KEY_CONFLICT');
+    assert.equal((await generate({ ...firstGeneration, key: 'taken-name' })).body.error, 'SPACE_ITEM_NAME_CONFLICT');
+    assert.equal(received.length, callsAfterCreate);
+
+    let started, release;
+    const generationStarted = new Promise(resolve => { started = resolve; });
+    const generationReleased = new Promise(resolve => { release = resolve; });
+    spaceGate = { started, released: generationReleased, release };
+    const editGeneration = { target: { itemId: firstDocument.body.id, baseVersionId: firstVersion },
+        instruction: 'Revise this handoff.', key: 'space-document-edit' };
+    const pending = generate(editGeneration);
+    await generationStarted;
+    assert.equal(JSON.parse(received.at(-1).input.messages.at(-1).content).markdown, firstDocument.body.markdown);
+    assert.equal((await generate(editGeneration)).body.error, 'SPACE_GENERATION_IN_PROGRESS');
+    const manual = await request(item, 'PUT', { key: 'manual-space-revision', baseVersionId: firstVersion, markdown: '# Manual revision\n' });
+    assert.equal(manual.status, 200);
+    release();
+    spaceGate = undefined;
+    assert.equal((await pending).body.error, 'DOCUMENT_VERSION_CHANGED');
+    assert.equal((await generate(editGeneration)).body.error, 'DOCUMENT_VERSION_CHANGED');
+    assert.deepEqual((await request(item)).body, manual.body);
+    const secondGeneration = { ...editGeneration, target: { ...editGeneration.target, baseVersionId: manual.body.version.id }, key: 'space-generation-new-base' };
+    const revised = await generate(secondGeneration);
+    assert.equal(revised.status, 200);
+    assert.equal(revised.body.version.ordinal, 3);
+    assert.match(revised.body.markdown, /^# Revised handoff/);
+    assert.equal((await request('/admin/model-usage')).body.records[0].capability, 'SPACE_DOCUMENT');
+    const stableCalls = received.length;
+    await stop();
+    await start();
+    const replayed = await generate(secondGeneration);
+    assert.deepEqual(replayed, revised);
+    assert.equal(received.length, stableCalls);
+    assert.equal((await request(item + '/versions/' + firstVersion)).body.markdown, firstDocument.body.markdown);
+    assert.deepEqual((await request(item + '/versions')).body.map(version => version.ordinal), [3, 2, 1]);
 });

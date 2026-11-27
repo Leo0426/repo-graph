@@ -1,9 +1,9 @@
-import { readFile } from 'node:fs/promises';
 import { zipSync } from 'fflate';
 import PDFDocument from 'pdfkit';
 import { z } from 'zod';
 import { agentRunIdPattern } from './agent-runs.js';
 import { HttpError } from './http-error.js';
+import { documentFont } from './pdf-font.js';
 import type { ReportSnapshot } from './review-queue.js';
 
 export const reviewFormat = z.enum(['json', 'markdown', 'pdf']);
@@ -11,7 +11,6 @@ type Format = z.infer<typeof reviewFormat>;
 export const reviewBatch = z.object({ snapshotIds: z.array(z.string().regex(agentRunIdPattern)).min(1).max(100),
     format: z.string().trim().toLowerCase().pipe(reviewFormat) });
 const MAX_BATCH = 32 * 1024 * 1024;
-let font: Promise<Buffer> | undefined;
 
 function content(snapshot: ReportSnapshot) {
     const title = '审核报告快照';
@@ -48,7 +47,7 @@ function markdown(snapshot: ReportSnapshot) {
 
 async function pdf(snapshot: ReportSnapshot) {
     const { title, labels, findings } = content(snapshot);
-    const embedded = await (font ??= readFile(new URL('../resources/fonts/NotoSansSC-Regular.ttf', import.meta.url)));
+    const embedded = await documentFont();
     const document = new PDFDocument({ size: 'A4', margin: 42, lang: 'zh-CN', info: { Title: title, Creator: 'RepoGraph' } });
     const chunks: Buffer[] = [];
     const output = new Promise<Buffer>((resolve, reject) => {

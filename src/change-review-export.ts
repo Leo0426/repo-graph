@@ -15,8 +15,47 @@ export function reviewMarkdown(snapshot: ChangeSnapshot) {
         '- Source ' + inline(snapshot.source), '- Generated ' + snapshot.generatedAt,
         ...(snapshot.legacyImported ? ['- Snapshot migrated from the legacy instance'] : []),
         '- Hunks ' + snapshot.plannedHunkCount + ' planned, ' + snapshot.omittedHunkCount + ' omitted, ' + snapshot.totalHunkCount + ' total',
-        '', 'Evidence comes from the captured index. Version labels are caller-provided.', '', '## Hunk Ledger', ''
+        '', ...(snapshot.provenance?.scope === 'WORKING_COPY_OVERLAY' ? [
+            'Evidence comes from selected paths captured from the working copy.', '',
+            '- Base snapshot ' + snapshot.provenance.baseSnapshotId, '- Base commit ' + snapshot.provenance.baseCommit,
+            '- Overlay digest ' + snapshot.provenance.overlayDigest,
+            '- Selected paths ' + snapshot.provenance.selectedPaths
+        ] : snapshot.provenance ? [
+            'Evidence comes from the published indexed source.', '',
+            '- Base snapshot ' + (snapshot.provenance.baseSnapshotId ?? '∅'),
+            '- Target snapshot ' + snapshot.provenance.targetSnapshotId,
+            '- Comparison ' + snapshot.provenance.mode + ' · ' + snapshot.provenance.baselineReason
+        ] : ['Evidence comes from the captured index. Version labels are caller-provided.']), ''
     ];
+    if (snapshot.checkCoverage?.length) {
+        lines.push('## Check coverage', '');
+        for (const check of snapshot.checkCoverage) {
+            lines.push('- ' + inline(check.tool) + ' · ' + check.status + ' · ' + check.provenance
+                + ('receipt' in check ? ' · ' + check.accepted + '/' + check.reported + ' · ' + check.receipt : ''));
+        }
+        lines.push('');
+    }
+    if (snapshot.dependencyCheck) {
+        const check = snapshot.dependencyCheck;
+        lines.push('## Offline dependency check', '', check.tool + ' · ' + check.status + ' · ' + check.provenance,
+            '- Findings ' + check.findingCount + ' · Comparable components ' + check.comparableComponents
+                + ' · Unverified ' + check.unverifiedComponents + ' · Unsupported ' + check.unsupportedComponents,
+            ...(check.manifestDigest ? ['- Manifest digest ' + check.manifestDigest] : []),
+            ...(check.catalogDigest ? ['- Advisory catalog digest ' + check.catalogDigest] : []),
+            ...check.reasons.map(reason => '- ' + inline(reason)),
+            ...check.preview.map(finding => '- ' + inline(finding.id) + ' · ' + inline(finding.coordinate) + ' @ ' + inline(finding.version)
+                + ' · ' + finding.severity + ' · ' + finding.manifests.map(inline).join(', ')), '');
+    }
+    if (snapshot.structuredFindings?.length) {
+        lines.push('## Structured findings', '');
+        for (const finding of snapshot.structuredFindings) {
+            lines.push('- ' + finding.id + ' · ' + inline(finding.tool) + ' · ' + inline(finding.ruleId) + ' · '
+                + inline(finding.location.path) + ':' + finding.location.startLine + ' · ' + finding.publishability + ' · '
+                + finding.snapshotId);
+        }
+        lines.push('');
+    }
+    lines.push('## Hunk Ledger', '');
     for (const item of snapshot.hunkLedger) {
         const location = inline(item.oldPath || '∅') + ' → ' + inline(item.newPath || '∅');
         lines.push('- File ' + item.fileIndex + ' / hunk ' + item.hunkOrdinal + ' · ' + location + ' · ' + item.disposition

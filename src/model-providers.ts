@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
+import { localTimeWindowInput } from './calendar-schedule.js';
 import { HttpError } from './http-error.js';
 import type { IdentityDirectory } from './identity.js';
 import { ProviderSecrets } from './provider-secrets.js';
 
 export const DEFAULT_PROVIDER = 'legacy-ollama';
+export const defaultModelPool = { maxConcurrent: 4, reservedAsk: 0 } as const;
 const MAX_PROVIDERS = 100;
 const protocol = z.enum(['OLLAMA', 'OPENAI', 'OPENAI_COMPATIBLE', 'ANTHROPIC']);
 export type GenerationProtocol = z.infer<typeof protocol>;
@@ -17,9 +19,12 @@ const price = z.number().min(0).max(1_000_000).nullish();
 const credential = z.object({ protocol, baseUrl: endpoint,
     apiKey: z.string().max(8192).regex(/^[\x20-\x7e]*$/).nullish().transform(value => value?.trim() ?? ''),
     clearApiKey: z.boolean().default(false), timeoutMillis: timeout });
+const poolInput = z.object({ maxConcurrent: z.int().min(1).max(defaultModelPool.maxConcurrent), reservedAsk: z.int().nonnegative(),
+    backgroundWindow: localTimeWindowInput.nullable().optional() }).strict()
+    .refine(pool => pool.reservedAsk < pool.maxConcurrent);
 export const providerInput = credential.extend({ name: providerText(100), model: providerText(200),
     enabled: z.boolean(), maxOutputTokens: z.number().int().min(1).max(65_536),
-    inputUsdPerMillionTokens: price, outputUsdPerMillionTokens: price
+    inputUsdPerMillionTokens: price, outputUsdPerMillionTokens: price, pool: poolInput.optional()
 }).refine(input => (input.inputUsdPerMillionTokens == null) === (input.outputUsdPerMillionTokens == null));
 export const discoveryInput = credential.extend({ providerId: z.string().max(70).nullish() });
 export const ollamaSettingsInput = z.object({ enabled: z.boolean(), baseUrl: endpoint, model: providerText(200) });
@@ -38,9 +43,11 @@ export interface ModelProvider {
     updatedAt: string;
     inputUsdPerMillionTokens: number | null;
     outputUsdPerMillionTokens: number | null;
+    pool?: z.infer<typeof poolInput>;
 }
 
 export interface ProviderConnection { protocol: GenerationProtocol; baseUrl: string; timeoutMillis: number; apiKey: string }
+export interface FrozenModelProvider { config: ModelProvider; encryptedKey: string }
 
 export function normalizeEndpoint(raw: string) {
     try {
@@ -121,6 +128,7 @@ export class ModelProviders {
             const previous = row ? profile(row) : undefined;
             let secret = String(row?.encrypted_key ?? '');
             const config = { ...fields, id: id ?? randomUUID(), baseUrl, updatedAt: new Date().toISOString(),
+                pool: fields.pool ?? previous?.pool,
                 inputUsdPerMillionTokens: fields.inputUsdPerMillionTokens ?? null,
                 outputUsdPerMillionTokens: fields.outputUsdPerMillionTokens ?? null };
             if (secret && !replacing && !clearApiKey && (previous?.baseUrl !== baseUrl || previous.protocol !== config.protocol)) {
@@ -160,6 +168,19 @@ export class ModelProviders {
         const row = this.row(id);
         const config = profile(row);
         const apiKey = row.encrypted_key ? this.secrets.decrypt(providerBinding(config), String(row.encrypted_key)) : '';
+        return { config, apiKey };
+    }
+
+    freeze(id?: string): FrozenModelProvider {
+        const row = id ? this.row(id) : this.db.prepare('SELECT * FROM model_provider WHERE selected = 1').get();
+        if (!row) throw new Error('Missing selected model provider');
+        const config = profile(row);
+        return { config, encryptedKey: config.enabled || id ? String(row.encrypted_key) : '' };
+    }
+
+    resolveFrozen(frozen: FrozenModelProvider) {
+        const { config, encryptedKey } = frozen;
+        const apiKey = encryptedKey ? this.secrets.decrypt(providerBinding(config), encryptedKey) : '';
         return { config, apiKey };
     }
 

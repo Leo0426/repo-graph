@@ -25,6 +25,8 @@ test('archive upload enters the managed index, exposes a profile, and removes on
     const marker = join(tmp, 'scanner-started');
     const codeql = join(tmp, 'codeql-fixture');
     const codeqlState = join(tmp, 'codeql-state');
+    const codeqlHeld = join(tmp, 'codeql-held');
+    const codeqlRelease = join(tmp, 'codeql-release');
     await writeFile(rules, 'partial');
     await writeFile(scanner, [
         '#!/usr/bin/env node',
@@ -87,8 +89,18 @@ test('archive upload enters the managed index, exposes a profile, and removes on
         'if (mode === "fail" || (mode === "java-partial" && file.endsWith(".java"))) process.exit(2);',
         'const result = name => ({ ruleId: "fixture/annotation", level: "note", message: { text: "Review this annotation" },',
         '    locations: [{ physicalLocation: { artifactLocation: { uri: name, uriBaseId: "%SRCROOT%" }, region: { startLine: 1 } } }] });',
-        'writeFileSync(option("--output"), JSON.stringify({ version: "2.1.0", runs: [{ tool: { driver: { name: "CodeQL" } },',
-        '    originalUriBaseIds: { "%SRCROOT%": { uri: pathToFileURL(source + "/").href } }, results: [result(file)] }] }));'
+        'const publish = () => writeFileSync(option("--output"), JSON.stringify({ version: "2.1.0",',
+        '    runs: [{ tool: { driver: { name: "CodeQL" } }, originalUriBaseIds: { "%SRCROOT%": { uri: pathToFileURL(source + "/").href } },',
+        '    results: [result(file)] }] }));',
+        'if (mode === "held") {',
+        '    const operator = dirname(process.argv[1]);',
+        '    writeFileSync(join(operator, "codeql-held"), String(process.pid));',
+        '    const checked = setInterval(() => {',
+        '        if (!existsSync(join(operator, "codeql-release"))) return;',
+        '        clearInterval(checked); clearTimeout(deadline); publish();',
+        '    }, 25);',
+        '    const deadline = setTimeout(() => { clearInterval(checked); process.exitCode = 2; }, 8000);',
+        '} else publish();'
     ].join('\n') + '\n', { mode: 0o700 });
     const realSlither = process.env.REPOGRAPH_TEST_SLITHER_BINARY;
     const realSolc = process.env.REPOGRAPH_TEST_SOLC_BINARY;
@@ -121,36 +133,43 @@ test('archive upload enters the managed index, exposes a profile, and removes on
         ].join('\n') + '\n', { mode: 0o700 });
     }
     const token = randomBytes(32).toString('hex');
-    const child = spawn(process.execPath, ['dist/server.js'], {
-        env: {
-            ...process.env, REPOGRAPH_ACCESS_TOKEN: token, REPOGRAPH_ADMIN_PASSWORD: undefined,
-            REPOGRAPH_PROJECTS_ROOT: projects, REPOGRAPH_ASSETS_ROOT: managed,
-            REPOGRAPH_SEMGREP_BINARY: scanner, REPOGRAPH_SEMGREP_RULES: rules,
-            REPOGRAPH_CODEQL_BINARY: codeql, REPOGRAPH_SLITHER_BINARY: slither, REPOGRAPH_SOLC_BINARY: solc,
-            REPOGRAPH_ASSET_MAX_UPLOAD_MIB: '1', REPOGRAPH_ASSET_MAX_DEPTH: '2',
-            REPOGRAPH_DB_PATH: join(tmp, 'index.db'), REPOGRAPH_EMBEDDING_MODEL: undefined, REPOGRAPH_PORT: '0'
-        },
-        stdio: ['ignore', 'ignore', 'pipe']
-    });
-    t.after(async () => {
+    let child, base;
+    async function start() {
+        child = spawn(process.execPath, ['dist/server.js'], {
+            env: {
+                ...process.env, REPOGRAPH_ACCESS_TOKEN: token, REPOGRAPH_ADMIN_PASSWORD: undefined, REPOGRAPH_PROJECT_RETENTION_SECONDS: '0',
+                REPOGRAPH_PROJECTS_ROOT: projects, REPOGRAPH_ASSETS_ROOT: managed,
+                REPOGRAPH_SEMGREP_BINARY: scanner, REPOGRAPH_SEMGREP_RULES: rules,
+                REPOGRAPH_CODEQL_BINARY: codeql, REPOGRAPH_SLITHER_BINARY: slither, REPOGRAPH_SOLC_BINARY: solc,
+                REPOGRAPH_ASSET_MAX_UPLOAD_MIB: '1', REPOGRAPH_ASSET_MAX_DEPTH: '2',
+                REPOGRAPH_DB_PATH: join(tmp, 'index.db'), REPOGRAPH_EMBEDDING_MODEL: undefined, REPOGRAPH_PORT: '0'
+            },
+            stdio: ['ignore', 'ignore', 'pipe']
+        });
+        base = await new Promise((resolve, reject) => {
+            let stderr = '';
+            child.once('error', reject);
+            child.once('exit', code => reject(new Error(`Server exited (${code}): ${stderr}`)));
+            child.stderr.on('data', chunk => {
+                stderr += chunk;
+                const address = stderr.match(/RepoGraph listening on (http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+                if (address) resolve(address);
+            });
+        });
+    }
+    async function stop(signal = 'SIGTERM') {
         if (child.exitCode === null && child.signalCode === null) {
             const exited = once(child, 'exit');
-            child.kill('SIGTERM');
+            child.kill(signal);
             await exited;
         }
+    }
+    t.after(async () => {
+        await writeFile(codeqlRelease, 'released');
+        await stop();
         await rm(tmp, { recursive: true, force: true });
     });
-
-    const base = await new Promise((resolve, reject) => {
-        let stderr = '';
-        child.once('error', reject);
-        child.once('exit', code => reject(new Error(`Server exited (${code}): ${stderr}`)));
-        child.stderr.on('data', chunk => {
-            stderr += chunk;
-            const address = stderr.match(/RepoGraph listening on (http:\/\/127\.0\.0\.1:\d+)/)?.[1];
-            if (address) resolve(address);
-        });
-    });
+    await start();
     async function api(path, init = {}, credential = token) {
         const response = await fetch(`${base}/api/v1${path}`, {
             ...init, headers: { ...(credential ? { Authorization: `Bearer ${credential}` } : {}), ...init.headers }
@@ -271,6 +290,57 @@ test('archive upload enters the managed index, exposes a profile, and removes on
     const combinedFindings = (await api(combinedPath + '/findings')).body.findings;
     assert.deepEqual(combinedFindings.map(finding => [finding.tool, finding.filePath]), [['semgrep', 'main.ts'], ['CodeQL', 'main.ts']]);
     assert.equal((await api('/triage/findings/' + combinedFindings[1].fingerprint + '?projectId=' + zip.projectId)).status, 200);
+
+    await writeFile(codeqlState, 'held');
+    const restartOptions = { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'restart-scanners' },
+        body: JSON.stringify({ scanners: ['SEMGREP', 'CODEQL'], timeoutSeconds: 10 }) };
+    const startedScan = await api(scanAsset + '/scan-tasks', restartOptions);
+    assert.equal(startedScan.status, 202, JSON.stringify(startedScan.body));
+    const restartPath = '/scan-tasks/' + startedScan.body.taskId;
+    for (let attempt = 0; attempt < 150 && !(await stat(codeqlHeld).catch(() => null)); attempt++) await delay(20);
+    const formerPid = Number(await readFile(codeqlHeld, 'utf8'));
+    assert.ok(Number.isSafeInteger(formerPid) && formerPid > 1);
+    const checkedBeforeRestart = (await api(restartPath)).body.scanners[0];
+    assert.equal(checkedBeforeRestart.scanner, 'SEMGREP');
+    await stop('SIGKILL');
+    await start();
+    assert.equal((await api(scanAsset + '/scan-tasks', restartOptions)).body.taskId, startedScan.body.taskId);
+    let observed;
+    for (let attempt = 0; attempt < 180; attempt++) {
+        observed = (await api(restartPath + '/execution')).body;
+        if (observed.awaitingReconciliation) break;
+        await delay(20);
+    }
+    assert.equal(observed.awaitingReconciliation, true, JSON.stringify(observed));
+    assert.equal(observed.execution.attempt, 1);
+    assert.doesNotThrow(() => process.kill(formerPid, 0));
+    await writeFile(codeqlState, 'success');
+    await writeFile(codeqlRelease, 'released');
+    const restartedScan = await finishScan(restartPath);
+    assert.equal(restartedScan.status, 'SUCCEEDED', JSON.stringify(restartedScan));
+    assert.deepEqual(restartedScan.scanners[0], checkedBeforeRestart);
+    assert.equal(restartedScan.scanners.filter(item => item.scanner === 'CODEQL').length, 1);
+    assert.deepEqual((await api(restartPath + '/execution')).body.attempts.map(attempt => attempt.outcome), ['LEASE_EXPIRED', 'FINISHED']);
+    assert.deepEqual(await readdir(join(managed, '.scan-executions')), []);
+    const release = await api('/summaries/generate?projectId=' + zip.projectId, { method: 'POST' });
+    assert.equal(release.status, 202);
+    let publication;
+    for (let attempt = 0; attempt < 120; attempt++) {
+        publication = (await api('/agent-runs/' + release.body.agentRunId)).body;
+        if (!['QUEUED', 'RUNNING'].includes(publication.status)) break;
+        await delay(20);
+    }
+    assert.equal(publication.status, 'COMPLETED');
+    const [frozen] = (await api('/knowledge-snapshots?projectId=' + zip.projectId)).body;
+    const review = await api('/change-reviews/compare', { method: 'POST', headers: {
+        'Content-Type': 'application/json', 'Idempotency-Key': 'scanned-release'
+    }, body: JSON.stringify({ projectId: zip.projectId, targetSnapshotId: frozen.id, baseSnapshotId: null }) });
+    assert.equal(review.status, 200, JSON.stringify(review.body));
+    assert.deepEqual(review.body.checkCoverage.map(({ tool, provenance, status }) => [tool, provenance, status]), [
+        ['codeql', 'VERIFIED_ARCHIVE_SOURCE', 'COMPLETED'], ['semgrep', 'VERIFIED_ARCHIVE_SOURCE', 'COMPLETED']
+    ]);
+    assert.equal(review.body.checkCoverage[0].codeVersion, zip.sourceObject.sha256);
+    assert.ok(review.body.structuredFindings.every(item => item.versionEvidence === 'VERIFIED_ARCHIVE_SOURCE'));
 
     await writeFile(rules, 'slow');
     const slow = await submitScan();
@@ -438,9 +508,16 @@ test('archive upload enters the managed index, exposes a profile, and removes on
     assert.equal((await api(`/assets/${zip.assetId}`)).status, 404);
     assert.equal((await api(`/assets/${zip.assetId}/authorization-evidence`)).status, 404);
     assert.equal((await api(`/symbol/archiveName?projectId=${zip.projectId}`)).status, 404);
+    assert.ok((await stat(zip.projectRoot)).isDirectory());
+    const lifecycle = `/projects/${zip.projectId}/lifecycle`;
+    const purge = await api(lifecycle, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'purge-zip' },
+        body: JSON.stringify({ action: 'purge', revision: 1 }) });
+    assert.equal(purge.status, 202);
+    for (let attempt = 0; attempt < 120 && (await api(lifecycle)).body.state !== 'PURGED'; attempt++) await delay(25);
+    assert.equal((await api(lifecycle)).body.state, 'PURGED');
     await assert.rejects(stat(zip.projectRoot), { code: 'ENOENT' });
     assert.equal((await stat(join(projects, 'untouched.ts'))).isFile(), true);
-    assert.deepEqual(await readdir(managed), [archive.assetId]);
+    assert.deepEqual((await readdir(managed)).filter(name => !name.startsWith('.')), [archive.assetId]);
 
     const rejected = await upload('plain file content', 'invalid.zip');
     assert.equal(rejected.status, 415);
@@ -456,5 +533,5 @@ test('archive upload enters the managed index, exposes a profile, and removes on
     const overDepth = await upload(await readFile(file), 'deep.tar.gz');
     assert.equal(overDepth.status, 413);
     assert.equal(overDepth.body.error, 'ARCHIVE_DEPTH_LIMIT');
-    assert.deepEqual(await readdir(managed), [archive.assetId]);
+    assert.deepEqual((await readdir(managed)).filter(name => !name.startsWith('.')), [archive.assetId]);
 });

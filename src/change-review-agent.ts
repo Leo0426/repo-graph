@@ -1,16 +1,26 @@
 import { setImmediate as nextTurn } from 'node:timers/promises';
+import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { agentStep, finishAgentStep as finish } from './agent-runs.js';
-import type { AgentRun, AgentRuns, AgentStep } from './agent-runs.js';
+import type { AgentRun, AgentStep } from './agent-runs.js';
 import { changeReviewInput, snapshotIdPattern } from './change-review.js';
 import type { ChangeSnapshot } from './change-review.js';
 import { GenerationError } from './generation.js';
 import type { GenerationGateway } from './generation.js';
+import { DurableJobs } from './durable-jobs.js';
+import type { JobAction } from './durable-jobs.js';
 import { HttpError } from './http-error.js';
+import type { Account } from './identity.js';
+import type { RepositoryIndex } from './index.js';
+import { DispatcherHealth } from './operability.js';
 import { redactReviewText } from './review-redaction.js';
+import { digest } from './source.js';
 
-const PLAYBOOK = 'CHANGE_REVIEW';
+export const changeReviewPlaybook = 'CHANGE_REVIEW';
+const PLAYBOOK = changeReviewPlaybook;
 const MAX_JOBS = 4;
+const MAX_QUEUE = 100;
+const LEASE_MS = 2500;
 const MAX_UNITS = 25;
 const MAX_ROUNDS = 3;
 const MAX_READS = 4;
@@ -37,6 +47,11 @@ const system = 'Provide defensive human-review advice about this unit of a repos
 const overhead = Buffer.byteLength(system) + Buffer.byteLength(JSON.stringify(schema)) + 128;
 type Session = ReturnType<GenerationGateway['session']>;
 type ReviewUnit = ChangeSnapshot['units'][number];
+type JobInput = { version: 1; reviewId: string; credentialVersion: number; model: ReturnType<GenerationGateway['freeze']> };
+type Queue = DurableJobs<JobInput>;
+type Lease = NonNullable<ReturnType<Queue['claim']>>;
+type State = NonNullable<ReturnType<Queue['get']>>;
+type Progress = { position: number; steps: number; input: number; output: number; calls: number };
 
 function publicText(value: string, max: number) {
     return redactReviewText(value).replace(/[\x00-\x1f\x7f-\x9f]/g, ' ').slice(0, max).trim();
@@ -53,112 +68,302 @@ function decode(value: string) {
 
 export class ChangeReviewAgent {
     private readonly jobs = new Map<string, { projectId: string; cancel: AbortController; job: Promise<void> }>();
+    private readonly queue: Queue;
+    private readonly dispatcher = new DispatcherHealth();
+    private timer?: ReturnType<typeof setInterval>;
+    private closing = false;
 
-    constructor(private readonly runs: AgentRuns, private readonly gateway: GenerationGateway) {}
-
-    submit(projectId: string, snapshot: () => ChangeSnapshot) {
-        if (this.runs.active(projectId, PLAYBOOK)) throw new HttpError(409, 'CHANGE_REVIEW_ALREADY_RUNNING');
-        if (this.jobs.size >= MAX_JOBS) throw new HttpError(503, 'CHANGE_REVIEW_QUEUE_FULL');
-        const frozen = snapshot();
-        const session = this.gateway.session();
-        const reference = 'change-review:' + frozen.id;
-        const run = this.runs.create(projectId, PLAYBOOK, reference, reference);
-        const cancel = new AbortController();
-        const job = nextTurn().then(() => this.execute(run, frozen, session, cancel.signal)).catch(() => {
-            console.error('Failed to persist change review run state');
-        });
-        this.jobs.set(run.id, { projectId, cancel, job });
-        void job.then(() => this.jobs.delete(run.id));
-        return run;
+    constructor(private readonly db: DatabaseSync, private readonly repo: RepositoryIndex) {
+        this.queue = new DurableJobs<JobInput>(db);
+        db.exec(`CREATE TABLE IF NOT EXISTS change_review_progress (
+            run_id TEXT PRIMARY KEY REFERENCES durable_job(id) ON DELETE CASCADE,
+            position INTEGER NOT NULL, steps INTEGER NOT NULL, input INTEGER NOT NULL, output INTEGER NOT NULL, calls INTEGER NOT NULL
+        )`);
     }
 
-    cancel(run: AgentRun, reason = 'CANCELLED') {
-        if (run.playbook !== PLAYBOOK) throw new HttpError(400, 'INVALID_CHANGE_REVIEW_RUN');
-        if (run.status === 'QUEUED' || run.status === 'RUNNING') {
-            this.runs.fail(run, reason, 'CANCELLED');
-            this.jobs.get(run.id)?.cancel.abort();
+    private get runs() { return this.repo.agentRuns; }
+
+    private transaction<T>(operation: () => T) {
+        this.db.exec('BEGIN IMMEDIATE');
+        try {
+            const result = operation();
+            this.db.exec('COMMIT');
+            return result;
+        } catch (error) {
+            this.db.exec('ROLLBACK');
+            throw error;
         }
+    }
+
+    submit(actor: Account, input: z.infer<typeof startChangeReviewInput>, key?: string) {
+        const { projectId } = input;
+        const fingerprint = digest(JSON.stringify(input));
+        const run = this.transaction(() => {
+            this.repo.identity.requireProjectEditor(actor, projectId);
+            if (key) {
+                const previous = this.queue.findRequest(PLAYBOOK, projectId, actor.id, key, fingerprint);
+                if (previous) {
+                    const saved = this.runs.get(previous)!;
+                    const reviewId = saved.outputReference?.slice('change-review:'.length);
+                    if (!reviewId || !this.repo.changeReviews.get(reviewId, projectId)) throw new HttpError(404, 'CHANGE_REVIEW_NOT_FOUND');
+                    return saved;
+                }
+            }
+            if (this.queue.hasActive(PLAYBOOK, projectId) || this.runs.active(projectId, PLAYBOOK)) {
+                throw new HttpError(409, 'CHANGE_REVIEW_ALREADY_RUNNING');
+            }
+            if (this.queue.pending(PLAYBOOK) >= MAX_QUEUE) throw new HttpError(503, 'CHANGE_REVIEW_QUEUE_FULL');
+            const frozen = 'snapshotId' in input ? this.repo.changeReviews.get(input.snapshotId, projectId) : this.repo.changeReviews.submit(input);
+            if (!frozen) throw new HttpError(404, 'CHANGE_REVIEW_NOT_FOUND');
+            const reference = 'change-review:' + frozen.id;
+            const created = this.runs.create(projectId, PLAYBOOK, frozen.provenance ? 'verified-' + reference : reference, reference);
+            created.playbookVersion = '2';
+            this.runs.save(created);
+            this.queue.enqueue({ id: created.id, projectId, actorId: actor.id, kind: PLAYBOOK, key, fingerprint,
+                input: { version: 1, reviewId: frozen.id, model: this.repo.generation.freeze(), credentialVersion: actor.credentialVersion },
+                availableAt: Date.now(), budgetMs: MAX_JOB_MS });
+            this.db.prepare('INSERT INTO change_review_progress VALUES (?,0,0,?,?,?)').run(created.id, MAX_INPUT_BYTES, MAX_OUTPUT_BYTES,
+                Math.max(1, Math.min(frozen.units.length, MAX_UNITS)) * MAX_ROUNDS);
+            return created;
+        });
+        this.dispatch();
         return run;
     }
 
-    cancelProject(projectId: string) {
-        for (const item of this.jobs.values()) if (item.projectId === projectId) item.cancel.abort();
+    start() {
+        if (!this.timer) this.timer = setInterval(() => this.dispatch(), 250).unref();
+        this.dispatch();
+    }
+
+    execution(id: string) { return this.queue.get(id); }
+    attempts(id: string) { return this.queue.history(id); }
+    workerHealth() { return this.dispatcher.status(!!this.timer && !this.closing); }
+
+    control(run: AgentRun, actor: Account, action: JobAction, revision?: number, priority?: number) {
+        const changed = this.transaction(() => {
+            const job = this.queue.get(run.id);
+            if (!job || run.playbook !== PLAYBOOK) throw new HttpError(404, 'JOB_NOT_FOUND');
+            this.repo.identity.requireProjectEditor(actor, job.projectId);
+            if (job.actorId !== actor.id || action === 'prioritize' || priority !== undefined) this.repo.identity.requireProjectManager(actor, job.projectId);
+            const state = this.queue.change(run.id, revision ?? job.revision, action, priority);
+            this.sync(state);
+            return state;
+        });
+        if (changed.stopRequested) this.jobs.get(run.id)?.cancel.abort();
+        if (action === 'resume') this.dispatch();
+        return changed;
+    }
+
+    async cancel(run: AgentRun, actor: Account) {
+        if (run.playbook !== PLAYBOOK) throw new HttpError(400, 'INVALID_CHANGE_REVIEW_RUN');
+        if (['QUEUED', 'RUNNING', 'PAUSED'].includes(run.status)) {
+            this.control(run, actor, 'cancel');
+            await this.jobs.get(run.id)?.job;
+        }
+        return this.runs.get(run.id) ?? run;
+    }
+
+    private sync(state: State, reason?: string) {
+        const run = this.runs.get(state.id);
+        if (!run || state.state === 'RUNNING' || state.state === 'FINISHED') return;
+        if (state.state === 'FAILED' || state.state === 'CANCELLED') {
+            this.queue.clearInput(state.id);
+            const partial = run.steps.length > 0 && (reason === 'CHANGE_REVIEW_SCOPE_CHANGED' || reason === 'CHANGE_REVIEW_FAILED');
+            this.runs.fail(run, state.state === 'CANCELLED' ? 'CANCELLED' : reason ?? 'CHANGE_REVIEW_DEADLINE',
+                state.state === 'FAILED' && partial ? 'PARTIAL' : state.state);
+        } else {
+            run.status = state.state;
+            run.statusReason = reason ?? null;
+            this.runs.save(run);
+        }
+    }
+
+    private dispatch() {
+        if (this.closing) return;
+        try {
+            this.transaction(() => {
+                for (const state of this.queue.reconcile(PLAYBOOK)) this.sync(state);
+            });
+            const excluded = [...this.jobs.keys()];
+            const waiting = this.db.prepare(`SELECT id FROM durable_job WHERE kind = ? AND state IN ('QUEUED','RUNNING') AND (
+                (json_extract(input, '$.model.config.enabled') = 1
+                    AND json_extract(input, '$.model.config.id') IN (SELECT value FROM json_each(?)))
+                OR EXISTS (SELECT 1 FROM model_invocation m WHERE m.run_id = durable_job.id AND m.status = 'SENDING' AND m.deadline_at > ?)
+            )`).all(PLAYBOOK, JSON.stringify(this.repo.generation.closedBackgroundPools()), Date.now());
+            excluded.push(...waiting.map(row => String(row.id)));
+            while (this.jobs.size < MAX_JOBS) {
+                const lease = this.queue.claim(PLAYBOOK, MAX_JOBS, LEASE_MS, excluded);
+                if (!lease) break;
+                this.launch(lease);
+                excluded.push(lease.id);
+            }
+            this.dispatcher.observe(true);
+        } catch { if (this.dispatcher.observe(false)) console.error('Failed to dispatch change review jobs'); }
+    }
+
+    private launch(lease: Lease) {
+        const cancel = new AbortController();
+        const heartbeat = setInterval(() => {
+            try {
+                const owner = this.queue.renew(lease, LEASE_MS);
+                if (!owner || owner.stopRequested) cancel.abort();
+                else this.authorize(lease);
+            } catch (error) { cancel.abort(error); }
+        }, LEASE_MS / 4).unref();
+        const job = nextTurn().then(() => this.execute(lease, cancel.signal)).catch(() => {
+            console.error('Failed to persist change review run state');
+        }).finally(() => {
+            clearInterval(heartbeat);
+            this.jobs.delete(lease.id);
+            this.dispatch();
+        });
+        this.jobs.set(lease.id, { projectId: lease.projectId, cancel, job });
+    }
+
+    private authorize(lease: Lease) {
+        this.repo.identity.requireProjectEditor({ id: lease.actorId, credentialVersion: lease.input.credentialVersion }, lease.projectId);
+        const snapshot = this.repo.changeReviews.get(lease.input.reviewId, lease.projectId);
+        if (!snapshot) throw new HttpError(404, 'CHANGE_REVIEW_NOT_FOUND');
+        return snapshot;
+    }
+
+    activeProject(projectId: string) {
+        return Array.from(this.jobs.values()).some(item => item.projectId === projectId);
     }
 
     async close() {
-        const active = [...this.jobs.entries()];
-        for (const [id, handle] of active) {
-            const run = this.runs.get(id);
-            if (run) this.cancel(run, 'INTERRUPTED');
-            handle.cancel.abort();
-        }
-        await Promise.all(active.map(([, handle]) => handle.job));
+        this.closing = true;
+        clearInterval(this.timer);
+        const active = [...this.jobs.values()];
+        for (const handle of active) handle.cancel.abort();
+        await Promise.all(active.map(handle => handle.job));
     }
 
-    private async execute(run: AgentRun, snapshot: ChangeSnapshot, session: Session, cancelled: AbortSignal) {
-        if (cancelled.aborted || this.runs.get(run.id)?.status !== 'QUEUED') return;
-        run.status = 'RUNNING';
-        const capture = agentStep(run, 'BUILD_CHANGE_REVIEW');
-        capture.evidenceReferences = ['change-review:' + snapshot.id];
-        capture.missingInfo = snapshot.omittedReasons;
-        finish(capture, snapshot.status === 'FAILED' ? 'FAILED' : 'COMPLETED', 'Frozen review snapshot retained.');
-        this.runs.save(run);
-        const deadline = AbortSignal.timeout(MAX_JOB_MS);
-        const signal = AbortSignal.any([cancelled, deadline]);
-        const budget = { input: MAX_INPUT_BYTES, output: MAX_OUTPUT_BYTES };
-        const perRoundPrice = 0.05 / (Math.max(1, Math.min(snapshot.units.length, MAX_UNITS)) * MAX_ROUNDS);
-        let complete = snapshot.status === 'COMPLETED' && snapshot.units.length > 0;
+    private async execute(lease: Lease, cancelled: AbortSignal) {
+        const run = this.runs.get(lease.id);
+        if (!run) return;
+        const authorize = () => {
+            cancelled.throwIfAborted();
+            this.queue.assertRunnable(lease);
+            return this.authorize(lease);
+        };
+        const checkpoint = <T>(write: () => T) => this.transaction(() => {
+            authorize();
+            return write();
+        });
         try {
-            for (const [position, unit] of snapshot.units.entries()) {
-                if (cancelled.aborted) return;
+            const snapshot = authorize();
+            if (lease.input.version !== 1) throw new HttpError(409, 'CHANGE_REVIEW_JOB_VERSION_CHANGED');
+            const progress = this.db.prepare('SELECT position, steps, input, output, calls FROM change_review_progress WHERE run_id = ?')
+                .get(run.id) as Progress;
+            const session = this.repo.generation.resume(lease.input.model);
+            const deadline = AbortSignal.timeout(Math.max(0, lease.deadline - Date.now()));
+            const signal = AbortSignal.any([cancelled, deadline]);
+            const persist = () => {
+                this.db.prepare('UPDATE change_review_progress SET position = ?, steps = ?, input = ?, output = ?, calls = ? WHERE run_id = ?')
+                    .run(progress.position, progress.steps, progress.input, progress.output, progress.calls, run.id);
+                this.runs.save(run);
+            };
+            const save = () => checkpoint(persist);
+            checkpoint(() => {
+                this.queue.begin(lease);
+                run.status = 'RUNNING';
+                run.statusReason = null;
+                run.steps = run.steps.slice(0, progress.steps);
+                if (!run.steps.length) {
+                    const capture = agentStep(run, 'BUILD_CHANGE_REVIEW');
+                    capture.evidenceReferences = ['change-review:' + snapshot.id];
+                    capture.missingInfo = snapshot.omittedReasons;
+                    finish(capture, snapshot.status === 'FAILED' ? 'FAILED' : 'COMPLETED', 'Frozen review snapshot retained.');
+                    progress.steps = run.steps.length;
+                }
+                persist();
+            });
+            const perRoundPrice = 0.05 / (Math.max(1, Math.min(snapshot.units.length, MAX_UNITS)) * MAX_ROUNDS);
+            for (let position = progress.position; position < snapshot.units.length; position++) {
+                authorize();
+                const unit = snapshot.units[position];
                 const step = agentStep(run, 'REVIEW_UNIT');
                 step.evidenceReferences.push('change-unit:' + snapshot.id + ':' + unit.unit.id);
                 const skip = !session.configuration.enabled ? 'CHANGE_REVIEW_MODEL_UNAVAILABLE' : position >= MAX_UNITS ? 'CHANGE_REVIEW_UNIT_LIMIT'
                     : deadline.aborted ? 'CHANGE_REVIEW_DEADLINE' : !unit.contextPack.evidence.length ? 'NO_CONTEXT_EVIDENCE' : null;
                 if (skip) finish(step, 'SKIPPED', 'Model review omitted for this unit.', skip);
                 else {
-                    this.runs.save(run);
-                    try { await this.reviewUnit(run, step, snapshot, unit, session, signal, budget, perRoundPrice); }
+                    save();
+                    try { await this.reviewUnit(run, step, snapshot, unit, session, signal, progress, perRoundPrice, authorize, save, lease.actorId); }
                     catch (error) {
-                        if (!(error instanceof GenerationError)) throw error;
+                        if (!(error instanceof GenerationError) || error.message === 'PROVIDER_POOL_WINDOW_CLOSED') throw error;
                         finish(step, 'PARTIAL', 'Model review incomplete.', deadline.aborted ? 'CHANGE_REVIEW_DEADLINE' : error.message);
                     }
-                    if (cancelled.aborted) return;
                 }
-                this.runs.save(run);
-                complete = complete && step.status === 'COMPLETED';
+                progress.position = position + 1;
+                progress.steps = run.steps.length;
+                save();
             }
-            run.status = complete ? 'WAITING_FOR_REVIEW' : 'PARTIAL';
-            run.statusReason = complete ? null : 'CHANGE_REVIEW_PARTIAL';
-            run.completedAt = new Date().toISOString();
-            this.runs.save(run);
-        } catch {
-            if (cancelled.aborted) return;
-            const saved = this.runs.get(run.id);
-            if (saved?.status === 'RUNNING') this.runs.fail(saved, 'CHANGE_REVIEW_FAILED', 'PARTIAL');
+            checkpoint(() => {
+                const complete = snapshot.status === 'COMPLETED' && snapshot.units.length > 0
+                    && run.steps.every(step => step.capability !== 'REVIEW_UNIT' || step.status === 'COMPLETED');
+                run.status = complete ? 'WAITING_FOR_REVIEW' : 'PARTIAL';
+                run.statusReason = complete ? null : 'CHANGE_REVIEW_PARTIAL';
+                run.completedAt = new Date().toISOString();
+                this.runs.save(run);
+                this.queue.finish(lease, 'FINISHED', digest(JSON.stringify(run)));
+                this.queue.clearInput(run.id);
+            });
+        } catch (error) {
+            try {
+                this.transaction(() => {
+                    const windowClosed = error instanceof GenerationError && error.message === 'PROVIDER_POOL_WINDOW_CLOSED';
+                    const paused = this.queue.finish(lease, this.closing || windowClosed ? 'QUEUED' : 'FAILED');
+                    this.sync(paused, windowClosed ? 'PROVIDER_POOL_WINDOW_CLOSED' : error instanceof HttpError
+                        ? error.message === 'JOB_DEADLINE_EXPIRED' ? 'CHANGE_REVIEW_DEADLINE' : 'CHANGE_REVIEW_SCOPE_CHANGED' : 'CHANGE_REVIEW_FAILED');
+                });
+            } catch (stale) {
+                if (!(stale instanceof HttpError) || stale.message !== 'JOB_LEASE_LOST') throw stale;
+            }
         }
     }
 
     private async reviewUnit(run: AgentRun, step: AgentStep, snapshot: ChangeSnapshot, unit: ReviewUnit, session: Session,
-        signal: AbortSignal, budget: { input: number; output: number }, price: number) {
+        signal: AbortSignal, budget: Progress, price: number, authorize: () => void, save: () => void, actorId: string) {
         const catalog = new Map(unit.contextPack.evidence.filter(item => item.projectId === snapshot.projectId).map(item => [item.citationId, item]));
         const read = new Set<string>();
         const receipts: NonNullable<AgentStep['verification']>[] = [];
         const reference = (id: string) => 'citation:' + snapshot.id + ':' + unit.unit.id + ':' + id;
         const diff = unit.unit.hunks.flatMap(hunk => [hunk.header, ...hunk.lines]).join('\n').slice(0, 1250);
         for (let round = 1; round <= MAX_ROUNDS; round++) {
+            authorize();
             const prompt = JSON.stringify({ snapshotId: snapshot.id, unitId: unit.unit.id, round,
                 file: publicText(unit.unit.filePath, 250), diff: redactReviewText(diff, false, true),
                 catalog: [...catalog.values()].map(item => ({ id: item.citationId, symbol: publicText(item.qualifiedName, 80), line: item.startLine })),
                 readContext: [...read].map(id => ({ id, excerpt: redactReviewText(catalog.get(id)!.excerpt).slice(0, 800) })),
                 verification: receipts.map(({ check, status, citationIds }) => ({ check, status, citationIds })) });
             const bytes = Buffer.byteLength(prompt) + overhead;
-            if (bytes > Math.min(MAX_ROUND_BYTES, budget.input) || budget.output <= 0) throw new GenerationError('CHANGE_REVIEW_BUDGET');
+            if (bytes > Math.min(MAX_ROUND_BYTES, budget.input) || budget.output <= 0 || budget.calls <= 0) throw new GenerationError('CHANGE_REVIEW_BUDGET');
             budget.input -= bytes;
-            const completion = await session.complete({ system, user: prompt, schema, maxOutputTokens: 1024,
-                maxEstimatedCostUsd: price, signal });
+            budget.calls--;
+            save();
+            const completion = await session.complete({ system, user: prompt, schema, maxOutputTokens: 1024, maxEstimatedCostUsd: price,
+                beforeRetry: () => {
+                    if (budget.input < bytes || budget.calls <= 0) return false;
+                    budget.input -= bytes;
+                    budget.calls--;
+                    save();
+                    return true;
+                },
+                signal, attribution: { capability: 'CHANGE_REVIEW', actorId, projectId: run.projectId, runId: run.id, phase: 'REVIEW_UNIT' } })
+                .catch(error => {
+                    if (error instanceof GenerationError && error.message === 'PROVIDER_POOL_WINDOW_CLOSED') {
+                        budget.input += bytes;
+                        budget.calls++;
+                        save();
+                    }
+                    throw error;
+                });
             if (signal.aborted) throw new GenerationError('CHANGE_REVIEW_CANCELLED');
+            authorize();
             budget.output -= Buffer.byteLength(completion.text);
+            save();
             if (budget.output < 0) throw new GenerationError('CHANGE_REVIEW_BUDGET');
             const response = decode(completion.text);
             if (response.action === 'READ_CONTEXT') {
@@ -170,7 +375,7 @@ export class ChangeReviewAgent {
                 const readStep = agentStep(run, 'READ_REVIEW_CONTEXT');
                 readStep.evidenceReferences = ids.map(reference);
                 finish(readStep, 'COMPLETED', 'Read registered citations for this unit.');
-                this.runs.save(run);
+                save();
                 continue;
             }
             if (response.action === 'VERIFY') {
@@ -183,7 +388,7 @@ export class ChangeReviewAgent {
                 verification.verification = receipt;
                 verification.evidenceReferences = receipt.citationIds.map(reference);
                 finish(verification, 'SKIPPED', 'Isolated verification is unavailable.', 'CHANGE_VERIFICATION_UNAVAILABLE');
-                this.runs.save(run);
+                save();
                 step.missingInfo.push('CHANGE_VERIFICATION_UNAVAILABLE');
                 continue;
             }

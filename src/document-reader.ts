@@ -368,7 +368,7 @@ export class DocumentReader {
         });
     }
 
-    private openSection(index: number) {
+    openSection(index: number) {
         const heading = this.headings[index], paper = this.paper;
         if (!heading || !paper) return;
         this.switchMode('document');

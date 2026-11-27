@@ -1,4 +1,5 @@
 import { once } from 'node:events';
+import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { lstat, mkdir, open } from 'node:fs/promises';
 import type { IncomingMessage } from 'node:http';
@@ -59,6 +60,8 @@ export async function receiveArchive(request: IncomingMessage, destination: stri
 
     const fields: Record<string, string> = {};
     let name = '';
+    let sizeBytes = 0;
+    const hash = createHash('sha256');
     let writing: Promise<void> | undefined;
     let fault: HttpError | undefined;
     const reject = (code = 'INVALID_ARCHIVE_UPLOAD') => { fault ??= new HttpError(400, code); };
@@ -78,7 +81,12 @@ export async function receiveArchive(request: IncomingMessage, destination: stri
         }
         name = (info.filename ?? '').replace(/[\x00-\x1f\x7f]/g, '').slice(0, 255);
         file.once('limit', () => { fault = limitError('ARCHIVE_UPLOAD_LIMIT'); });
-        writing = pipeline(file, createWriteStream(destination, { flags: 'wx', mode: 0o600 }), { signal });
+        const fingerprint = new Transform({ transform(chunk: Buffer, _, done) {
+            sizeBytes += chunk.byteLength;
+            hash.update(chunk);
+            done(null, chunk);
+        } });
+        writing = pipeline(file, fingerprint, createWriteStream(destination, { flags: 'wx', mode: 0o600 }), { signal });
         void writing.catch(error => parser.destroy(error));
     });
     async function* body() {
@@ -98,21 +106,21 @@ export async function receiveArchive(request: IncomingMessage, destination: stri
         throw fault ?? new HttpError(400, 'INVALID_ARCHIVE_UPLOAD');
     }
     if (fault) throw fault;
-    if (!writing || !(await lstat(destination)).size) throw new HttpError(400, 'ARCHIVE_FILE_REQUIRED');
-    return { name: name || 'archive', fields };
+    if (!writing || !sizeBytes || sizeBytes !== (await lstat(destination)).size) throw new HttpError(400, 'ARCHIVE_FILE_REQUIRED');
+    return { name: name || 'archive', fields, sha256: hash.digest('hex'), sizeBytes };
 }
 
-export interface ArchiveFile { path: string; sizeBytes: number }
-type ArchiveType = 'ZIP' | 'TAR_GZ';
+export interface ArchiveFile { path: string; sizeBytes: number; sha256?: string }
+export type ArchiveType = 'ZIP' | 'TAR_GZ';
 
-class ArchiveWriter {
+export class ArchiveWriter {
     private readonly paths = new Map<string, { name: string; directory: boolean; explicit: boolean }>();
     private readonly files: ArchiveFile[] = [];
     private entries = 0;
     private size = 0;
     private rootSeen = false;
 
-    constructor(private readonly root: string, private readonly limits: ArchiveLimits) {}
+    constructor(private readonly root: string, private readonly limits: ArchiveLimits, private readonly preservePathBytes = false) {}
 
     async put(name: string, directory: boolean, size: number, stream?: Readable, checksum?: number, signal?: AbortSignal) {
         if (++this.entries > this.limits.entries) throw limitError('ARCHIVE_ENTRY_LIMIT');
@@ -123,7 +131,8 @@ class ArchiveWriter {
             this.rootSeen = true;
             return;
         }
-        const path = name.replace(/^(?:\.\/)+/, '').replace(/\/$/, '').normalize('NFC');
+        const relative = name.replace(/^(?:\.\/)+/, '').replace(/\/$/, '');
+        const path = this.preservePathBytes ? relative : relative.normalize('NFC');
         const parts = path.split('/');
         if (!name || name.startsWith('/') || (!directory && name.endsWith('/')) || path.length > 4096
             || parts.some(part => !part || part === '.' || part === '..' || /[\\:\x00-\x1f\x7f]/u.test(part))) {
@@ -153,6 +162,7 @@ class ArchiveWriter {
         await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
         let written = 0;
         let crc = 0;
+        const fingerprint = createHash('sha256');
         const monitor = new Transform({
             transform: (chunk: Buffer, _, done) => {
                 written += chunk.length;
@@ -161,13 +171,14 @@ class ArchiveWriter {
                     return;
                 }
                 if (checksum !== undefined) crc = crc32(chunk, crc);
+                fingerprint.update(chunk);
                 done(null, chunk);
             }
         });
         await pipeline(stream, monitor, createWriteStream(destination, { flags: 'wx', mode: 0o600 }), { signal });
         if (written !== size || (checksum !== undefined && crc !== checksum)) throw new HttpError(400, 'INVALID_ARCHIVE_CHECKSUM');
         this.size += written;
-        this.files.push({ path, sizeBytes: written });
+        this.files.push({ path, sizeBytes: written, sha256: fingerprint.digest('hex') });
     }
 
     manifest() {

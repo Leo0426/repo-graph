@@ -1,9 +1,11 @@
+import { setTimeout as backoff } from 'node:timers/promises';
 import { z } from 'zod';
-import { providerText } from './model-providers.js';
-import type { ModelProvider, ModelProviders, ProviderConnection } from './model-providers.js';
+import { defaultModelPool, providerText } from './model-providers.js';
+import type { FrozenModelProvider, ModelProvider, ModelProviders, ProviderConnection } from './model-providers.js';
+import type { ModelUsage, ModelUsageSample, ModelUse } from './model-usage.js';
 
 const MAX_BYTES = 2 * 1024 * 1024;
-const MAX_CONCURRENT = 4;
+const MAX_CONCURRENT = defaultModelPool.maxConcurrent;
 const object = z.record(z.string(), z.unknown());
 const modelId = providerText(200);
 const tokens = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
@@ -16,6 +18,10 @@ const anthropicOutput = z.object({ content: z.array(z.object({ type: z.string(),
 
 export class GenerationError extends Error {}
 
+class TransientProviderError extends GenerationError {
+    constructor(status: number, readonly delayMs: number) { super('PROVIDER_HTTP_' + status); }
+}
+
 interface GenerationRequest {
     system: string;
     user: string;
@@ -23,6 +29,8 @@ interface GenerationRequest {
     maxOutputTokens?: number;
     maxEstimatedCostUsd?: number;
     signal?: AbortSignal;
+    attribution?: ModelUse;
+    beforeRetry?: () => boolean;
 }
 
 interface RawCompletion { text: string; inputTokens: number | null; outputTokens: number | null }
@@ -42,7 +50,12 @@ async function exchange(connection: ProviderConnection, path: string, signal: Ab
     const response = await fetch(connection.baseUrl + path, { method: body === undefined ? 'GET' : 'POST',
         headers: requestHeaders, body, redirect: 'manual', signal });
     if (!response.ok || !response.body) {
-        void response.body?.cancel().catch(() => undefined);
+        await response.body?.cancel().catch(() => undefined);
+        if (response.status === 429 || response.status === 503) {
+            const retryAfter = response.headers.get('Retry-After')?.trim();
+            const suppliedDelay = retryAfter ? /^\d+$/.test(retryAfter) ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - Date.now() : 0;
+            throw new TransientProviderError(response.status, Number.isNaN(suppliedDelay) ? 200 : Math.max(200, suppliedDelay));
+        }
         throw new GenerationError(response.status >= 300 && response.status < 400
             ? 'PROVIDER_REDIRECT_BLOCKED' : 'PROVIDER_HTTP_' + response.status);
     }
@@ -108,19 +121,50 @@ function cost(config: ModelProvider, inputTokens: number | null, outputTokens: n
     return (inputTokens * config.inputUsdPerMillionTokens + outputTokens * config.outputUsdPerMillionTokens) / 1_000_000;
 }
 
+function countedUsage(config: ModelProvider, data: Record<string, unknown>): ModelUsageSample {
+    const usage = config.protocol === 'OLLAMA' ? data : object.safeParse(data.usage).data;
+    const fields = config.protocol === 'OLLAMA' ? ['prompt_eval_count', 'eval_count']
+        : config.protocol === 'ANTHROPIC' ? ['input_tokens', 'output_tokens'] : ['prompt_tokens', 'completion_tokens'];
+    const [inputTokens, outputTokens] = fields.map(field => tokens.safeParse(usage?.[field]).data ?? null);
+    return { inputTokens, outputTokens, costUsd: cost(config, inputTokens, outputTokens) };
+}
+
 export class GenerationGateway {
     private running = 0;
+    private readonly observations = new Map<string, { revision: string; time: number; failure: string | null }>();
 
-    constructor(private readonly providers: ModelProviders) {}
+    constructor(private readonly providers: ModelProviders, private readonly usage: ModelUsage) {}
 
     session() {
+        return this.resume(this.providers.freeze());
+    }
+
+    freeze() { return this.providers.freeze(); }
+    closedBackgroundPools() { return this.usage.closedBackgroundPools(); }
+
+    availability() {
         const config = this.providers.current();
-        const resolved = config.enabled ? this.providers.resolve(config.id) : null;
+        const sample = this.observations.get(config.id);
+        const current = sample?.revision === config.updatedAt && Date.now() - sample.time < 300_000 ? sample : undefined;
+        const status = !config.enabled ? 'disabled' : !current ? 'unverified' : current.failure ? 'unavailable' : 'available';
+        return { status, running: this.running, capacity: MAX_CONCURRENT,
+            checkedAt: config.enabled && current ? new Date(current.time).toISOString() : null,
+            reason: config.enabled ? current?.failure ?? null : null };
+    }
+
+    private observe(config: ModelProvider, failure: string | null) {
+        this.observations.delete(config.id);
+        this.observations.set(config.id, { revision: config.updatedAt, time: Date.now(), failure });
+        if (this.observations.size > 100) this.observations.delete(this.observations.keys().next().value!);
+    }
+
+    resume(frozen: FrozenModelProvider) {
+        const { config, apiKey } = this.providers.resolveFrozen(frozen);
         return {
-            configuration: Object.freeze(resolved?.config ?? config),
+            configuration: Object.freeze(config),
             complete: (request: GenerationRequest) => {
-                if (!resolved) throw new GenerationError('GENERATION_DISABLED');
-                return this.complete(resolved.config, resolved.apiKey, request);
+                if (!config.enabled) throw new GenerationError('GENERATION_DISABLED');
+                return this.complete(config, apiKey, frozen.encryptedKey, request);
             }
         };
     }
@@ -139,7 +183,7 @@ export class GenerationGateway {
         } finally { this.running--; }
     }
 
-    private async complete(config: ModelProvider, apiKey: string, request: GenerationRequest) {
+    private async complete(config: ModelProvider, apiKey: string, encryptedKey: string, request: GenerationRequest) {
         const { protocol, model } = config;
         const outputLimit = Math.min(config.maxOutputTokens, request.maxOutputTokens ?? config.maxOutputTokens);
         const system = request.schema ? request.system + '\nReturn JSON matching this schema: ' + JSON.stringify(request.schema) : request.system;
@@ -157,18 +201,55 @@ export class GenerationGateway {
         if (Buffer.byteLength(body) > MAX_BYTES) throw new GenerationError('PROVIDER_REQUEST_TOO_LARGE');
         const route = protocol === 'OLLAMA' ? '/api/chat' : protocol === 'ANTHROPIC' ? '/messages' : '/chat/completions';
         const connection = { protocol, timeoutMillis: config.timeoutMillis, baseUrl: config.baseUrl, apiKey };
-        return this.bounded(config.timeoutMillis, request.signal, async signal => {
-            const { data } = await exchange(connection, route, signal, MAX_BYTES, body);
-            const response = readCompletion(connection, data);
-            return { ...response, model, costUsd: cost(config, response.inputTokens, response.outputTokens) };
-        });
+        const deadline = Date.now() + config.timeoutMillis;
+        try {
+            return await this.sendCompletion(config, encryptedKey, request, connection, route, body, config.timeoutMillis);
+        } catch (error) {
+            if (!(error instanceof TransientProviderError) || !request.beforeRetry || error.delayMs > 1000
+                || deadline - Date.now() < error.delayMs + 100
+                || (estimatedCost !== null && request.maxEstimatedCostUsd !== undefined && 2 * estimatedCost > request.maxEstimatedCostUsd)) throw error;
+            try { await backoff(error.delayMs, undefined, { signal: request.signal }); }
+            catch { throw new GenerationError('PROVIDER_CANCELLED'); }
+            const remaining = deadline - Date.now();
+            if (remaining < 100 || !request.beforeRetry()) throw error;
+            return this.sendCompletion(config, encryptedKey, request, connection, route, body, remaining);
+        }
     }
 
-    async test(id: string, signal?: AbortSignal) {
-        const { config, apiKey } = this.providers.resolve(id);
+    private async sendCompletion(config: ModelProvider, encryptedKey: string, request: GenerationRequest, connection: ProviderConnection,
+        route: string, body: string, timeout: number) {
+        let invocation: string | undefined;
+        let measured: ModelUsageSample | undefined;
         try {
-            await this.complete(config, apiKey, { system: 'This request checks the model connection.', user: 'Reply with OK.',
-                maxOutputTokens: 128, signal });
+            const result = await this.bounded(timeout, request.signal, async signal => {
+                signal.throwIfAborted();
+                const permit = this.usage.send({ ...config, timeoutMillis: timeout }, encryptedKey, request.attribution);
+                if (!permit.id) throw new GenerationError(permit.reason);
+                invocation = permit.id;
+                const { data } = await exchange(connection, route, signal, MAX_BYTES, body);
+                measured = countedUsage(config, data);
+                const response = readCompletion(connection, data);
+                return { ...response, model: config.model, costUsd: cost(config, response.inputTokens, response.outputTokens) };
+            });
+            if (invocation) this.usage.settle(invocation, null, measured);
+            this.observe(config, null);
+            return result;
+        } catch (error) {
+            if (invocation) this.usage.settle(invocation, error instanceof GenerationError ? error.message : 'MODEL_SETTLEMENT_FAILED', measured);
+            if (error instanceof GenerationError && !error.message.startsWith('HOSTED_') && !['PROVIDER_CANCELLED', 'PROVIDER_BUSY', 'PROVIDER_POOL_BUSY',
+                'PROVIDER_POOL_WINDOW_CLOSED', 'PROVIDER_ACCESS_CHANGED', 'PROVIDER_OUTPUT_TRUNCATED'].includes(error.message)) {
+                this.observe(config, error.message);
+            }
+            throw error;
+        }
+    }
+
+    async test(id: string, signal?: AbortSignal, actorId?: string) {
+        const frozen = this.providers.freeze(id);
+        const { config, apiKey } = this.providers.resolveFrozen(frozen);
+        try {
+            await this.complete(config, apiKey, frozen.encryptedKey, { system: 'This request checks the model connection.', user: 'Reply with OK.',
+                maxOutputTokens: 128, signal, attribution: { capability: 'PROVIDER_TEST', actorId } });
             return { connected: true, message: 'PROVIDER_CONNECTED' };
         } catch (error) {
             if (!(error instanceof GenerationError)) throw error;

@@ -1,7 +1,10 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { z } from 'zod';
+import { deviceBearer, deviceStartInput, deviceTokenInput, deviceUserCode } from './device-authorization.js';
+import type { DeviceAuthorization } from './device-authorization.js';
 import { HttpError, send } from './http-error.js';
+import { externalDirectoryInput, externalIdPattern, externalSessionInput } from './external-identity.js';
 import { readPayload } from './http-body.js';
 import { ADMIN_ID } from './identity.js';
 import type { Account, IdentityDirectory } from './identity.js';
@@ -25,6 +28,10 @@ const review = z.object({ status: z.enum(['ACTIVE', 'REJECTED', 'DISABLED']), re
 const org = z.object({ name: text(100), active: z.boolean().default(true) });
 const membership = z.object({ member: z.boolean() });
 const owner = z.object({ ownerType: z.enum(['PERSONAL', 'ORGANIZATION']), ownerId: text(64) });
+const devicePreview = z.object({ code: deviceUserCode }).strict();
+const deviceDecision = devicePreview.extend({ approved: z.boolean() });
+const deviceId = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
+const perMinute = { login: 30, register: 5, 'device-start': 8, 'device-exchange': 120, 'device-review': 30 };
 
 interface Session { account: Pick<Account, 'id' | 'credentialVersion'>; csrf: string; expires: number }
 interface Principal { account: Account; session?: Session }
@@ -53,7 +60,7 @@ export class IdentityHttp {
     private readonly sessions = new Map<string, Session>();
     private readonly limits = new Map<string, { count: number; expires: number }>();
 
-    constructor(private readonly directory: IdentityDirectory, private readonly token?: string) {}
+    constructor(private readonly directory: IdentityDirectory, private readonly token?: string, private readonly devices?: DeviceAuthorization) {}
 
     private checkBearer(request: IncomingMessage) {
         return !!this.token && sameSecret(`Bearer ${this.token}`, request.headers.authorization);
@@ -61,6 +68,11 @@ export class IdentityHttp {
 
     principal(request: IncomingMessage): Principal | undefined {
         if (this.checkBearer(request)) return { account: this.directory.account(ADMIN_ID)! };
+        const credential = deviceBearer.exec(request.headers.authorization ?? '')?.[1];
+        if (credential) {
+            const account = this.devices?.authenticate(credential);
+            return account && { account };
+        }
         const id = cookie(request, SESSION);
         const session = id && localHost(request) ? this.sessions.get(id) : undefined;
         if (!session || session.expires <= Date.now()) {
@@ -122,15 +134,19 @@ export class IdentityHttp {
         }
     }
 
-    private rateLimit(request: IncomingMessage, response: ServerResponse, key: 'login' | 'register') {
+    private rateLimit(request: IncomingMessage, response: ServerResponse, key: keyof typeof perMinute) {
         const address = `${key}:${request.socket.remoteAddress ?? 'unknown'}`;
         const now = Date.now();
         let bucket = this.limits.get(address);
         if (!bucket || bucket.expires <= now) {
+            if (this.limits.size >= 512) for (const [name, earlier] of this.limits) {
+                if (earlier.expires <= now) this.limits.delete(name);
+            }
+            if (!bucket && this.limits.size >= 512) throw new HttpError(429, 'RATE_LIMITED');
             bucket = { count: 0, expires: now + 60_000 };
             this.limits.set(address, bucket);
         }
-        if (++bucket.count > (key === 'login' ? 30 : 5)) {
+        if (++bucket.count > perMinute[key]) {
             response.setHeader('Retry-After', Math.ceil((bucket.expires - now) / 1000));
             throw new HttpError(429, 'RATE_LIMITED');
         }
@@ -139,6 +155,23 @@ export class IdentityHttp {
     async authenticateRoute(request: IncomingMessage, response: ServerResponse, path: string) {
         const route = `${request.method} ${path}`;
         switch (route) {
+            case `POST ${PREFIX}/auth/device/start`: {
+                if (!this.devices) throw new HttpError(404, 'DEVICE_AUTH_DISABLED');
+                this.verifyOrigin(request);
+                this.rateLimit(request, response, 'device-start');
+                const input = await payload(request, deviceStartInput, true);
+                send(response, 200, this.devices.start(input.client_name, 'http://' + request.headers.host! + '/?authorizeDevice=1'));
+                return true;
+            }
+            case `POST ${PREFIX}/auth/device/token`: {
+                if (!this.devices) throw new HttpError(404, 'DEVICE_AUTH_DISABLED');
+                this.verifyOrigin(request);
+                this.rateLimit(request, response, 'device-exchange');
+                const input = await payload(request, deviceTokenInput, true);
+                const result = this.devices.exchange(input.device_code);
+                send(response, 'error' in result ? 400 : 200, result);
+                return true;
+            }
             case `GET ${PREFIX}/auth/csrf`: {
                 this.verifyOrigin(request);
                 const session = this.principal(request)?.session;
@@ -159,6 +192,17 @@ export class IdentityHttp {
                 this.rateLimit(request, response, 'login');
                 const input = await payload(request, login, true);
                 const account = await this.directory.authenticate(input.username, input.password);
+                this.beginSession(request, response, account);
+                send(response, 200, account);
+                return true;
+            }
+            case `POST ${PREFIX}/auth/external-session`: {
+                if (!this.directory.external.enabled) throw new HttpError(404, 'EXTERNAL_IDENTITY_DISABLED');
+                this.verifyCsrf(request, this.principal(request)?.session);
+                this.rateLimit(request, response, 'login');
+                const { assertion } = await payload(request, externalSessionInput);
+                if (response.destroyed) return true;
+                const account = this.directory.external.exchange(assertion, String(request.headers[CSRF]));
                 this.beginSession(request, response, account);
                 send(response, 200, account);
                 return true;
@@ -187,6 +231,33 @@ export class IdentityHttp {
     async accountRoute(request: IncomingMessage, response: ServerResponse, url: URL, account: Account, repository: RepositoryIndex) {
         const path = url.pathname;
         const route = `${request.method} ${path}`;
+        if (path.startsWith(PREFIX + '/auth/device/')) {
+            if (!this.devices) throw new HttpError(404, 'DEVICE_AUTH_DISABLED');
+            if (!this.principal(request)?.session || (request.method !== 'GET' && !sameBrowserOrigin(request))) {
+                throw new HttpError(403, 'DEVICE_BROWSER_SESSION_REQUIRED');
+            }
+            if (route === `POST ${PREFIX}/auth/device/inspect`) {
+                this.rateLimit(request, response, 'device-review');
+                send(response, 200, this.devices.inspect(account, (await payload(request, devicePreview)).code));
+                return true;
+            }
+            if (route === `POST ${PREFIX}/auth/device/decision`) {
+                this.rateLimit(request, response, 'device-review');
+                const { code, approved } = await payload(request, deviceDecision);
+                send(response, 200, this.devices.decide(account, code, approved));
+                return true;
+            }
+            if (route === `GET ${PREFIX}/auth/device/credentials`) {
+                send(response, 200, this.devices.list(account));
+                return true;
+            }
+            const id = path.slice((PREFIX + '/auth/device/credentials/').length);
+            if (request.method === 'DELETE' && path.startsWith(PREFIX + '/auth/device/credentials/') && deviceId.test(id)) {
+                send(response, 200, this.devices.revoke(account, id));
+                return true;
+            }
+            throw new HttpError(404, 'NOT_FOUND');
+        }
         if (route === `GET ${PREFIX}/auth/me`) {
             send(response, 200, account);
             return true;
@@ -220,6 +291,16 @@ export class IdentityHttp {
             const raw = url.searchParams.get('limit') ?? '100';
             if (!/^\d{1,5}$/.test(raw) || Number(raw) < 1) throw new HttpError(400, 'INVALID_LIMIT');
             result = this.directory.audit(Math.min(Number(raw), 500));
+        } else if (parts[0] === 'external-directory' && parts.length === 2 && externalIdPattern.test(parts[1])
+            && (request.method === 'GET' || request.method === 'PUT')) {
+            if (!this.directory.external.enabled) throw new HttpError(404, 'EXTERNAL_IDENTITY_DISABLED');
+            if (request.method === 'GET') result = this.directory.external.status(parts[1]);
+            else {
+                const input = await readPayload(request, externalDirectoryInput, 2 * 1024 * 1024);
+                if (response.destroyed) return true;
+                requireAdmin(this.directory.requireCurrent(account));
+                result = this.directory.external.sync(account.id, parts[1], input);
+            }
         } else if (parts[0] === 'accounts' && parts.length === 3 && parts[2] === 'review' && request.method === 'POST') {
             const input = await after(review);
             result = this.directory.review(account.id, parts[1], input.status, input.reason);

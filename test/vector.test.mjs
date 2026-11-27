@@ -115,6 +115,17 @@ test('REST semantic search ranks declaration and source vectors while code searc
         assert.equal((await request('/index/project', { projectRoot }, 'POST')).status, 202);
         return finishIndex();
     }
+    async function publish() {
+        const accepted = await request('/summaries/generate', { projectId }, 'POST');
+        assert.equal(accepted.status, 202);
+        for (let attempt = 0; attempt < 100; attempt++) {
+            const run = (await request('/agent-runs/' + accepted.body.agentRunId, { projectId })).body;
+            if (['QUEUED', 'RUNNING'].includes(run.status)) { await delay(20); continue; }
+            assert.equal(run.status, 'COMPLETED');
+            return (await request('/knowledge-snapshots', { projectId })).body[0];
+        }
+        assert.fail('Wiki did not publish a snapshot');
+    }
 
     assert.equal((await request('/index/project', { projectRoot }, 'POST')).status, 202);
     try {
@@ -128,6 +139,7 @@ test('REST semantic search ranks declaration and source vectors while code searc
     }
     const initial = await finishIndex();
     assert.equal(initial.status, 'done');
+    const initialSnapshot = await publish();
     assert.equal(initial.stage, undefined);
     assert.deepEqual(await request('/health'), { status: 200, body: { status: 'ok', sqlite: 'ok', ollama: 'ok' } });
     const semantic = await request('/search/semantic', { projectId, q: 'a friendly greeting', limit: '1' });
@@ -235,12 +247,20 @@ test('REST semantic search ranks declaration and source vectors while code searc
 
     available = false;
     assert.deepEqual(await request('/health'), { status: 207, body: { status: 'degraded', sqlite: 'ok', ollama: 'error' } });
+    const degraded = (await request('/admin/diagnostics')).body;
+    assert.equal(degraded.status, 'degraded');
+    assert.equal(degraded.components.vectorSearch, 'unavailable');
+    assert.equal(degraded.components.fullText, 'available');
     await assert.rejects(benchmark(), { code: 2 });
     assert.deepEqual((await request('/benchmark/results')).body, snapshot.body);
     await writeFile(join(directory, 'greetings.ts'), 'function bonjour() { return "hello"; }');
     const partial = await index();
     assert.equal(partial.status, 'partial');
     assert.deepEqual(partial.errors, ['greetings.ts: EMBEDDING_UNAVAILABLE']);
+    assert.deepEqual(await request('/summaries/generate', { projectId }, 'POST'), {
+        status: 409, body: { error: 'WIKI_SNAPSHOT_VECTOR_INCOMPLETE' }
+    });
+    assert.equal((await request('/knowledge-snapshots', { projectId })).body[0].id, initialSnapshot.id);
     assert.deepEqual((await request('/search/semantic', { projectId, q: 'bonjour' })).body, {
         error: 'EMBEDDING_UNAVAILABLE'
     });
@@ -252,6 +272,11 @@ test('REST semantic search ranks declaration and source vectors while code searc
     assert.equal((await index()).status, 'done');
     const recovered = await request('/search/semantic', { projectId, q: 'bonjour' });
     assert.deepEqual(recovered.body.results.map(hit => hit.unit.qualifiedName), ['bonjour']);
+    const archived = await request('/search/semantic', { projectId, snapshotId: initialSnapshot.id, q: 'a friendly greeting' });
+    assert.equal(archived.status, 200);
+    assert.equal(archived.body.results[0].snapshotId, initialSnapshot.id);
+    assert.equal(archived.body.results[0].unit.qualifiedName, 'welcome');
+    assert.equal((await request('/search/semantic', { projectId: '000000000000', snapshotId: initialSnapshot.id, q: 'greeting' })).status, 404);
 
     await writeFile(join(directory, 'welcome-team.ts'), [
         '/** Publishes greetings for the welcome team. */',
@@ -275,10 +300,15 @@ test('REST semantic search ranks declaration and source vectors while code searc
     const localMatch = await request('/search/code', { projectId, snippet: fragment, limit: '1' });
     assert.equal(localMatch.body.results[0].unit.qualifiedName, 'publishCard');
     assert.equal(localMatch.body.results[0].score, 1);
+    const publishedCard = await publish();
     await writeFile(cardFile, card.replace(fragment, 'return renderCaption("updated-card-caption");'));
     assert.equal((await index()).status, 'done');
     const afterEdit = await request('/search/code', { projectId, snippet: fragment });
     const reindexed = afterEdit.body.results.find(result => result.unit.id === localMatch.body.results[0].unit.id);
     assert.equal(reindexed.score, 0);
     assert.doesNotMatch(reindexed.unit.rawSource, /caption-for-published-card/);
+    const archivedCard = await request('/search/code', { projectId, snapshotId: publishedCard.id, snippet: fragment, limit: '1' });
+    assert.equal(archivedCard.body.results[0].score, 1);
+    assert.equal(archivedCard.body.results[0].snapshotId, publishedCard.id);
+    assert.match(archivedCard.body.results[0].unit.rawSource, /caption-for-published-card/);
 });

@@ -362,21 +362,25 @@ export class CodeGraph {
         `).iterate(projectId, projectId);
     }
 
-    traverse(seed: string, query: GraphQuery, depth: number, limit = MAX_GRAPH_UNITS, connections?: GraphConnection[]) {
+    traverse(seed: string, query: GraphQuery, depth: number, limit = MAX_GRAPH_UNITS, connections?: GraphConnection[], snapshotId?: string) {
         const [from, to] = query === 'callees' ? ['source_id', 'target_id'] : ['target_id', 'source_id'];
         const kinds = queryKinds[query];
+        const tables = snapshotId ? { relation: 'knowledge_relation', unit: 'knowledge_unit', scope: 'r.snapshot_id = ? AND',
+            join: 'AND u.snapshot_id = r.snapshot_id' } : { relation: 'code_relation', unit: 'unit', scope: '', join: '' };
+        const scope = snapshotId ? [snapshotId] : [];
         const neighbors = this.db.prepare(`
-            SELECT DISTINCT u.id FROM code_relation r JOIN unit u ON u.id = r.${to}
-            WHERE r.${from} = ? AND r.kind IN (${kinds.map(() => '?').join(',')})
+            SELECT DISTINCT u.id FROM ${tables.relation} r JOIN ${tables.unit} u ON u.id = r.${to} ${tables.join}
+            WHERE ${tables.scope} r.${from} = ? AND r.kind IN (${kinds.map(() => '?').join(',')})
             ORDER BY u.qualified_name, u.file_path, u.id LIMIT ?
         `);
-        const payload = this.db.prepare('SELECT payload FROM unit WHERE id = ?');
+        const load = this.unitLoader(snapshotId);
 
         let frontier = [seed];
         if (query === 'impact') {
             const members = this.db.prepare(`
-                SELECT target_id FROM code_relation WHERE source_id = ? AND kind = 'CONTAINS' ORDER BY target_id LIMIT ?
-            `).all(seed, MAX_GRAPH_UNITS);
+                SELECT target_id FROM ${tables.relation} r WHERE ${tables.scope} source_id = ? AND kind = 'CONTAINS'
+                ORDER BY target_id LIMIT ?
+            `).all(...scope, seed, MAX_GRAPH_UNITS);
             frontier.push(...members.map(row => String(row.target_id)));
         }
         const seen = new Set(frontier);
@@ -384,12 +388,12 @@ export class CodeGraph {
         for (let step = 0; step < depth && frontier.length; step++) {
             const next: string[] = [];
             for (const id of frontier) {
-                for (const row of neighbors.all(id, ...kinds, seen.size + limit - units.length)) {
+                for (const row of neighbors.all(...scope, id, ...kinds, seen.size + limit - units.length)) {
                     const neighbor = String(row.id);
                     if (seen.has(neighbor)) continue;
                     seen.add(neighbor);
                     next.push(neighbor);
-                    units.push(JSON.parse(String(payload.get(neighbor)?.payload)) as CodeUnit);
+                    units.push(load(neighbor));
                     if (connections && connections.length < MAX_DIAGRAM_CONNECTIONS) {
                         const source = query === 'callees' ? id : neighbor;
                         const target = query === 'callees' ? neighbor : id;
@@ -403,12 +407,17 @@ export class CodeGraph {
         return units;
     }
 
-    traverseView(seed: string, query: GraphQuery, depth: number): GraphDiagram {
-        const payload = this.db.prepare('SELECT payload FROM unit WHERE id = ?');
-        const load = (id: string) => JSON.parse(String(payload.get(id)?.payload)) as CodeUnit;
+    private unitLoader(snapshotId?: string) {
+        const query = snapshotId ? 'SELECT payload FROM knowledge_unit WHERE id = ? AND snapshot_id = ?' : 'SELECT payload FROM unit WHERE id = ?';
+        const payload = this.db.prepare(query);
+        return (id: string) => JSON.parse(String((snapshotId ? payload.get(id, snapshotId) : payload.get(id))?.payload)) as CodeUnit;
+    }
+
+    traverseView(seed: string, query: GraphQuery, depth: number, snapshotId?: string): GraphDiagram {
+        const load = this.unitLoader(snapshotId);
         const root = load(seed);
         const connections: GraphConnection[] = [];
-        const results = this.traverse(seed, query, depth, MAX_GRAPH_UNITS, connections);
+        const results = this.traverse(seed, query, depth, MAX_GRAPH_UNITS, connections, snapshotId);
         const parents = new Set(connections.map(edge => query === 'callees' ? edge.source : edge.target));
         for (const { id } of [root, ...results]) parents.delete(id);
         const members = [...parents].map(load);

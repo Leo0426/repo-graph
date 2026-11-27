@@ -52,12 +52,14 @@
                 <div class="nav-group">
                     <p class="nav-label" data-text="workspace">Workspace</p>
                     <a href="/?view=repositories" data-view="repositories"><span class="nav-icon icon-repo" aria-hidden="true"></span><span data-text="repositories">Repositories</span></a>
+                    <a href="/?view=spaces" data-view="spaces"><span class="nav-icon icon-wiki" aria-hidden="true"></span><span data-text="spaces">Project spaces</span></a>
                 </div>
                 <div class="nav-group">
                     <p class="nav-label" data-text="explore">Code intelligence</p>
                     <a href="/?view=search" data-view="search"><span class="nav-icon icon-search" aria-hidden="true"></span><span data-text="search">Code search</span></a>
                     <a href="/?view=graph" data-view="graph"><span class="nav-icon icon-graph" aria-hidden="true"></span><span data-text="graph">Code graph</span></a>
                     <a href="/?view=evidence" data-view="evidence"><span class="nav-icon icon-evidence" aria-hidden="true"></span><span data-text="evidence">Evidence packs</span></a>
+                    <a href="/?view=ask" data-view="ask"><span class="nav-icon icon-search" aria-hidden="true"></span><span data-text="ask">Ask</span></a>
                     <a href="/?view=wiki" data-view="wiki"><span class="nav-icon icon-wiki" aria-hidden="true"></span><span data-text="wiki">Repository Wiki</span></a>
                 </div>
                 <div class="nav-group">
@@ -96,6 +98,7 @@
                         <summary class="icon-button" data-aria="account" aria-label="Account"><span class="icon-person" aria-hidden="true"></span></summary>
                         <div class="popover-items">
                             <button id="account-button" type="button" data-text="account">Account</button>
+                            <button id="device-auth-open" type="button" data-text="deviceAuthorization" hidden>Device access</button>
                             <button id="disconnect" type="button" data-text="disconnect">Disconnect</button>
                         </div>
                     </details>
@@ -124,6 +127,7 @@
                                         <option value="all" data-text="repositoryAllSources">All sources</option>
                                         <option value="local" data-text="repositoryLocal">Local folders</option>
                                         <option value="archive" data-text="repositoryArchives">Archives</option>
+                                        <option value="git" data-text="gitRepositories">Remote Git</option>
                                     </select>
                                 </label>
                                 <button id="refresh" class="icon-button" type="button" data-aria="refresh" aria-label="Refresh list"><span class="nav-icon icon-refresh" aria-hidden="true"></span></button>
@@ -150,6 +154,16 @@
                             <p id="repository-empty" class="empty" role="status" hidden></p>
                         </div>
                     </section>
+                    <details id="project-trash" class="surface workspace-panel project-trash">
+                        <summary data-text="projectTrash">Repository trash</summary>
+                        <p class="notice" id="project-trash-status" role="status" hidden></p>
+                        <p class="notice" id="project-lifecycle-status" role="status" hidden></p>
+                        <ul id="project-trash-list" class="space-list"></ul>
+                        <div class="change-actions">
+                            <button type="button" id="project-trash-refresh" data-text="refresh">Refresh</button>
+                            <button type="button" id="project-trash-next" data-text="next" hidden>Load more</button>
+                        </div>
+                    </details>
                     <div class="workspace-panels">
                         <section class="surface workspace-panel" aria-labelledby="repo-activity-title">
                             <h2 id="repo-activity-title" data-text="repositoryActivity">Recent activity</h2>
@@ -161,6 +175,102 @@
                         </section>
                     </div>
                 </section>
+                <section id="view-spaces" aria-labelledby="spaces-title" hidden>
+                    <div class="page-header"><h1 id="spaces-title" data-text="spaces">Project spaces</h1></div>
+                    <p class="notice" id="spaces-status" role="status" hidden></p>
+                    <p class="notice" id="space-action-status" role="status" hidden></p>
+                    <div class="space-layout">
+                        <section class="surface workspace-panel" aria-labelledby="space-list-title">
+                            <h2 class="sr-only" id="space-list-title" data-text="spaces">Project spaces</h2>
+                            <ul class="space-list" id="space-list"></ul>
+                            <form class="space-inline-form" id="space-create">
+                                <label><span data-text="spaceName">Space name</span><input id="space-name" required maxlength="200"></label>
+                                <button type="submit" data-text="spaceCreate">Create space</button>
+                            </form>
+                            <details id="space-deleted-list"><summary data-text="spaceDeleted">Deleted spaces</summary>
+                                <p class="notice" id="space-deleted-status" role="status" hidden></p>
+                                <ul class="space-list" id="space-deleted-items"></ul>
+                            </details>
+                        </section>
+                        <div class="stack" id="space-content" hidden>
+                            <section class="surface workspace-panel" aria-labelledby="space-name-title">
+                                <div class="space-panel-header">
+                                    <h2 id="space-name-title"></h2>
+                                    <span class="kind" id="space-state" hidden></span>
+                                    <button type="button" id="space-settings-open" data-text="spaceSettings" hidden>Space settings</button>
+                                    <button type="button" id="space-archive" data-text="spaceArchive" hidden>Archive space</button>
+                                    <button type="button" id="space-reactivate" data-text="spaceReactivate" hidden>Reactivate space</button>
+                                </div>
+                                <h3 data-text="spaceRepositories">Linked repositories</h3>
+                                <ul class="space-list" id="space-repositories"></ul>
+                                <form class="space-inline-form" id="space-link">
+                                    <label><span data-text="repository">Repository</span><select id="space-repository"></select></label>
+                                    <label><span data-text="spaceSnapshot">Knowledge snapshot</span><select id="space-link-snapshot"></select></label>
+                                    <button type="submit" data-text="spaceLink">Link repository</button>
+                                </form>
+                                <p class="notice" id="space-link-snapshots-status" role="status" hidden></p>
+                                <details id="space-detached"><summary data-text="spaceDetached">Detached repositories</summary>
+                                    <p class="notice" id="space-detached-status" role="status" hidden></p>
+                                    <ul class="space-list" id="space-detached-items"></ul>
+                                </details>
+                            </section>
+                            <section class="surface workspace-panel" aria-labelledby="space-documents-title">
+                                <div class="space-panel-header">
+                                    <h3 id="space-documents-title" data-text="spaceDocuments">Shared documents</h3>
+                                    <button type="button" id="space-up" data-text="spaceUp">Root folder</button>
+                                </div>
+                                <form class="space-inline-form" id="space-search-form">
+                                    <label><span data-text="spaceSearch">Search documents</span><input id="space-search" type="search" required maxlength="4096"></label>
+                                    <button type="submit" data-text="spaceSearchSubmit">Search</button>
+                                    <button type="button" id="space-clear-search" data-text="spaceClear">Clear</button>
+                                </form>
+                                <ul class="space-list" id="space-items"></ul>
+                                <form class="space-inline-form" id="space-add-item">
+                                    <label><span data-text="spaceItemName">Folder or document name</span><input id="space-item-name" required maxlength="200"></label>
+                                    <button type="submit" id="space-add-folder" data-text="spaceNewFolder">New folder</button>
+                                    <button type="submit" id="space-add-document" data-text="spaceNewDocument">New Markdown</button>
+                                    <button type="submit" id="space-generate-document" data-text="spaceGenerateDocument">Generate Markdown</button>
+                                    <button type="button" id="space-import-open" data-text="spaceImportDocuments">Import document</button>
+                                </form>
+                                <details id="space-trash"><summary data-text="spaceTrash">Trash</summary><ul class="space-list" id="space-trash-items"></ul></details>
+                            </section>
+                            <section class="surface workspace-panel" id="space-reader" aria-labelledby="space-document-name" hidden>
+                                <div class="space-panel-header">
+                                    <h3 id="space-document-name"></h3>
+                                    <label><span data-text="spaceVersion">Revision</span><select id="space-version"></select></label>
+                                </div>
+                                <p class="notice" id="space-document-status" role="status" hidden></p>
+                                <form id="space-editor" class="stack">
+                                    <label id="space-pdf-page-field" hidden><span data-text="spacePdfPage">Page</span><select id="space-pdf-page"></select></label>
+                                    <p class="notice" id="space-pdf-status" role="status" hidden></p>
+                                    <label id="space-document-text-field"><span id="space-document-text-label" data-text="spaceMarkdown">Markdown source</span><textarea id="space-markdown" spellcheck="false" rows="12"></textarea></label>
+                                    <section id="space-csv-grid" aria-label="CSV table" data-aria="spaceCsvTable" class="stack" hidden>
+                                        <div class="change-actions">
+                                            <button type="button" id="space-csv-previous" data-text="spaceCsvPrevious">Previous rows</button>
+                                            <button type="button" id="space-csv-next" data-text="spaceCsvNext">Next rows</button>
+                                            <label><span data-text="spaceCsvRow">Row</span><input id="space-csv-row" type="number" inputmode="numeric" min="1" value="1"></label>
+                                        </div>
+                                        <div class="space-csv-scroll"><table id="space-csv-table"></table></div>
+                                        <p class="notice" id="space-csv-empty" data-text="spaceCsvEmpty" hidden>This CSV file has no cells.</p>
+                                        <label id="space-csv-cell-field" hidden><span id="space-csv-cell-label"></span><textarea id="space-csv-cell" spellcheck="false" rows="3" maxlength="32768"></textarea></label>
+                                    </section>
+                                    <div class="change-actions">
+                                        <button type="submit" id="space-save" data-text="spaceSave">Save revision</button>
+                                        <button type="button" id="space-generate-revision" data-text="spaceGenerateRevision">Generate a revision</button>
+                                        <button type="button" id="space-export" data-text="downloadMarkdown">Download Markdown</button>
+                                        <button type="button" id="space-knowledge-search" data-text="knowledgeExactScope">Search this version</button>
+                                        <button type="button" id="space-latest" data-text="spaceLatest">Open latest revision</button>
+                                        <button type="button" id="space-restore-version" data-text="spaceRestoreVersion">Restore this revision</button>
+                                    </div>
+                                </form>
+                                <details id="space-retained-draft" hidden>
+                                    <summary data-text="spaceRetainedDraft">Retained draft</summary>
+                                    <textarea id="space-draft-content" aria-label="Retained draft" data-aria="spaceRetainedDraft" readonly rows="8"></textarea>
+                                </details>
+                            </section>
+                        </div>
+                    </div>
+                </section>
                 <section id="view-overview" aria-labelledby="overview-title" hidden>
                     <div class="page-header">
                         <div><h1 id="overview-title" data-text="overview">Repository overview</h1><p class="mono" id="overview-root"></p></div>
@@ -168,6 +278,68 @@
                     </div>
                     <p class="notice" id="overview-status" role="status" hidden></p>
                     <div id="overview-data"></div>
+                    <section class="surface workspace-panel" id="git-overview" aria-labelledby="git-overview-title" hidden>
+                        <h2 id="git-overview-title" data-text="gitTracking">Git tracking</h2>
+                        <p class="notice" id="git-action-status" role="status" hidden></p>
+                        <div class="settings-layout" id="git-settings">
+                            <div class="settings-tablist" role="tablist" aria-labelledby="git-overview-title" aria-orientation="vertical">
+                                <button type="button" role="tab" id="git-status-tab" aria-controls="git-status-panel" aria-selected="true" data-text="status">Status</button>
+                                <button type="button" role="tab" id="git-automation-tab" aria-controls="git-automation-panel" aria-selected="false" tabindex="-1" data-text="gitSchedule" hidden>Schedule</button>
+                                <button type="button" role="tab" id="git-connection-tab" aria-controls="git-connection-settings" aria-selected="false" tabindex="-1" data-text="gitConnectionSettings" hidden>Connection settings</button>
+                            </div>
+                            <div id="git-status-panel" role="tabpanel" aria-labelledby="git-status-tab" tabindex="0">
+                                <dl id="git-overview-data" class="git-revision-list"></dl>
+                                <p class="notice" id="git-overview-status" role="status" hidden></p>
+                                <div class="change-actions">
+                                    <button type="button" id="git-sync" data-text="gitSync">Sync branch</button>
+                                    <button type="button" id="git-retry" data-text="gitRetry">Retry this commit</button>
+                                    <button type="button" id="git-cancel" data-text="gitCancel">Cancel sync</button>
+                                    <a id="git-published" data-text="gitPublished" hidden>Latest published Wiki</a>
+                                </div>
+                            </div>
+                            <div id="git-automation-panel" role="tabpanel" aria-labelledby="git-automation-tab" hidden>
+                                <form id="git-automation-form" class="space-inline-form">
+                                    <label><span data-text="gitSchedule">Schedule</span><select id="git-schedule-mode"><option value="off" data-text="gitScheduleOff">Off</option><option value="interval" data-text="gitScheduleInterval">Interval</option><option value="calendar" data-text="gitScheduleCalendar">Local time</option></select></label>
+                                    <label id="git-interval-field" hidden><span data-text="gitInterval">Check interval in minutes</span><input id="git-interval" type="number" min="1" max="10080" step="1"></label>
+                                    <div id="git-calendar-fields" class="space-inline-form" hidden>
+                                        <label><span data-text="gitTimeZone">Time zone</span><input id="git-time-zone" list="git-time-zones" maxlength="100" placeholder="Asia/Shanghai" disabled></label>
+                                        <datalist id="git-time-zones"></datalist>
+                                        <label><span data-text="gitLocalTime">Local time</span><input id="git-local-time" type="time" step="60" disabled></label>
+                                        <fieldset class="git-schedule-days"><legend data-text="gitScheduleDays">Run on</legend><div id="git-schedule-days"></div></fieldset>
+                                    </div>
+                                    <label class="check"><input type="checkbox" id="git-events"><span data-text="gitEvents">Accept signed events</span></label>
+                                    <label class="check"><input type="checkbox" id="git-auto-publish"><span data-text="gitAutoPublish">Publish Wiki after sync</span></label>
+                                    <button type="submit" data-text="gitSaveAutomation">Save sync settings</button>
+                                </form>
+                            </div>
+                            <div id="git-connection-settings" role="tabpanel" aria-labelledby="git-connection-tab" hidden>
+                                <form id="git-connection-form" class="stack">
+                                    <label class="check"><input type="checkbox" id="git-connection-enabled"><span data-text="gitConnectionEnabled">Connection enabled</span></label>
+                                    <label><span data-text="gitUsername">Git username (optional)</span><input id="git-update-username" maxlength="256" autocomplete="off"></label>
+                                    <label><span data-text="gitToken">Git token (optional)</span><input id="git-update-token" type="password" maxlength="4096" autocomplete="new-password"></label>
+                                    <label class="check"><input type="checkbox" id="git-clear-token"><span data-text="gitClearToken">Remove saved token</span></label>
+                                    <label><span data-text="gitSigningSecret">Event signing secret</span><input id="git-update-secret" type="password" minlength="32" maxlength="4096" autocomplete="new-password"></label>
+                                    <label class="check"><input type="checkbox" id="git-clear-secret"><span data-text="gitClearSecret">Remove event signing secret</span></label>
+                                    <code id="git-event-path"></code>
+                                    <button type="submit" data-text="gitConnectionSave">Save connection</button>
+                                </form>
+                                <p class="notice" id="git-connection-settings-status" role="status" hidden></p>
+                                <p class="notice" id="git-connection-save-status" role="status" hidden></p>
+                                <form id="git-reconnect-form" class="stack" hidden>
+                                    <p id="git-hosted-identity" class="mono" hidden></p>
+                                    <label id="git-reconnect-adapter-field"><span data-text="gitAdapter">Hosting platform</span><select id="git-reconnect-adapter" required>
+                                            <option value="" data-text="gitSelectAdapter">Select a platform</option>
+                                            <option value="GITHUB">GitHub</option><option value="GITLAB">GitLab</option>
+                                        </select></label>
+                                    <label><span data-text="gitUrl">Repository URL</span><input type="url" id="git-reconnect-url" required maxlength="500"></label>
+                                    <button type="submit" id="git-reconnect-submit" data-text="gitVerifyIdentity">Verify repository identity</button>
+                                </form>
+                                <p class="notice" id="git-reconnect-status" role="status" hidden></p>
+                                <button type="button" id="git-disconnect" data-text="gitDisconnect" hidden>Disconnect and clear credentials</button>
+                                <p class="notice" id="git-disconnect-status" role="status" hidden></p>
+                            </div>
+                        </div>
+                    </section>
                     <section class="surface overview-status-panel" id="overview-actions" hidden>
                         <h2 data-text="repositoryStatus">Repository status</h2>
                         <p id="overview-updated"></p>
@@ -218,6 +390,12 @@
                     </section>
                     <section class="surface archive-profile" id="archive-profile" aria-labelledby="archive-profile-title" hidden>
                         <header class="surface-header"><h2 id="archive-profile-title" data-text="archiveProfile">Archive profile</h2></header>
+                        <form class="space-inline-form" id="archive-identity-form" hidden>
+                            <label><span data-text="archiveDisplayName">Display name</span><input id="archive-display-name" required maxlength="255"></label>
+                            <button type="submit" data-text="archiveRename">Rename archive</button>
+                            <button type="button" id="archive-reuse" data-text="archiveReuse">Reuse in a new repository</button>
+                        </form>
+                        <p class="notice" id="archive-identity-status" role="status" hidden></p>
                         <div class="stack" id="profile-content"></div>
                         <p class="notice repository-notice" id="profile-status" role="status" hidden></p>
                     </section>
@@ -229,19 +407,27 @@
                         <button type="button" data-query-option="semantic" aria-pressed="false" data-text="semantic">Semantic</button>
                         <button type="button" data-query-option="code" aria-pressed="false" data-text="similarity">Code similarity</button>
                         <button type="button" data-query-option="graphrag" aria-pressed="false">GraphRAG</button>
+                        <button type="button" data-query-option="knowledge" aria-pressed="false" data-text="knowledgeSearch">Knowledge</button>
                     </div>
                     <form id="search-form" class="surface query-form">
-                        <select id="search-mode" hidden><option value="keyword">Keyword</option><option value="semantic">Semantic</option><option value="code">Code similarity</option><option value="graphrag">GraphRAG</option></select>
+                        <select id="search-mode" hidden><option value="keyword">Keyword</option><option value="semantic">Semantic</option><option value="code">Code similarity</option><option value="graphrag">GraphRAG</option><option value="knowledge">Knowledge</option></select>
                         <label class="field-grow"><span data-text="query">Search query</span><textarea id="query" rows="1" maxlength="4096" required data-placeholder="searchPlaceholder" placeholder="Function, code snippet, or behavior"></textarea></label>
-                        <label><span data-text="scope">Scope</span><select id="search-scope"><option value="current" data-text="current">Current repository</option><option value="all" data-text="all">All authorized repositories</option></select></label>
+                        <label id="search-code-scope"><span data-text="scope">Scope</span><select id="search-scope"><option value="current" data-text="current">Current repository</option><option value="all" data-text="all">All authorized repositories</option></select></label>
+                        <div id="knowledge-scope" class="knowledge-scope" hidden>
+                            <label><span data-text="scope">Scope</span><select id="knowledge-sources" multiple size="5" aria-describedby="knowledge-scope-help"></select></label>
+                            <p id="knowledge-scope-help" class="hint" data-text="knowledgeScopeHelp">Select up to eight repositories or spaces.</p>
+                        </div>
+                        <p id="knowledge-pinned" class="hint" hidden></p>
                         <button type="submit" class="primary" data-text="find">Search</button>
                     </form>
                     <p class="notice" id="search-status" role="status" hidden></p>
+                    <details id="knowledge-coverage" class="surface workspace-panel" hidden><summary data-text="knowledgeCoverage">Search coverage</summary><ul id="knowledge-coverage-list"></ul></details>
                     <div id="search-results" class="search-split"></div>
                     <button id="next" type="button" data-text="next" hidden>Load more</button>
                 </section>
                 <section id="view-graph" aria-labelledby="graph-title" hidden>
                     <div class="page-header"><div><h1 id="graph-title" data-text="graph">Code graph</h1><p data-text="graphAbout">Trace calls, type relationships, and source locations.</p></div></div>
+                    <p id="graph-snapshot" class="notice" hidden><span id="graph-snapshot-id"></span> · <a id="graph-current-link" data-text="currentKnowledgeIndex" href="/">Current index</a></p>
                     <div class="query-tabs control-tabs" data-query-modes="relation" role="group" data-aria="relation" aria-label="Relation">
                         <button type="button" data-query-option="callers" aria-pressed="true" data-text="callers">Callers</button>
                         <button type="button" data-query-option="callees" aria-pressed="false" data-text="callees">Callees</button>
@@ -267,13 +453,54 @@
                         <p class="notice" id="locate-status" role="status" hidden></p>
                     </details>
                 </section>
+                <section id="view-ask" aria-labelledby="ask-title" hidden>
+                    <div class="page-header"><h1 id="ask-title" data-text="ask">Ask</h1></div>
+                    <div class="ask-workspace">
+                        <aside class="surface workspace-panel">
+                            <label><span data-text="askHistory">Conversations</span><select id="ask-session-select"></select></label>
+                            <form id="ask-create" class="stack">
+                                <label><span data-text="askSessionTitle">Conversation name</span><input id="ask-session-title" maxlength="150"></label>
+                                <label><span data-text="repositories">Repositories</span><select id="ask-projects" multiple size="4"></select></label>
+                                <label><span data-text="spaces">Project spaces</span><select id="ask-spaces" multiple size="3"></select></label>
+                                <label><span data-text="askAttachments">Private attachments</span>
+                                    <input type="file" id="ask-attachment-files" accept=".md,.markdown,.txt,.pdf,text/plain,text/markdown,application/pdf" aria-describedby="ask-attachment-limits" multiple></label>
+                                <p id="ask-attachment-limits" class="hint" data-text="askAttachmentLimits">PDF, Markdown or plain text. Up to 8 files, 256 KiB each and 1 MiB total.</p>
+                                <label class="check"><input type="checkbox" id="ask-partial-spaces"><span data-text="askPartialSpaces">Skip inaccessible spaces</span></label>
+                                <label><span data-text="askRetention">Keep conversation for days</span><input id="ask-retention" type="number" min="1" max="30" value="14" required></label>
+                                <p id="ask-frozen-selection" class="hint" hidden></p>
+                                <button type="submit" data-text="askCreate">Start conversation</button>
+                            </form>
+                        </aside>
+                        <section class="surface workspace-panel" aria-labelledby="ask-thread-title" id="ask-thread" hidden>
+                            <h2 id="ask-thread-title"></h2>
+                            <p id="ask-thread-version" class="hint mono"></p>
+                            <section id="ask-attachments" aria-labelledby="ask-attachments-title" hidden>
+                                <h3 id="ask-attachments-title" data-text="askAttachments">Private attachments</h3>
+                                <ul id="ask-attachment-list" class="space-list"></ul>
+                            </section>
+                            <div id="ask-timeline" class="stack" role="log"></div>
+                            <form id="ask-question-form" class="stack">
+                                <label><span data-text="askQuestion">Question</span><textarea id="ask-question" rows="3" maxlength="4096" required></textarea></label>
+                                <div class="change-actions">
+                                    <button class="primary" type="submit" data-text="askSubmit">Send question</button>
+                                    <button type="button" id="ask-cancel" data-text="askCancel" hidden>Cancel question</button>
+                                </div>
+                            </form>
+                        </section>
+                    </div>
+                    <p id="ask-status" class="notice" role="status" hidden></p>
+                    <p id="ask-feed-status" class="notice" role="status" hidden></p>
+                    <p id="ask-write-status" class="notice" role="status" hidden></p>
+                </section>
                 <section id="view-evidence" aria-labelledby="evidence-title" hidden>
                     <div class="page-header"><div><h1 id="evidence-title" data-text="evidence">Evidence packs</h1><p data-text="evidenceAbout">Collect related source excerpts with repository, file, and line citations.</p></div></div>
                     <form id="evidence-form" class="surface query-form">
                         <label class="field-grow"><span data-text="query">Search query</span><input id="evidence-query" required maxlength="4096" data-placeholder="evidencePlaceholder" placeholder="Describe the context you need"></label>
+                        <label id="evidence-snapshot-control" hidden><span data-text="wikiSnapshots">Published snapshots</span><select id="evidence-snapshot"></select></label>
                         <label><span data-text="budget">Character budget</span><input id="budget" type="number" min="1000" max="60000" step="1" value="12000" required></label>
                         <button type="submit" class="primary" data-text="buildPack">Build pack</button>
                     </form>
+                    <p class="notice" id="evidence-snapshots-status" role="status" hidden></p>
                     <p class="notice" id="evidence-status" role="status" hidden></p>
                     <div class="results" id="evidence-results"></div>
                 </section>
@@ -283,9 +510,60 @@
                         <div id="wiki-primary-action"><button id="wiki-generate" type="button" data-text="wikiGenerate">Generate summaries</button></div>
                     </div>
                     <p class="notice" id="wiki-status" role="status" hidden></p>
+                    <div class="wiki-scope" id="wiki-scope" hidden>
+                        <label id="wiki-snapshot-control"><span data-text="wikiSnapshots">Published snapshots</span><select id="wiki-snapshot-select"></select></label>
+                        <label><span data-text="wikiPerspective">Perspective</span><select id="wiki-perspective"></select></label>
+                        <a id="wiki-ask" data-text="askFromWiki" hidden>Ask about this snapshot</a>
+                    </div>
+                    <form class="surface query-form" id="wiki-search-form" hidden>
+                        <label class="field-grow"><span data-text="wikiSearchPages">Search Wiki pages</span><input type="search" id="wiki-search-query" required maxlength="500"></label>
+                        <button type="submit" data-text="find">Search</button>
+                    </form>
+                    <p class="notice" id="wiki-search-status" role="status" hidden></p>
+                    <ul id="wiki-search-results" class="wiki-search-results" hidden></ul>
                     <p class="notice" id="wiki-generation-status" role="status" hidden></p>
+                    <details class="surface wiki-run" id="wiki-settings" hidden>
+                        <summary id="wiki-settings-title" data-text="wikiSettings">Wiki settings</summary>
+                        <div class="settings-layout" id="wiki-settings-tabs">
+                            <div class="settings-tablist" role="tablist" aria-labelledby="wiki-settings-title" aria-orientation="vertical">
+                                <button type="button" role="tab" id="wiki-schedule-tab" aria-controls="wiki-schedule" aria-selected="true" data-text="gitSchedule">Schedule</button>
+                                <button type="button" role="tab" id="wiki-snapshot-tab" aria-controls="wiki-snapshot-management" aria-selected="false" tabindex="-1" data-text="wikiManageSnapshots" hidden>Manage snapshots</button>
+                            </div>
+                            <div id="wiki-schedule" role="tabpanel" aria-labelledby="wiki-schedule-tab">
+                                <form class="query-form" id="wiki-schedule-form">
+                                    <label class="field-grow"><span data-text="wikiStartTime">Start time</span><input type="datetime-local" id="wiki-start-time" required></label>
+                                    <button type="submit" data-text="wikiSchedule">Schedule generation</button>
+                                </form>
+                            </div>
+                            <div id="wiki-snapshot-management" role="tabpanel" aria-labelledby="wiki-snapshot-tab" hidden>
+                                <div class="stack">
+                                    <div class="change-actions" id="wiki-release-actions" hidden>
+                                        <button type="button" id="wiki-retire-snapshot" data-text="wikiRetireSnapshot">Retire selected snapshot</button>
+                                    </div>
+                                    <div class="change-actions">
+                                        <label><span data-text="wikiRetiredSnapshots">Retired snapshots</span><select id="wiki-retired-snapshot"></select></label>
+                                        <button type="button" id="wiki-older-retired" data-text="wikiOlderRetired" hidden>Load earlier snapshots</button>
+                                        <button type="button" id="wiki-restore-snapshot" data-text="wikiRestoreSnapshot" hidden>Restore snapshot</button>
+                                        <button type="button" id="wiki-purge-snapshot" data-text="wikiPurgeSnapshot" hidden>Delete permanently</button>
+                                    </div>
+                                    <p id="wiki-retention-date" class="hint" hidden></p>
+                                    <p id="wiki-lifecycle-status" class="notice" role="status" hidden></p>
+                                    <p id="wiki-lifecycle-write-status" class="notice" role="status" hidden></p>
+                                </div>
+                            </div>
+                        </div>
+                    </details>
                     <details class="surface wiki-run" id="wiki-run" hidden>
                         <summary data-text="wikiRun">Generation steps</summary>
+                        <div class="stack" id="wiki-execution" hidden>
+                            <p id="wiki-execution-time" class="hint" hidden></p>
+                            <div class="change-actions">
+                                <button type="button" id="wiki-job-pause" data-text="wikiPause">Pause</button>
+                                <button type="button" id="wiki-job-resume" data-text="wikiResume">Resume</button>
+                                <button type="button" id="wiki-job-cancel" data-text="wikiCancel">Cancel generation</button>
+                            </div>
+                            <p id="wiki-control-status" class="notice" role="status" hidden></p>
+                        </div>
                         <div id="wiki-steps" class="stack"></div>
                     </details>
                     <section class="surface" id="wiki-document" aria-labelledby="wiki-content-title" hidden>
@@ -293,10 +571,60 @@
                             <label class="document-select" id="wiki-document-picker"><span class="sr-only" data-text="wikiChoose">Wiki document</span><select id="wiki-select"></select></label>
                             <details class="action-popover" id="wiki-actions" data-dropdown>
                                 <summary class="icon-button" data-aria="readerActions" aria-label="Document actions"><span aria-hidden="true">···</span></summary>
-                                <div class="popover-items" id="wiki-action-items"><a id="wiki-export" data-text="downloadMarkdown">Download Markdown</a></div>
+                                <div class="popover-items" id="wiki-action-items"><a id="wiki-export" data-text="downloadMarkdown">Download Markdown</a><button type="button" id="wiki-knowledge-search" data-text="knowledgeExactScope">Search this version</button><button type="button" id="wiki-rebuild" data-text="wikiRebuild">Rebuild Wiki</button></div>
                             </details>
                         </div>
                         <div class="document-reader" data-document-reader id="wiki-content"></div>
+                        <section class="wiki-revisions stack" aria-labelledby="wiki-revisions-title">
+                            <h2 id="wiki-revisions-title" data-text="wikiRevisionHistory">Revision history</h2>
+                            <div class="change-actions">
+                                <label><span data-text="wikiRevision">Revision</span><select id="wiki-revision"></select></label>
+                                <button type="button" id="wiki-older-revisions" data-text="wikiOlderRevisions" hidden>Load older revisions</button>
+                                <button type="button" id="wiki-restore-revision" data-text="wikiRestoreRevision" hidden>Restore this revision</button>
+                                <button type="button" id="wiki-open-edit" data-text="wikiEditPage" hidden>Edit page</button>
+                            </div>
+                            <p class="notice" id="wiki-history-status" role="status" hidden></p>
+                            <form class="stack" id="wiki-edit-form" hidden>
+                                <label><span data-text="wikiMarkdownSource">Markdown source</span><textarea id="wiki-edit-markdown" class="wiki-markdown-input" rows="12"></textarea></label>
+                                <div class="change-actions">
+                                    <button type="submit" id="wiki-save-revision" class="primary" data-text="wikiSaveRevision">Publish revision</button>
+                                    <button type="button" id="wiki-save-draft" data-text="wikiSaveDraft">Save as draft</button>
+                                    <button type="button" id="wiki-close-edit" data-text="close">Close</button>
+                                </div>
+                            </form>
+                            <p class="notice" id="wiki-write-status" role="status" hidden></p>
+                            <details id="wiki-artifacts" class="wiki-drafts stack" hidden>
+                                <summary data-text="wikiArtifacts">Revision exports</summary>
+                                <form id="wiki-artifact-form" class="query-form">
+                                    <label><span data-text="wikiExportFormat">Format</span><select id="wiki-artifact-format"><option value="markdown">Markdown</option><option value="pdf">PDF</option><option value="docx">Word (.docx)</option></select></label>
+                                    <label class="field-grow"><span data-text="wikiExportSelection">Content</span><select id="wiki-artifact-section"></select></label>
+                                    <button type="submit" data-text="wikiPrepareExport">Generate export</button>
+                                </form>
+                                <p class="notice" id="wiki-artifact-list-status" role="status" hidden></p>
+                                <p class="notice" id="wiki-artifact-create-status" role="status" hidden></p>
+                                <ul id="wiki-artifact-results" class="space-list" hidden></ul>
+                                <button id="wiki-more-artifacts" type="button" data-text="next" hidden>Load more</button>
+                            </details>
+                            <details class="wiki-drafts stack" id="wiki-drafts" hidden>
+                                <summary data-text="wikiDrafts">Drafts</summary>
+                                <form class="stack" id="wiki-propose-form">
+                                    <label><span data-text="wikiDraftInstruction">Instructions for the model</span><textarea id="wiki-draft-instruction" rows="3" maxlength="4000" required></textarea></label>
+                                    <div class="change-actions"><button type="submit" id="wiki-generate-draft" data-text="wikiGenerateDraft">Generate draft</button></div>
+                                </form>
+                                <label><span data-text="wikiCompareDraft">Compare draft</span><select id="wiki-draft-select"></select></label>
+                                <p class="notice" id="wiki-draft-status" role="status" hidden></p>
+                                <section class="stack" id="wiki-draft-view" hidden>
+                                    <div class="wiki-draft-compare">
+                                        <div><h3 data-text="wikiDraftBase">Base revision</h3><pre id="wiki-draft-base"></pre></div>
+                                        <div><h3 data-text="wikiDraftProposed">Proposed Markdown</h3><pre id="wiki-draft-text"></pre></div>
+                                    </div>
+                                    <div class="change-actions" id="wiki-draft-review" hidden>
+                                        <button type="button" id="wiki-apply-draft" class="primary" data-text="wikiApplyDraft">Apply draft</button>
+                                        <button type="button" id="wiki-discard-draft" data-text="wikiDiscardDraft">Discard draft</button>
+                                    </div>
+                                </section>
+                            </details>
+                        </section>
                     </section>
                 </section>
                 <section id="view-findings" aria-labelledby="findings-title" hidden>
@@ -466,13 +794,27 @@
                 </section>
                 <section id="view-change-review" aria-labelledby="change-review-title" hidden>
                     <div class="page-header"><div><h1 id="change-review-title" data-text="change-review">Change review</h1>
-                        <p data-text="changeAbout">Submit a unified diff to capture evidence from the current repository index.</p></div></div>
+                        <p data-text="changeAbout">Compare published snapshots, capture local changes, or submit a unified diff.</p></div></div>
                     <form id="change-form" class="surface stack">
-                        <div class="change-versions">
-                            <label><span data-text="changeBase">Base version</span><input id="change-base" maxlength="256" autocomplete="off"></label>
-                            <label><span data-text="changeTarget">Target version</span><input id="change-target" maxlength="256" autocomplete="off"></label>
+                        <label><span data-text="changeInput">Review input</span><select id="change-source">
+                            <option value="diff" data-text="changeDiff">Unified diff</option>
+                            <option id="change-published-option" value="published" data-text="changePublished" hidden disabled>Published snapshots</option>
+                            <option id="change-working-option" value="working" data-text="changeWorkingCopy" hidden disabled>Local working copy</option>
+                        </select></label>
+                        <div id="change-paste-fields" class="stack">
+                            <div class="change-versions">
+                                <label><span data-text="changeBase">Base version</span><input id="change-base" maxlength="256" autocomplete="off"></label>
+                                <label><span data-text="changeTarget">Target version</span><input id="change-target" maxlength="256" autocomplete="off"></label>
+                            </div>
+                            <label><span data-text="changeDiff">Unified diff</span><textarea class="mono" id="change-diff" rows="9" required maxlength="2000000" spellcheck="false"></textarea></label>
                         </div>
-                        <label><span data-text="changeDiff">Unified diff</span><textarea class="mono" id="change-diff" rows="9" required maxlength="2000000" spellcheck="false"></textarea></label>
+                        <div id="change-published-fields" class="change-versions" hidden>
+                            <label><span data-text="changeBaseSnapshot">Baseline snapshot</span><select id="change-base-snapshot" disabled></select></label>
+                            <label id="change-target-field"><span data-text="changeTargetSnapshot">Target snapshot</span><select id="change-target-snapshot" disabled required></select></label>
+                        </div>
+                        <label id="change-paths-field" hidden><span data-text="changeWorkingPaths">Repository-relative file paths, one per line (up to 24)</span>
+                            <textarea class="mono" id="change-paths" rows="4" maxlength="32768" spellcheck="false" required disabled></textarea></label>
+                        <p class="notice" id="change-versions-status" role="status" hidden></p>
                         <div class="change-actions"><button type="submit" class="primary" data-text="changeSubmit">Create snapshot</button></div>
                     </form>
                     <p class="notice" id="change-status" role="status" hidden></p>
@@ -487,6 +829,7 @@
                         <p class="notice repository-notice" id="change-export-status" role="status" hidden></p>
                         <p class="notice repository-notice" id="change-model-status" role="status" hidden></p>
                         <p class="notice repository-notice" id="change-cancel-status" role="status" hidden></p>
+                        <p class="notice repository-notice" id="change-ask-status" role="status" hidden></p>
                         <div class="stack" id="change-run" hidden>
                             <div class="change-actions">
                                 <strong data-text="changeModelRun">Model review</strong>
@@ -514,8 +857,16 @@
                     </div>
                     <p class="notice" id="admin-status" role="status" hidden></p>
                     <p class="notice" id="admin-write-status" role="status" hidden></p>
-                    <div class="admin-layout">
-                        <section class="surface">
+                    <div class="settings-layout" id="admin-settings">
+                        <div class="settings-tablist" role="tablist" aria-labelledby="admin-title" aria-orientation="vertical">
+                            <button type="button" role="tab" id="admin-accounts-tab" aria-controls="admin-accounts" aria-selected="true" data-text="accounts">Accounts</button>
+                            <button type="button" role="tab" id="admin-organizations-tab" aria-controls="admin-organizations" aria-selected="false" tabindex="-1" data-text="organizations">Organizations</button>
+                            <button type="button" role="tab" id="admin-ownership-tab" aria-controls="admin-ownership" aria-selected="false" tabindex="-1" data-text="ownership">Repository ownership</button>
+                            <button type="button" role="tab" id="admin-providers-tab" aria-controls="provider-panel" aria-selected="false" tabindex="-1" data-text="settingsModels">Models</button>
+                            <button type="button" role="tab" id="admin-diagnostics-tab" aria-controls="diagnostics-panel" aria-selected="false" tabindex="-1" data-text="operationsDiagnostics">Service diagnostics</button>
+                            <button type="button" role="tab" id="admin-audit-tab" aria-controls="admin-audit" aria-selected="false" tabindex="-1" data-text="audit">Management audit</button>
+                        </div>
+                        <section class="surface" role="tabpanel" id="admin-accounts" aria-labelledby="admin-accounts-tab">
                             <header class="surface-header"><h2 data-text="accounts">Accounts</h2></header>
                             <div id="account-list" class="admin-list"></div>
                             <form id="review-form" class="stack">
@@ -525,7 +876,7 @@
                                 <button type="submit" class="primary" data-text="saveReview">Save review</button>
                             </form>
                         </section>
-                        <section class="surface">
+                        <section class="surface" role="tabpanel" id="admin-organizations" aria-labelledby="admin-organizations-tab" hidden>
                             <header class="surface-header"><h2 data-text="organizations">Organizations</h2></header>
                             <form id="organization-form" class="stack">
                                 <label><span data-text="organization">Organization</span><select id="managed-org"></select></label>
@@ -541,7 +892,7 @@
                             </form>
                             <p class="notice repository-notice" id="admin-members-status" role="status" hidden></p>
                         </section>
-                        <section class="surface">
+                        <section class="surface" role="tabpanel" id="admin-ownership" aria-labelledby="admin-ownership-tab" hidden>
                             <header class="surface-header"><h2 data-text="ownership">Repository ownership</h2></header>
                             <form id="owner-form" class="stack">
                                 <label><span data-text="repository">Repository</span><select id="owner-project" required></select></label>
@@ -551,45 +902,73 @@
                                 <button type="submit" class="primary" data-text="assign">Assign repository</button>
                             </form>
                         </section>
-                        <section class="surface">
+                        <section class="surface" role="tabpanel" id="admin-audit" aria-labelledby="admin-audit-tab" tabindex="0" hidden>
                             <header class="surface-header"><h2 data-text="audit">Management audit</h2></header>
                             <div id="audit-list" class="admin-list"></div>
                         </section>
+                        <section class="surface" id="diagnostics-panel" role="tabpanel" aria-labelledby="admin-diagnostics-tab" hidden>
+                            <header class="surface-header"><h2 data-text="operationsDiagnostics">Service diagnostics</h2></header>
+                            <section class="stack">
+                                <p class="notice" id="operations-status" role="status" hidden></p>
+                                <div id="operations-content" class="stack" hidden></div>
+                                <form id="operations-lookup" class="stack">
+                                    <div class="provider-fields">
+                                        <label><span data-text="operationsLookupType">Diagnose by</span><select id="operations-kind">
+                                                <option value="requests" data-text="operationsRequestId">Request ID</option>
+                                                <option value="runs" data-text="operationsRunId">Run ID</option>
+                                            </select></label>
+                                        <label><span data-text="operationsIdentifier">Identifier</span><input id="operations-id" required maxlength="36"></label>
+                                    </div>
+                                    <div class="change-actions"><button type="submit" data-text="find">Search</button></div>
+                                </form>
+                                <p class="notice" id="operations-lookup-status" role="status" hidden></p>
+                                <pre id="operations-lookup-result" class="operations-result" hidden></pre>
+                            </section>
+                        </section>
+                        <section class="surface" id="provider-panel" role="tabpanel" aria-labelledby="admin-providers-tab" hidden>
+                            <header class="surface-header"><h2 data-text="generationProviders">Generation providers</h2></header>
+                            <p class="notice repository-notice" id="provider-list-status" role="status" hidden></p>
+                            <form id="provider-form" class="stack" hidden>
+                                <label><span data-text="providerProfile">Profile</span><select id="provider-profile"></select></label>
+                                <div class="provider-fields">
+                                    <label><span data-text="providerName">Name</span><input id="provider-name" maxlength="100" required></label>
+                                    <label><span data-text="providerProtocol">Protocol</span><select id="provider-protocol">
+                                            <option value="OLLAMA">Ollama</option><option value="OPENAI">OpenAI</option>
+                                            <option value="OPENAI_COMPATIBLE" data-text="openAiCompatible">OpenAI compatible</option><option value="ANTHROPIC">Anthropic</option>
+                                        </select></label>
+                                    <label><span data-text="providerUrl">Base URL</span><input id="provider-url" type="url" maxlength="500" required></label>
+                                    <label><span data-text="providerModel">Model ID</span><input id="provider-model" list="provider-models" maxlength="200" required><datalist id="provider-models"></datalist></label>
+                                    <label><span data-text="providerKey">API key</span><input id="provider-key" type="password" autocomplete="new-password" maxlength="8192"></label>
+                                    <label><span data-text="providerTimeout">Timeout (ms)</span><input id="provider-timeout" type="number" min="1000" max="600000" required></label>
+                                    <label><span data-text="providerTokens">Output token limit</span><input id="provider-tokens" type="number" min="1" max="65536" required></label>
+                                    <label><span data-text="providerConcurrency">Concurrent model calls</span><input id="provider-concurrency" type="number" min="1" max="4" step="1" required></label>
+                                    <label><span data-text="providerReservedAsk">Slots reserved for Ask</span><input id="provider-reserved-ask" type="number" min="0" max="3" step="1" required></label>
+                                    <label><span data-text="providerInputPrice">Input USD per million tokens</span><input id="provider-input-price" type="number" min="0" max="1000000" step="any"></label>
+                                    <label><span data-text="providerOutputPrice">Output USD per million tokens</span><input id="provider-output-price" type="number" min="0" max="1000000" step="any"></label>
+                                </div>
+                                <label class="check"><input id="provider-window-enabled" type="checkbox"><span data-text="providerWindow">Schedule background model calls</span></label>
+                                <div id="provider-window-fields" class="provider-fields" hidden>
+                                    <label><span data-text="gitTimeZone">Time zone</span><input id="provider-window-zone" maxlength="100" placeholder="Asia/Shanghai" disabled required></label>
+                                    <label><span data-text="providerWindowStart">Window opens</span><input id="provider-window-start" type="time" step="60" disabled required></label>
+                                    <label><span data-text="providerWindowEnd">Window closes</span><input id="provider-window-end" type="time" step="60" disabled required></label>
+                                    <fieldset class="git-schedule-days"><legend data-text="gitScheduleDays">Run on</legend><div id="provider-window-days"></div></fieldset>
+                                </div>
+                                <div class="provider-actions">
+                                    <label class="check"><input id="provider-enabled" type="checkbox"><span data-text="active">Active</span></label>
+                                    <label class="check"><input id="provider-clear-key" type="checkbox"><span data-text="providerClearKey">Clear saved key</span></label>
+                                    <span id="provider-key-state" class="hint"></span>
+                                </div>
+                                <div class="provider-actions">
+                                    <button type="submit" class="primary" data-text="providerSave">Save profile</button>
+                                    <button type="button" id="provider-discover" data-text="providerDiscover">Discover models</button>
+                                    <button type="button" id="provider-test" data-text="providerTest">Test saved profile</button>
+                                    <button type="button" id="provider-select" data-text="providerSelect">Select saved profile</button>
+                                    <button type="button" id="provider-delete" data-text="providerDelete">Delete profile</button>
+                                </div>
+                            </form>
+                            <p class="notice repository-notice" id="provider-write-status" role="status" hidden></p>
+                        </section>
                     </div>
-                    <details class="surface provider-panel" id="provider-panel">
-                        <summary data-text="generationProviders">Generation providers</summary>
-                        <p class="notice repository-notice" id="provider-list-status" role="status" hidden></p>
-                        <form id="provider-form" class="stack" hidden>
-                            <label><span data-text="providerProfile">Profile</span><select id="provider-profile"></select></label>
-                            <div class="provider-fields">
-                                <label><span data-text="providerName">Name</span><input id="provider-name" maxlength="100" required></label>
-                                <label><span data-text="providerProtocol">Protocol</span><select id="provider-protocol">
-                                    <option value="OLLAMA">Ollama</option><option value="OPENAI">OpenAI</option>
-                                    <option value="OPENAI_COMPATIBLE" data-text="openAiCompatible">OpenAI compatible</option><option value="ANTHROPIC">Anthropic</option>
-                                </select></label>
-                                <label><span data-text="providerUrl">Base URL</span><input id="provider-url" type="url" maxlength="500" required></label>
-                                <label><span data-text="providerModel">Model ID</span><input id="provider-model" list="provider-models" maxlength="200" required><datalist id="provider-models"></datalist></label>
-                                <label><span data-text="providerKey">API key</span><input id="provider-key" type="password" autocomplete="new-password" maxlength="8192"></label>
-                                <label><span data-text="providerTimeout">Timeout (ms)</span><input id="provider-timeout" type="number" min="1000" max="600000" required></label>
-                                <label><span data-text="providerTokens">Output token limit</span><input id="provider-tokens" type="number" min="1" max="65536" required></label>
-                                <label><span data-text="providerInputPrice">Input USD per million tokens</span><input id="provider-input-price" type="number" min="0" max="1000000" step="any"></label>
-                                <label><span data-text="providerOutputPrice">Output USD per million tokens</span><input id="provider-output-price" type="number" min="0" max="1000000" step="any"></label>
-                            </div>
-                            <div class="provider-actions">
-                                <label class="check"><input id="provider-enabled" type="checkbox"><span data-text="active">Active</span></label>
-                                <label class="check"><input id="provider-clear-key" type="checkbox"><span data-text="providerClearKey">Clear saved key</span></label>
-                                <span id="provider-key-state" class="hint"></span>
-                            </div>
-                            <div class="provider-actions">
-                                <button type="submit" class="primary" data-text="providerSave">Save profile</button>
-                                <button type="button" id="provider-discover" data-text="providerDiscover">Discover models</button>
-                                <button type="button" id="provider-test" data-text="providerTest">Test saved profile</button>
-                                <button type="button" id="provider-select" data-text="providerSelect">Select saved profile</button>
-                                <button type="button" id="provider-delete" data-text="providerDelete">Delete profile</button>
-                            </div>
-                        </form>
-                        <p class="notice repository-notice" id="provider-write-status" role="status" hidden></p>
-                    </details>
                 </section>
             </main>
         </div>
@@ -599,37 +978,96 @@
             <h2 id="index-title" data-text="connectRepository">Connect repository</h2>
             <form method="dialog"><button type="submit" class="icon-button" aria-label="Close" data-aria="close"><span class="nav-icon icon-close" aria-hidden="true"></span></button></form>
         </header>
-        <div class="control-tabs" role="group" aria-label="Repository source" data-aria="repositoryType">
-            <button type="button" data-connect-source="local" aria-pressed="true" aria-controls="local-index" data-text="repositoryLocal">Local folders</button>
-            <button type="button" data-connect-source="archive" aria-pressed="false" aria-controls="archive-upload" data-text="archiveUpload">Import a source archive</button>
+        <div class="settings-layout" id="repository-settings">
+            <div class="settings-tablist" role="tablist" aria-label="Repository source" data-aria="repositoryType" aria-orientation="vertical">
+                <button type="button" role="tab" id="connect-local-tab" aria-selected="true" aria-controls="local-index" data-text="repositoryLocal">Local folders</button>
+                <button type="button" role="tab" id="connect-archive-tab" aria-selected="false" aria-controls="archive-upload" tabindex="-1" data-text="repositoryArchives">Archives</button>
+                <button type="button" role="tab" id="connect-git-tab" aria-selected="false" aria-controls="git-connect" tabindex="-1" data-text="gitRepositories">Remote Git</button>
+            </div>
+            <div id="local-index" role="tabpanel" aria-labelledby="connect-local-tab">
+                <form class="stack" id="index-form">
+                    <label><span data-text="directory">Repository directory</span><input id="directory" required placeholder="/path/to/repository" maxlength="4096"></label>
+                    <p class="hint" data-text="directoryHint">Use an absolute path inside the configured workspace root.</p>
+                    <label><span data-text="parseStrategy">Parsing strategy</span><select id="index-strategy">
+                            <option value="auto" data-text="parseAuto">Automatic</option>
+                            <option value="precise" data-text="parsePrecise">Precise</option>
+                            <option value="heuristic" data-text="parseHeuristic">Heuristic</option>
+                        </select></label>
+                    <label class="check"><input id="index-bytecode" type="checkbox"><span data-text="includeBytecode">Include Java bytecode (.class and .jar)</span></label>
+                    <label class="check"><input id="rebuild" type="checkbox"><span data-text="rebuild">Rebuild the index</span></label>
+                    <button type="submit" class="primary" data-text="startIndex">Start indexing</button>
+                </form>
+                <div class="job" id="index-status" role="status" aria-live="polite" hidden></div>
+            </div>
+            <div id="archive-upload" role="tabpanel" aria-labelledby="connect-archive-tab" hidden>
+                <form id="archive-form" class="stack">
+                    <label><span data-text="archiveFile">ZIP, TAR.GZ or JAR file</span><input id="archive-file" type="file" accept=".zip,.tar.gz,.tgz,.jar" required></label>
+                    <label><span data-text="parseStrategy">Parsing strategy</span><select id="archive-strategy">
+                            <option value="auto" data-text="parseAuto">Automatic</option>
+                            <option value="precise" data-text="parsePrecise">Precise</option>
+                            <option value="heuristic" data-text="parseHeuristic">Heuristic</option>
+                        </select></label>
+                    <label class="check"><input id="archive-bytecode" type="checkbox"><span data-text="includeBytecode">Include Java bytecode (.class and .jar)</span></label>
+                    <button type="submit" class="primary" data-text="importArchive">Import and index</button>
+                </form>
+                <div class="job" id="archive-status" role="status" aria-live="polite" hidden></div>
+            </div>
+            <div id="git-connect" role="tabpanel" aria-labelledby="connect-git-tab" hidden>
+                <form id="git-connect-form" class="stack">
+                    <label><span data-text="gitConnection">Git connection</span><select id="git-connection"></select></label>
+                    <div id="git-new-connection" class="stack">
+                        <label><span data-text="gitConnectionName">Connection name</span><input id="git-connection-name" required maxlength="100"></label>
+                        <label><span data-text="gitAdapter">Hosting platform</span><select id="git-adapter">
+                                <option value="" data-text="gitGenericAdapter">Generic Git</option>
+                                <option value="GITHUB">GitHub</option><option value="GITLAB">GitLab</option>
+                            </select></label>
+                        <label><span data-text="gitUrl">Repository URL</span><input type="url" id="git-url" required maxlength="500" placeholder="https://git.example.com/team/repository.git"></label>
+                        <label><span data-text="gitUsername">Git username (optional)</span><input id="git-username" maxlength="256" autocomplete="off"></label>
+                        <label><span data-text="gitToken">Git token (optional)</span><input type="password" id="git-token" maxlength="4096" autocomplete="new-password"></label>
+                    </div>
+                    <label><span data-text="gitBranch">Tracking branch</span><input id="git-branch" value="main" required maxlength="200"></label>
+                    <button type="submit" class="primary" data-text="gitConnectSync">Connect and sync</button>
+                </form>
+                <p class="notice" id="git-connect-status" role="status" hidden></p>
+                <p class="notice" id="git-connections-status" role="status" hidden></p>
+            </div>
         </div>
-        <div id="local-index">
-            <form class="stack" id="index-form">
-                <label><span data-text="directory">Repository directory</span><input id="directory" required placeholder="/path/to/repository" maxlength="4096"></label>
-                <p class="hint" data-text="directoryHint">Use an absolute path inside the configured workspace root.</p>
-                <label><span data-text="parseStrategy">Parsing strategy</span><select id="index-strategy">
-                    <option value="auto" data-text="parseAuto">Automatic</option>
-                    <option value="precise" data-text="parsePrecise">Precise</option>
-                    <option value="heuristic" data-text="parseHeuristic">Heuristic</option>
-                </select></label>
-                <label class="check"><input id="index-bytecode" type="checkbox"><span data-text="includeBytecode">Include Java bytecode (.class and .jar)</span></label>
-                <label class="check"><input id="rebuild" type="checkbox"><span data-text="rebuild">Rebuild the index</span></label>
-                <button type="submit" class="primary" data-text="startIndex">Start indexing</button>
-            </form>
-            <div class="job" id="index-status" role="status" aria-live="polite" hidden></div>
-        </div>
-        <div id="archive-upload" hidden>
-            <form id="archive-form" class="stack">
-                <label><span data-text="archiveFile">ZIP, TAR.GZ or JAR file</span><input id="archive-file" type="file" accept=".zip,.tar.gz,.tgz,.jar" required></label>
-                <label><span data-text="parseStrategy">Parsing strategy</span><select id="archive-strategy">
-                    <option value="auto" data-text="parseAuto">Automatic</option>
-                    <option value="precise" data-text="parsePrecise">Precise</option>
-                    <option value="heuristic" data-text="parseHeuristic">Heuristic</option>
-                </select></label>
-                <label class="check"><input id="archive-bytecode" type="checkbox"><span data-text="includeBytecode">Include Java bytecode (.class and .jar)</span></label>
-                <button type="submit" class="primary" data-text="importArchive">Import and index</button>
-            </form>
-            <div class="job" id="archive-status" role="status" aria-live="polite" hidden></div>
+    </dialog>
+    <dialog id="device-auth" class="source-dialog settings-dialog" aria-labelledby="device-auth-title">
+        <header class="surface-header">
+            <h2 id="device-auth-title" data-text="deviceAuthorization">Device access</h2>
+            <form method="dialog"><button type="submit" data-text="close">Close</button></form>
+        </header>
+        <div class="settings-layout" id="device-settings">
+            <div class="settings-tablist" role="tablist" aria-labelledby="device-auth-title" aria-orientation="vertical">
+                <button type="button" role="tab" id="device-approve-tab" aria-controls="device-approval" aria-selected="true" data-text="deviceApprove">Approve device</button>
+                <button type="button" role="tab" id="device-list-tab" aria-controls="device-list" aria-selected="false" tabindex="-1" data-text="deviceActive">Authorized devices</button>
+            </div>
+            <div id="device-approval" role="tabpanel" aria-labelledby="device-approve-tab" class="settings-content">
+                <form id="device-code-form" class="space-inline-form">
+                    <label><span data-text="deviceCode">Code shown by the CLI</span><input id="device-code" maxlength="12" autocomplete="off" spellcheck="false" placeholder="ABCD-EFGH" required></label>
+                    <button type="submit" data-text="deviceReview">Review request</button>
+                </form>
+                <div id="device-review" class="stack" hidden>
+                    <p id="device-client"></p>
+                    <p class="hint" data-text="deviceReadScope">This device can read knowledge you can access. Approve only a code you requested.</p>
+                    <div class="change-actions">
+                        <button type="button" class="primary" id="device-approve" data-text="deviceApprove">Approve device</button>
+                        <button type="button" id="device-deny" data-text="deviceDeny">Deny</button>
+                    </div>
+                </div>
+                <p class="notice" id="device-inspect-status" role="status" hidden></p>
+                <p class="notice" id="device-decision-status" role="status" hidden></p>
+            </div>
+            <div id="device-list" role="tabpanel" aria-labelledby="device-list-tab" class="settings-content" hidden>
+                <div class="space-panel-header">
+                    <h3 data-text="deviceActive">Authorized devices</h3>
+                    <button type="button" id="device-refresh" data-text="deviceRefresh">Refresh</button>
+                </div>
+                <ul id="device-credentials" class="space-list"></ul>
+                <p class="notice" id="device-credentials-status" role="status" hidden></p>
+                <p class="notice" id="device-revoke-status" role="status" hidden></p>
+            </div>
         </div>
     </dialog>
     <dialog id="source-dialog" class="source-dialog" aria-labelledby="source-title">
@@ -637,14 +1075,123 @@
         <div class="source-actions"><a id="source-link" href="/" data-text="sourceLink">Source link</a><button id="copy" type="button" data-text="copy">Copy source</button><span id="copy-status" role="status"></span></div>
         <pre id="source-content" tabindex="0"></pre>
     </dialog>
-    <dialog id="account-dialog" class="source-dialog account-dialog" aria-labelledby="account-title">
-        <header class="surface-header"><div><h2 id="account-title" data-text="account">Account</h2><p id="account-details"></p></div><form method="dialog"><button type="submit" data-text="close">Close</button></form></header>
-        <form id="password-form" class="stack">
-            <label><span data-text="oldPassword">Current password</span><input id="old-password" type="password" required maxlength="72" autocomplete="current-password"></label>
-            <label><span data-text="newPassword">New password</span><input id="new-password" type="password" required minLength="12" maxlength="72" autocomplete="new-password"></label>
-            <button type="submit" class="primary" data-text="changePassword">Change password</button>
+    <dialog id="ask-attachment-dialog" class="source-dialog" aria-labelledby="ask-attachment-title">
+        <header class="surface-header">
+            <div><h2 id="ask-attachment-title" data-text="askAttachmentPreview">Attachment preview</h2><p id="ask-attachment-version" class="mono"></p></div>
+            <form method="dialog"><button type="submit" data-text="close">Close</button></form>
+        </header>
+        <div class="source-actions"><a id="ask-attachment-download" data-text="askAttachmentDownload" hidden>Download original</a></div>
+        <label id="ask-attachment-page-field" hidden><span data-text="spacePdfPage">Page</span><select id="ask-attachment-page"></select></label>
+        <p class="notice" id="ask-attachment-status" role="status" hidden></p>
+        <pre id="ask-attachment-content" tabindex="0"></pre>
+    </dialog>
+    <dialog id="space-settings" class="source-dialog settings-dialog" aria-labelledby="space-settings-title">
+        <header class="surface-header">
+            <div><h2 id="space-settings-title" data-text="spaceSettings">Space settings</h2><p id="space-settings-name"></p></div>
+            <form method="dialog"><button type="submit" data-text="close">Close</button></form>
+        </header>
+        <p class="notice repository-notice" id="space-settings-status" role="status" hidden></p>
+        <div class="settings-layout" id="space-settings-content" hidden>
+            <div class="settings-tablist" role="tablist" aria-labelledby="space-settings-title" aria-orientation="vertical">
+                <button type="button" role="tab" id="space-general-tab" aria-controls="space-general" aria-selected="true" data-text="settingsGeneral">General</button>
+                <button type="button" role="tab" id="space-members-tab" aria-controls="space-members" aria-selected="false" tabindex="-1" data-text="spaceMembers">Space members</button>
+                <button type="button" role="tab" id="space-management-tab" aria-controls="space-management" aria-selected="false" tabindex="-1" data-text="settingsManagement">Management</button>
+            </div>
+            <div class="settings-content" id="space-general" role="tabpanel" aria-labelledby="space-general-tab">
+                <form id="space-settings-limits" class="space-settings-form">
+                    <label><span data-text="spaceName">Space name</span><input id="space-settings-input" maxlength="200" required></label>
+                    <label><span data-text="spaceMaxRepositories">Repository limit</span><input id="space-max-repositories" type="number" min="0" max="500" step="1" required></label>
+                    <label><span data-text="spaceMaxFileBytes">Single file limit (bytes)</span><input id="space-max-file-bytes" type="number" min="0" max="2097152" step="1" required></label>
+                    <label><span data-text="spaceMaxBytes">Total storage limit (bytes)</span><input id="space-max-bytes" type="number" min="0" max="1073741824" step="1" required></label>
+                    <p class="hint" id="space-used-bytes"></p>
+                    <div class="change-actions"><button type="submit" data-text="spaceSaveSettings">Save settings</button></div>
+                </form>
+            </div>
+            <section class="settings-content" id="space-members" role="tabpanel" aria-labelledby="space-members-tab" hidden>
+                <h3 id="space-members-title" data-text="spaceMembers">Space members</h3>
+                <ul class="space-list" id="space-member-list"></ul>
+                <form id="space-add-member" class="space-inline-form">
+                    <label><span data-text="username">Username</span><input id="space-member-username" required maxlength="64" autocomplete="off"></label>
+                    <label><span data-text="spaceRole">Role</span><select id="space-add-role"></select></label>
+                    <button type="submit" data-text="spaceGrantRole">Grant access</button>
+                </form>
+            </section>
+            <div class="settings-content change-actions" id="space-management" role="tabpanel" aria-labelledby="space-management-tab" hidden>
+                <button type="button" id="space-settings-refresh" data-text="spaceReloadSettings">Reload settings</button>
+                <button type="button" id="space-delete" data-text="spaceDeleteSpace">Delete space</button>
+            </div>
+        </div>
+    </dialog>
+    <dialog id="space-move" class="source-dialog space-dialog" aria-labelledby="space-move-title">
+        <header class="surface-header"><h2 id="space-move-title" data-text="spaceMove">Move or rename</h2>
+            <form method="dialog"><button type="submit" data-text="close">Close</button></form>
+        </header>
+        <form id="space-move-form" class="stack">
+            <label><span data-text="spaceItemName">Folder or document name</span><input id="space-move-name" maxlength="200" required></label>
+            <div>
+                <h3 data-text="spaceDestination">Destination</h3>
+                <p id="space-move-path" class="hint"></p>
+                <div class="change-actions">
+                    <button type="button" id="space-move-current" data-text="spaceKeepFolder">Keep current folder</button>
+                    <button type="button" id="space-move-root" data-text="spaceUp">Root folder</button>
+                    <button type="button" id="space-move-up" data-text="spaceParentFolder" hidden>Parent folder</button>
+                </div>
+                <ul class="space-list" id="space-move-folders"></ul>
+                <p class="notice" id="space-move-folders-status" role="status" hidden></p>
+            </div>
+            <div class="change-actions"><button type="submit" id="space-move-submit" class="primary" data-text="save">Save</button></div>
         </form>
-        <p class="notice repository-notice" id="password-status" role="status" hidden></p>
+        <p class="notice repository-notice" id="space-move-status" role="status" hidden></p>
+    </dialog>
+    <dialog id="space-import" class="source-dialog space-dialog" aria-labelledby="space-import-title">
+        <header class="surface-header"><h2 id="space-import-title" data-text="spaceImportDocuments">Import document</h2>
+            <form method="dialog"><button type="submit" data-text="close">Close</button></form>
+        </header>
+        <form id="space-import-form" class="stack">
+            <label><span data-text="spaceImportDocument">Markdown, PDF or CSV file</span><input id="space-import-file" type="file" accept=".md,.markdown,text/markdown,.pdf,application/pdf,.csv,text/csv" required></label>
+            <label><span data-text="spaceImportMode">Save as</span><select id="space-import-mode">
+                <option value="new" data-text="spaceImportNew">New document</option><option value="revision" data-text="spaceImportRevision">New revision</option>
+            </select></label>
+            <label id="space-import-name-label"><span data-text="spaceItemName">Folder or document name</span><input id="space-import-name" maxlength="200" required></label>
+            <label id="space-import-target-label" hidden><span data-text="spaceImportExisting">Existing document</span><select id="space-import-target" disabled></select></label>
+            <div class="change-actions">
+                <button type="submit" id="space-import-submit" class="primary" data-text="spaceImportSave">Import file</button>
+                <button type="button" id="space-import-reload" data-text="spaceImportReload" hidden>Reload documents</button>
+            </div>
+        </form>
+        <p class="notice repository-notice" id="space-import-status" role="status" hidden></p>
+        <p class="notice repository-notice" id="space-import-targets-status" role="status" hidden></p>
+    </dialog>
+    <dialog id="space-generation" class="source-dialog account-dialog" aria-labelledby="space-generation-title">
+        <header class="surface-header">
+            <div><h2 id="space-generation-title" data-text="spaceGenerateDocument">Generate Markdown</h2><p id="space-generation-target"></p></div>
+            <form method="dialog"><button type="submit" data-text="close">Close</button></form>
+        </header>
+        <form id="space-generation-form" class="stack">
+            <p class="hint" data-text="spaceGenerationConsent">Generation sends these instructions and the saved revision, if any, to the configured model.</p>
+            <label><span data-text="spaceGenerationInstruction">Instructions</span><textarea id="space-generation-instruction" rows="5" maxlength="4000" required></textarea></label>
+            <div class="change-actions"><button type="submit" class="primary" id="space-generation-submit" data-text="spaceGenerateSave">Generate and save</button></div>
+        </form>
+        <p id="space-generation-status" class="notice repository-notice" role="status" hidden></p>
+        <div id="space-generation-result" class="workspace-panel" hidden></div>
+    </dialog>
+    <dialog id="account-dialog" class="source-dialog settings-dialog" aria-labelledby="account-title">
+        <header class="surface-header"><h2 id="account-title" data-text="account">Account</h2><form method="dialog"><button type="submit" data-text="close">Close</button></form></header>
+        <div class="settings-layout" id="account-settings">
+            <div class="settings-tablist" role="tablist" aria-labelledby="account-title" aria-orientation="vertical">
+                <button type="button" role="tab" id="account-profile-tab" aria-controls="account-profile" aria-selected="true" data-text="settingsProfile">Profile</button>
+                <button type="button" role="tab" id="account-password-tab" aria-controls="account-password" aria-selected="false" tabindex="-1" data-text="changePassword">Change password</button>
+            </div>
+            <div id="account-profile" class="settings-content" role="tabpanel" aria-labelledby="account-profile-tab" tabindex="0"><p id="account-details"></p></div>
+            <div id="account-password" role="tabpanel" aria-labelledby="account-password-tab" hidden>
+                <form id="password-form" class="stack">
+                    <label><span data-text="oldPassword">Current password</span><input id="old-password" type="password" required maxlength="72" autocomplete="current-password"></label>
+                    <label><span data-text="newPassword">New password</span><input id="new-password" type="password" required minLength="12" maxlength="72" autocomplete="new-password"></label>
+                    <button type="submit" class="primary" data-text="changePassword">Change password</button>
+                </form>
+                <p class="notice repository-notice" id="password-status" role="status" hidden></p>
+            </div>
+        </div>
     </dialog>
 </body>
 </html>

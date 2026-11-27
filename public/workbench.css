@@ -24,6 +24,7 @@
     --radius-control: 5px;
     --ease-control: 150ms cubic-bezier(.2, .7, .2, 1);
     --ease-dialog: 210ms cubic-bezier(.2, .7, .2, 1);
+    --ease-content: 240ms cubic-bezier(.2, .65, .25, 1);
     --mono: "SFMono-Regular", Consolas, monospace;
     font: 14px/1.6 "Instrument Sans", "PingFang SC", "Microsoft Yahei", system-ui, sans-serif;
 }
@@ -184,7 +185,7 @@ main { width: min(100%, 1600px); padding: 32px clamp(20px, 3vw, 48px) 44px; marg
 .status-tabs button, .control-tabs button { color: var(--muted); background: transparent; border: 0; padding: 7px 10px 12px; border-radius: 0; font-weight: 500; }
 .status-tabs button:hover, .control-tabs button:hover { background: var(--sidebar); }
 .status-tabs button[aria-pressed="true"], .control-tabs button[aria-pressed="true"] { color: var(--accent); box-shadow: inset 0 -2px var(--accent); font-weight: 650; }
-.status-tabs small { display: inline-block; margin-inline-start: 5px; padding: 2px 5px; border-radius: 4px; background: var(--sidebar); font: 11px var(--mono); }
+.status-tabs small { display: inline-block; margin-inline-start: 5px; padding: 2px 5px; border-radius: 4px; background: var(--sidebar); font: 11px var(--mono); font-variant-numeric: tabular-nums; }
 .status-tabs button:focus-visible, .control-tabs button:focus-visible { outline-offset: -3px; }
 .repository-table table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; text-align: start; font-size: 12px; }
 .repository-table :is(th, td) { text-align: start; padding: 11px 16px; border-top: 1px solid var(--border); }
@@ -224,6 +225,40 @@ main { width: min(100%, 1600px); padding: 32px clamp(20px, 3vw, 48px) 44px; marg
 .workspace-panels { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 18px; margin-top: 22px; }
 .workspace-panel { padding: 16px 20px; }
 .workspace-panel h2 { margin-bottom: 12px; }
+.project-trash { margin-top: 18px; }
+.project-trash .kind { white-space: normal; overflow-wrap: anywhere; }
+.space-layout { display: grid; grid-template-columns: minmax(13rem, 0.7fr) minmax(0, 2fr); gap: 18px; align-items: start; }
+.space-panel-header, .space-inline-form, .space-list li { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.space-panel-header { justify-content: space-between; }
+.space-csv-scroll { max-width: 100%; overflow: auto; }
+#space-csv-table button { display: block; min-width: 2.4rem; min-height: 2rem; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#space-csv-table button[aria-pressed="true"] { outline: 2px solid currentColor; outline-offset: -2px; }
+#space-csv-row { width: 7ch; }
+.space-inline-form { align-items: end; margin-block: 8px; }
+.space-inline-form > label { flex: 1 1 11rem; }
+.space-list { list-style: none; padding: 0; margin-block: 10px; }
+.space-list li { overflow-wrap: anywhere; padding-block: 6px; }
+.space-list a[aria-current] { font-weight: 700; }
+.space-list a, .space-list li > span { margin-inline-end: auto; }
+.space-dialog { width: min(600px, calc(100% - 26px)); }
+.space-settings-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: 10px 14px; }
+.space-settings-form p, .space-settings-form .change-actions { grid-column: 1 / -1; }
+.space-dialog p { overflow-wrap: anywhere; }
+#space-member-list select { width: auto; }
+#space-markdown { font-family: var(--mono); }
+#git-overview { margin-block: 16px; }
+.git-revision-list { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr); gap: 7px 14px; margin-block: 12px; }
+.git-revision-list dd { margin: 0; overflow-wrap: anywhere; }
+#git-connection-form { margin-block: 12px; max-width: 34rem; }
+#git-event-path { overflow-wrap: anywhere; }
+.archive-digest { overflow-wrap: anywhere; }
+.ask-workspace { display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); gap: 16px; align-items: start; }
+#ask-create, #ask-question-form { margin-top: 14px; }
+.ask-message { padding: 12px; border-radius: 8px; border: 1px solid var(--line); overflow-wrap: anywhere; }
+.ask-message p { white-space: pre-wrap; }
+.ask-message pre { white-space: pre-wrap; }
+.ask-message summary { cursor: pointer; }
+@media (max-width: 720px) { .ask-workspace { grid-template-columns: minmax(0, 1fr); } }
 .workspace-empty { padding-block: 8px; font-size: 13px; }
 .repo-event { display: flex; align-items: center; gap: 8px; padding-block: 8px; border-top: 1px solid var(--border); color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
 .repo-event:hover { background: var(--sidebar); }
@@ -242,8 +277,7 @@ main { width: min(100%, 1600px); padding: 32px clamp(20px, 3vw, 48px) 44px; marg
 .workspace-lang-bar i:nth-child(4n+2), .workspace-lang-legend li:nth-child(4n+2) { --language-color: #77a39a; }
 .workspace-lang-bar i:nth-child(4n+3), .workspace-lang-legend li:nth-child(4n+3) { --language-color: #bc9c75; }
 .workspace-lang-bar i:nth-child(4n+4), .workspace-lang-legend li:nth-child(4n+4) { --language-color: #a496b5; }
-.index-dialog { width: min(480px, 92vw); }
-.index-dialog .control-tabs { border-bottom: 1px solid var(--border); margin-top: 8px; }
+.index-dialog, .settings-dialog { width: min(730px, calc(100% - 26px)); }
 .index-dialog .stack > button { justify-self: start; }
 .index-dialog .job { overflow-wrap: anywhere; }
 .row-actions { display: grid; gap: 6px; }
@@ -293,8 +327,16 @@ summary { cursor: pointer; font-weight: 600; padding: 12px 15px; }
     from { opacity: .3; transform: translateY(4px); }
     to { opacity: 1; transform: translateY(0); }
 }
+@keyframes content-enter {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
 @media (prefers-reduced-motion: no-preference) {
     dialog[open] { animation: dialog-enter var(--ease-dialog); }
+    #main > section:not([hidden]), .settings-layout > [role="tabpanel"]:not([hidden]),
+    #wiki-content > .document-layout, #git-calendar-fields:not([hidden]), #provider-window-fields:not([hidden]) {
+        animation: content-enter var(--ease-content);
+    }
     button:enabled:active { transform: translateY(1px); }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -358,6 +400,18 @@ summary { cursor: pointer; font-weight: 600; padding: 12px 15px; }
 #vuln-detail-content { overflow-wrap: anywhere; }
 #vuln-detail-content ol, #vuln-detail-content ul { margin: 0; padding-inline-start: 22px; }
 .wiki-run { margin-bottom: 12px; }
+.wiki-scope { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin-bottom: 12px; }
+.wiki-scope a { padding-block: 9px; }
+.wiki-search-results { margin-block: 10px 14px; padding-inline-start: 25px; }
+.wiki-search-results li + li { margin-top: 5px; }
+.wiki-revisions { border-top: 1px solid var(--border); padding-block: 18px; }
+.wiki-revisions .change-actions { align-items: end; }
+.wiki-markdown-input { min-height: 180px; resize: vertical; font-family: var(--mono, monospace); }
+.wiki-drafts { border-top: 1px solid var(--border); padding-top: 12px; }
+.wiki-drafts summary { cursor: pointer; font-weight: 650; }
+.wiki-drafts > * + * { margin-top: 12px; }
+.wiki-draft-compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 275px), 1fr)); gap: 12px; }
+.wiki-draft-compare pre { max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .wiki-run summary { padding: 12px 17px; cursor: pointer; }
 #view-wiki:has(#wiki-document:not([hidden])) .wiki-page-header {
     position: absolute; width: 1px; height: 1px; margin: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
@@ -373,11 +427,10 @@ main:has(#view-wiki:not([hidden]) #wiki-document:not([hidden])) { padding-top: c
 .wiki-table { overflow-x: auto; }
 .wiki-body li + li, #wiki-steps li + li { margin-top: 4px; }
 .wiki-body a { color: var(--accent); }
-.provider-panel { margin-top: 16px; }
-.provider-panel summary { padding: 14px 17px; font-weight: 650; cursor: pointer; }
-.provider-panel[open] summary { border-bottom: 1px solid var(--border); }
 .provider-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 12px; }
 .provider-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+.operations-table { overflow-x: auto; }
+.operations-result { white-space: pre-wrap; overflow-wrap: anywhere; }
 .distributions { display: grid; gap: 10px; }
 .distributions { grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); margin-top: 14px; }
 .distribution { padding: 13px 15px 15px; border-radius: 7px; }
@@ -393,15 +446,68 @@ main:has(#view-wiki:not([hidden]) #wiki-document:not([hidden])) { padding-top: c
 .credential-fields { display: grid; gap: 11px; }
 .registration { border-top: 1px solid var(--border); margin-top: 18px; }
 .registration summary { padding: 12px 0 0; color: var(--accent); }
-.admin-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.settings-layout {
+    display: grid;
+    grid-template-columns: clamp(86px, 25%, 186px) minmax(0, 1fr);
+    gap: clamp(8px, 1.5vw, 18px);
+    align-items: start;
+}
+.settings-tablist {
+    display: grid;
+    gap: 3px;
+    padding: 5px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--sidebar);
+}
+.settings-tablist button {
+    min-height: 41px;
+    padding: 7px 10px 7px 12px;
+    border: 1px solid transparent;
+    border-inline-start-width: 3px;
+    background: transparent;
+    color: var(--muted);
+    font-size: .87rem;
+    line-height: 1.35;
+    text-align: start;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+.settings-tablist button:hover { background: var(--elevated); color: var(--ink); }
+.settings-tablist button[aria-selected="true"] {
+    background: var(--nav-current);
+    border-inline-start-color: var(--accent);
+    color: var(--accent);
+}
+.settings-layout > [role="tabpanel"] { min-width: 0; }
+.settings-content { padding: 9px 10px; }
+.settings-content > h3, .settings-content h3:first-child { margin-top: 0; }
+.index-dialog > .settings-layout, .settings-dialog > .settings-layout { margin: 14px; }
+.settings-layout .stack, .settings-layout .query-form { min-width: 0; }
+.settings-layout input, .settings-layout textarea, .settings-layout select { min-inline-size: 0; max-inline-size: 100%; }
+.settings-layout label, .settings-layout .change-actions button, .settings-layout .provider-actions button {
+    overflow-wrap: anywhere;
+}
+.settings-layout [role="tabpanel"] button { white-space: normal; }
+.index-dialog [role="tabpanel"] > .stack, .settings-dialog [role="tabpanel"] > .stack, #git-connection-form { padding: 0; }
+#wiki-settings-tabs { padding: 14px; }
+#git-settings { margin-top: 12px; }
 .admin-list { padding: 0 17px; max-height: 330px; overflow: auto; }
 .admin-list > div { padding: 10px 0; overflow-wrap: anywhere; }
 .admin-list > div + div { border-top: 1px solid var(--border); }
 .admin-list > div p { font-size: .8rem; margin-top: 2px; }
 .admin-list > p { padding-block: 11px; }
 #membership-form { border-top: 1px solid var(--border); }
-.account-dialog { width: min(465px, calc(100% - 26px)); }
-@media (max-width: 905px) { .admin-layout { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 590px) {
+    .settings-tablist { padding: 3px; }
+    .settings-tablist button { min-height: 44px; padding: 7px 4px 7px 6px; }
+    .settings-content, #wiki-settings-tabs { padding: 8px; }
+    .index-dialog > .settings-layout, .settings-dialog > .settings-layout { margin: 9px; }
+    .settings-layout .surface-header, .settings-layout .stack { padding-inline: 9px; }
+    .settings-layout .space-inline-form > label { flex-basis: 100%; }
+    .settings-layout .git-revision-list { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+    .settings-layout .git-revision-list dd { margin-bottom: 5px; }
+}
 
 #archive-upload input::file-selector-button {
     border: 1px solid var(--border); border-radius: 5px; padding: 4px 7px; margin-right: 8px;
@@ -426,7 +532,7 @@ main:has(#view-wiki:not([hidden]) #wiki-document:not([hidden])) { padding-top: c
 .overview-metrics > div { display: flex; flex-direction: column-reverse; padding-inline-end: 25px; border-inline-end: 1px solid #445067; }
 .overview-metrics > div:last-child { border: 0; }
 .overview-metrics dt { color: #c4cede; font-size: 11px; }
-.overview-metrics dd { margin: 0; font: 500 clamp(23px, 2.1vw, 32px)/1.15 var(--mono); letter-spacing: -.045em; }
+.overview-metrics dd { margin: 0; font: 500 clamp(23px, 2.1vw, 32px)/1.15 var(--mono); letter-spacing: -.045em; font-variant-numeric: tabular-nums; }
 .overview-status-panel { padding: 16px 20px; }
 .overview-status-panel > p { margin: 5px 0 8px; font-size: 13px; }
 .overview-status-panel .watch-controls { margin: 7px 0 10px; }
@@ -507,6 +613,7 @@ main:has(#view-wiki:not([hidden]) #wiki-document:not([hidden])) { padding-top: c
     .repository-status { white-space: normal; padding-inline: 5px; }
     .repository-table tbody tr:first-child > * { border-top: 1px solid var(--border); }
     .workspace-panels { grid-template-columns: minmax(0, 1fr); }
+    .space-layout { grid-template-columns: minmax(0, 1fr); }
     .workspace-panel { padding: 14px; }
     .result-top { flex-direction: column; }
     .row-actions { display: flex; flex-wrap: wrap; }
@@ -523,6 +630,16 @@ main:has(#view-wiki:not([hidden]) #wiki-document:not([hidden])) { padding-top: c
     display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(280px, 1fr); align-items: start; gap: 16px; margin-top: 16px;
 }
 :is(.search-split, .graph-diagram):empty { display: none; }
+.knowledge-scope { flex: 0 1 min(100%, 23rem); min-width: 0; }
+.knowledge-scope select { width: 100%; }
+.knowledge-scope p, #knowledge-pinned { margin: 5px 0 0; }
+.knowledge-result-list { grid-column: 1 / -1; display: grid; gap: 10px; min-width: 0; }
+.knowledge-result-list h2, .knowledge-result-list .kind { overflow-wrap: anywhere; }
+#knowledge-coverage { margin-block-start: 12px; }
+#knowledge-coverage li { overflow-wrap: anywhere; }
+.git-schedule-days { min-inline-size: 0; border: 0; margin: 0; padding: 0; }
+.git-schedule-days legend { color: var(--muted); font-size: .82rem; }
+.git-schedule-days > div { display: flex; flex-wrap: wrap; gap: 4px 9px; }
 .search-match-list { overflow: hidden; }
 .search-match {
     display: block; width: 100%; padding: 12px 14px; border: 0; border-radius: 0; text-align: start;

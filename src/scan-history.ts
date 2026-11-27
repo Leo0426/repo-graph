@@ -3,7 +3,7 @@ import type { ExternalFinding } from './finding-import.js';
 
 export const scanHistoryId = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 export const scannerRunStatuses = ['SUCCEEDED', 'PARTIAL', 'FAILED', 'TIMED_OUT', 'UNAVAILABLE'] as const;
-export const scanTaskStatuses = ['QUEUED', 'RUNNING', 'SUCCEEDED', 'PARTIAL', 'FAILED', 'CANCELLED'] as const;
+export const scanTaskStatuses = ['QUEUED', 'RUNNING', 'PAUSED', 'SUCCEEDED', 'PARTIAL', 'FAILED', 'CANCELLED'] as const;
 
 export interface ArchivedScannerSummary {
     scanId: string;
@@ -123,7 +123,8 @@ export class ScanHistory {
 
     recoverInterrupted() {
         const rows = this.db.prepare(`SELECT payload FROM scan_history_task
-            WHERE json_extract(payload, '$.status') IN ('QUEUED', 'RUNNING')`).all();
+            WHERE json_extract(payload, '$.status') IN ('QUEUED', 'RUNNING')
+            AND NOT EXISTS (SELECT 1 FROM scan_execution WHERE task_id = scan_history_task.id)`).all();
         for (const row of rows) {
             const task = readPayload<ArchivedScanTask>(row);
             this.saveTask({ ...task, status: 'FAILED', error: 'PROCESS_INTERRUPTED', updatedAt: new Date().toISOString() });

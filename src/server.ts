@@ -1,6 +1,9 @@
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { randomUUID } from 'node:crypto';
+import { deviceRouteAllowed } from './device-authorization.js';
 import { agentRunIdPattern } from './agent-runs.js';
+import { handleAsk } from './ask-http.js';
 import { architectureReview } from './architecture-review.js';
 import { assetIdPattern, indexLanguages, indexStrategy } from './assets.js';
 import { benchmarkEmbeddingHeader, benchmarkResultsPath, benchmarkSnapshot, readBenchmarkFile } from './benchmark.js';
@@ -9,17 +12,20 @@ import { maxHostReportBytes } from './host-report-input.js';
 import { threatReport, threatReportRequest } from './threat-report.js';
 import type { GraphQuery } from './graph.js';
 import { githubPullRequest, publishGithubTriage } from './github-comments.js';
-import { changeReviewInput, maxReviewRequestBytes, snapshotIdPattern } from './change-review.js';
-import { startChangeReviewInput } from './change-review-agent.js';
+import { changeReviewInput, compareChangeInput, compareChangeScopeInput, maxReviewRequestBytes, snapshotIdPattern, workingReviewInput } from './change-review.js';
+import { changeReviewPlaybook, startChangeReviewInput } from './change-review-agent.js';
+import { reviewFindingDecision } from './change-review-findings.js';
+import { handleCollaboration, handleCollaborationAdmin } from './collaboration-http.js';
 import type { DependencyScanResult } from './dependency-advisories.js';
 import { ruleAction, ruleIdSchema, ruleInput } from './detection-rules.js';
 import { scanHistoryId } from './scan-history.js';
 import { startScanInput } from './scan-tasks.js';
 import { reviewMarkdown } from './change-review-export.js';
 import { readPayload } from './http-body.js';
+import { handleGitEvent, handleGitSources } from './git-source-http.js';
 import { findingReport } from './external-findings.js';
 import type { FindingReport } from './external-findings.js';
-import { findingBody, findingPublicText, isFindingFormat, maxFindingBody, maxFindingRows, normalizeFindings } from './finding-import.js';
+import { findingBody, findingIntakeStatus, findingPublicText, isFindingFormat, maxFindingBody, maxFindingRows, normalizeFindings } from './finding-import.js';
 import { exportReview, exportReviewBatch, reviewBatch, reviewFormat } from './review-export.js';
 import { reviewAction, reviewStatuses, snapshotSelection } from './review-queue.js';
 import type { ReviewAction } from './review-queue.js';
@@ -32,19 +38,38 @@ import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { RepositoryIndex } from './index.js';
 import { HttpError, send } from './http-error.js';
+import { decideChangePatch, proposeChangePatch } from './change-patches.js';
+import { entitlementSnapshot } from './hosted-entitlements.js';
 import { IdentityHttp, requireAdmin } from './identity-http.js';
+import { projectGrantRoles } from './identity.js';
+import { isolatedVerificationPlaybook, isolatedVerificationReference, verificationInput } from './isolated-verifications.js';
+import { knowledgeOpenInput, knowledgeSearchInput, openKnowledge, searchKnowledge } from './knowledge-search.js';
+import { localIndexPlaybook } from './local-index-jobs.js';
+import { modelUsageEvidence } from './model-usage.js';
 import { gitChurn, packageGraph, sourceHotspots } from './metric-output.js';
+import { handleMcpHttp, mcpHttpEnabled } from './mcp-http.js';
+import { diagnosticReport } from './operability.js';
 import { handleProviders } from './provider-http.js';
+import { handleProjectSpaces } from './project-space-http.js';
+import { projectLifecycleInput } from './project-retirement.js';
 import { contextPack, graphRag } from './retrieval.js';
+import { overlayPath } from './review-working-copy.js';
+import { reviewRuleInput } from './review-rule-proposals.js';
+import { scopedSearch, scopedSearchInput } from './scoped-retrieval.js';
 import { cyclonedx, dependencyInventory } from './sbom.js';
+import { serviceContract } from './service-contract.js';
 import { kinds } from './source.js';
 import { EmbeddingUnavailable, OllamaEmbedding } from './vector.js';
 import { webAsset } from './web.js';
-import { wikiMarkdown } from './wiki-export.js';
+import { handleWikiPage } from './wiki-page-http.js';
 
 const prefix = '/api/v1';
 const vulnerabilitySeed = z.object({ fingerprint: z.string().regex(/^[a-f0-9]{16}$/) });
 const advisoryInput = vulnerabilitySeed.extend({ snapshotId: z.string().regex(agentRunIdPattern).optional() });
+const jobActionInput = z.object({ action: z.enum(['pause', 'resume', 'cancel', 'prioritize']), revision: z.int().nonnegative(),
+    priority: z.int().min(-10).max(10).optional() }).strict();
+const snapshotAction = z.object({ action: z.enum(['retire', 'restore', 'purge']), revision: z.int().nonnegative() }).strict();
+const assetDisplayName = z.string().trim().min(1).max(255).regex(/^[^\u0000-\u001f\u007f]+$/u);
 const triageSelection = z.object({ fingerprints: z.array(vulnerabilitySeed.shape.fingerprint).min(1).max(maxTriageFindings) });
 const vulnerabilityDecision = z.object({ status: z.enum(vulnerabilityStatuses), reason: z.string().max(500).optional(),
     revision: z.number().int().min(0).optional() });
@@ -65,7 +90,19 @@ const repository = await RepositoryIndex.open(database, projectsRoot, embedding,
     resolve(process.env.REPOGRAPH_ASSETS_ROOT ?? `${database}-assets`));
 const hasAdminPassword = await repository.identity.initializeAdmin(process.env.REPOGRAPH_ADMIN_PASSWORD);
 if (!token && !hasAdminPassword) throw new Error('Configure REPOGRAPH_ACCESS_TOKEN or REPOGRAPH_ADMIN_PASSWORD');
-const auth = new IdentityHttp(repository.identity, token);
+const auth = new IdentityHttp(repository.identity, token, repository.devices);
+repository.wiki.start();
+repository.changeReviewAgent.start();
+repository.sastTriageAgent.start();
+repository.gitSources.start();
+repository.assets.startRecovery();
+repository.snapshotRetirement.start();
+repository.projectRetirement.start();
+repository.ask.start();
+repository.verifications.start();
+repository.scans.start();
+repository.localIndexes.start();
+let stopping = false;
 
 function value(query: URLSearchParams, key: string, required: true): string;
 function value(query: URLSearchParams, key: string, required?: false): string | null;
@@ -106,6 +143,14 @@ function cancelOnClose(response: ServerResponse) {
     return cancellation.signal;
 }
 
+function idempotencyKey(request: IncomingMessage) {
+    const key = request.headers['idempotency-key'];
+    if (key !== undefined && (typeof key !== 'string' || !/^[A-Za-z0-9._~-]{1,128}$/.test(key))) {
+        throw new HttpError(400, 'INVALID_IDEMPOTENCY_KEY');
+    }
+    return key;
+}
+
 function attachment(response: ServerResponse, type: string, filename: string, payload: Uint8Array) {
     response.writeHead(200, { 'Content-Type': type, 'Content-Disposition': `attachment; filename="${filename}"`,
         'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }).end(payload);
@@ -113,7 +158,15 @@ function attachment(response: ServerResponse, type: string, filename: string, pa
 
 async function handleHttpRequest(request: IncomingMessage, response: ServerResponse) {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
+    if (request.method === 'GET' && (url.pathname === '/livez' || url.pathname === '/readyz')) {
+        const ready = url.pathname === '/livez' || (!stopping && repository.storageAvailable());
+        send(response, ready ? 200 : 503, { status: ready ? 'ok' : 'unavailable' });
+        return;
+    }
     if (await webAsset(request, response, url)) return;
+    if (await handleMcpHttp(request, response, url.pathname, auth, repository.identity)) return;
+    if (await handleGitEvent(request, response, url, repository.gitSources, () => cancelOnClose(response))) return;
+    if (await handleCollaboration(request, response, url, repository.collaboration)) return;
     if (await auth.authenticateRoute(request, response, url.pathname)) return;
     const principal = auth.principal(request);
     if (!principal) {
@@ -123,13 +176,20 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
     }
     auth.requireWrite(request, principal);
     const account = principal.account;
+    if (account.deviceCredentialId && !deviceRouteAllowed(request.method, url.pathname)) throw new HttpError(403, 'DEVICE_SCOPE_DENIED');
     if (await auth.accountRoute(request, response, url, account, repository)) return;
+    if (await handleProjectSpaces(request, response, url, account, repository, () => cancelOnClose(response))) return;
+    if (await handleAsk(request, response, url, account, repository.ask, () => cancelOnClose(response))) return;
+    if (await handleGitSources(request, response, url, account, repository.gitSources, () => cancelOnClose(response))) return;
     const visible = () => repository.identity.visibleProjects(account);
     const authorizeAdmin = () => requireAdmin(repository.identity.requireCurrent(account));
+    if (await handleCollaborationAdmin(request, response, url, account, authorizeAdmin, repository.collaboration)) return;
     if (await handleProviders(request, response, url.pathname, repository.modelProviders, repository.generation, account.id,
         authorizeAdmin, () => cancelOnClose(response))) return;
 
     function requireProject(id: string | null) {
+        if (id) repository.identity.requireAvailableProject(id);
+        if (repository.identity.requireCurrent(account).role === 'ADMIN') return;
         const allowed = visible();
         if (allowed === null) return;
         if (!id) throw new HttpError(403, 'PROJECT_SCOPE_REQUIRED');
@@ -158,6 +218,10 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
         requireProject(id);
         return id;
     }
+    function editableProject(id = requestedProject()) {
+        repository.identity.requireProjectEditor(account, id);
+        return id;
+    }
     function policyProject(bodyProjectId?: string) {
         const queryProjectId = projectId(query);
         if (queryProjectId && bodyProjectId && queryProjectId !== bodyProjectId) throw new HttpError(400, 'INVALID_PROJECT_ID');
@@ -167,17 +231,53 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
         repository.projectRoot(id);
         return id;
     }
-    function projectGuard(id: string) {
+    function projectGuard(id: string, write = false) {
         const root = repository.projectRoot(id);
         return () => {
-            requireProject(id);
+            if (write) editableProject(id);
+            else requireProject(id);
             if (repository.projectRoot(id) !== root) throw new HttpError(409, 'PROJECT_ROOT_CHANGED');
         };
     }
     function canReadResource(resource: { projectId: string }) {
         const id = projectId(query);
         const allowed = visible();
-        return (!id || id === resource.projectId) && (allowed === null || allowed.includes(resource.projectId));
+        return repository.identity.projectAvailable(resource.projectId)
+            && (!id || id === resource.projectId) && (allowed === null || allowed.includes(resource.projectId));
+    }
+    function canReadRun(run: { projectId: string; inputReference: string }) {
+        const prefix = 'verified-change-review:';
+        return canReadResource(run) && (!run.inputReference?.startsWith(prefix)
+            || Boolean(repository.changeReviews.get(run.inputReference.slice(prefix.length), run.projectId)))
+            && (!run.inputReference?.startsWith(isolatedVerificationReference) || repository.knowledgeSnapshots.get(
+                run.inputReference.slice(isolatedVerificationReference.length))?.projectId === run.projectId);
+    }
+    function knowledgeSnapshot(id: string) {
+        const snapshot = agentRunIdPattern.test(id) ? repository.knowledgeSnapshots.get(id) : undefined;
+        if (!snapshot || !canReadResource(snapshot)) throw new HttpError(404, 'NOT_FOUND');
+        return snapshot;
+    }
+    function requestedKnowledgeSnapshot() {
+        return query.has('snapshotId') ? knowledgeSnapshot(value(query, 'snapshotId', true)) : undefined;
+    }
+    function wikiPerspective() {
+        const perspective = value(query, 'perspective') ?? 'technical';
+        if (perspective !== 'technical' && perspective !== 'business') throw new HttpError(400, 'WIKI_INVALID_PERSPECTIVE');
+        return perspective;
+    }
+    function wikiPage(id: string) {
+        const page = repository.wiki.getBase(id);
+        if (!page || !canReadResource(page)) throw new HttpError(404, 'NOT_FOUND');
+        const snapshot = requestedKnowledgeSnapshot();
+        if (snapshot && page.knowledgeSnapshotId !== snapshot.id) throw new HttpError(404, 'NOT_FOUND');
+        if (page.knowledgeSnapshotId && !snapshot) knowledgeSnapshot(page.knowledgeSnapshotId);
+        if (query.has('perspective') && (page.perspective ?? 'technical') !== wikiPerspective()) throw new HttpError(404, 'NOT_FOUND');
+        return page;
+    }
+    function wikiRevision() {
+        const id = value(query, 'revisionId');
+        if (id && !agentRunIdPattern.test(id)) throw new HttpError(400, 'WIKI_INVALID_REVISION');
+        return id ?? undefined;
     }
     function visibleSnapshot(id: string) {
         const scope = repository.reviewQueue.scopeForSnapshot(id);
@@ -198,18 +298,52 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
         const body = await readPayload(request, findingBody, maxFindingBody, { allowSarif: format === 'sarif' || format === 'codeql' });
         if (response.destroyed) return;
         requireProject(id);
-        return normalizeFindings(format, body, repository.projectRoot(id), limit, {
-            codeVersion: declaredFindingVersion(value(query, 'codeVersion')), ruleVersion: declaredFindingVersion(value(query, 'ruleVersion')) });
+        const versions = { codeVersion: declaredFindingVersion(value(query, 'codeVersion')), ruleVersion: declaredFindingVersion(value(query, 'ruleVersion')) };
+        return { parsed: normalizeFindings(format, body, repository.projectRoot(id), limit, versions),
+            declared: { ...versions, format, execution: findingIntakeStatus(format, body) } };
     }
-    function retrievalScope() {
+    function retrievalScope(snapshot?: NonNullable<ReturnType<RepositoryIndex['knowledgeSnapshots']['get']>>) {
+        if (snapshot) return { id: snapshot.projectId, allowedProjects: () => { knowledgeSnapshot(snapshot.id); return null; } };
         const id = authorizedSearch ? null : scopedProject();
         return {
             id,
             allowedProjects: authorizedSearch ? visible : () => {
                 requireProject(id);
-                return null;
+                return id ? null : visible();
             }
         };
+    }
+    if (await handleWikiPage(request, response, url, account, repository.wiki.pages, wikiPage,
+        () => idempotencyKey(request), () => cancelOnClose(response))) return;
+    const usageEvidence = /^\/api\/v1\/admin\/entitlements\/([^/]+)\/model-invocations\/([^/]+)\/evidence$/.exec(url.pathname);
+    if (repository.entitlements.enabled && usageEvidence && request.method === 'POST') {
+        authorizeAdmin();
+        const [, organizationId, invocationId] = usageEvidence;
+        if (!agentRunIdPattern.test(organizationId) || !agentRunIdPattern.test(invocationId)) throw new HttpError(400, 'INVALID_MODEL_INVOCATION_ID');
+        const input = await readPayload(request, modelUsageEvidence, 4096);
+        if (response.destroyed) return;
+        authorizeAdmin();
+        send(response, 200, repository.modelUsage.reconcile(organizationId, invocationId, account.id, input));
+        return;
+    }
+    const entitlementAdmin = /^\/api\/v1\/admin\/entitlements\/([^/]+)(?:\/tasks\/([^/]+)\/void)?$/.exec(url.pathname);
+    if (repository.entitlements.enabled && entitlementAdmin && (entitlementAdmin[2] ? request.method === 'POST'
+        : request.method === 'GET' || request.method === 'PUT')) {
+        authorizeAdmin();
+        const [, organizationId, taskId] = entitlementAdmin;
+        if (!agentRunIdPattern.test(organizationId)) throw new HttpError(400, 'INVALID_ORGANIZATION_ID');
+        if (taskId) {
+            if (!agentRunIdPattern.test(taskId)) throw new HttpError(400, 'INVALID_RUN_ID');
+            send(response, 200, repository.entitlements.voidPurgedTask(organizationId, taskId, account.id));
+        } else if (request.method === 'GET') {
+            send(response, 200, repository.entitlements.report(organizationId, Math.min(int(query, 'limit', 50), 200), int(query, 'offset', 0, 0)));
+        } else {
+            const input = await readPayload(request, entitlementSnapshot, 32_768);
+            if (response.destroyed) return;
+            authorizeAdmin();
+            send(response, 200, repository.entitlements.publish(organizationId, account.id, input));
+        }
+        return;
     }
     switch (route) {
         case `GET ${prefix}/scanners/capabilities`: {
@@ -226,6 +360,29 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
             if (sqlite === 'ok') repository.identity.requireCurrent(account);
             const healthy = sqlite === 'ok' && ollama !== 'error';
             send(response, healthy ? 200 : 207, { status: healthy ? 'ok' : 'degraded', sqlite, ollama });
+            return;
+        }
+        case `GET ${prefix}/admin/diagnostics`: {
+            authorizeAdmin();
+            const report = await diagnosticReport(repository, embedding, cancelOnClose(response));
+            if (response.destroyed) return;
+            authorizeAdmin();
+            send(response, 200, report);
+            return;
+        }
+        case `GET ${prefix}/admin/metrics`: {
+            authorizeAdmin();
+            send(response, 200, repository.operations.metrics.hourly(int(query, 'hours', 24)));
+            return;
+        }
+        case `GET ${prefix}/admin/model-usage`: {
+            authorizeAdmin();
+            const runId = value(query, 'runId') ?? undefined;
+            const organizationId = value(query, 'organizationId') ?? undefined;
+            if (runId && !agentRunIdPattern.test(runId)) throw new HttpError(400, 'INVALID_RUN_ID');
+            if (organizationId && !agentRunIdPattern.test(organizationId)) throw new HttpError(400, 'INVALID_ORGANIZATION_ID');
+            send(response, 200, repository.modelUsage.list(Math.min(int(query, 'limit', 50), 200), int(query, 'offset', 0, 0),
+                runId, organizationId));
             return;
         }
         case `POST ${prefix}/config-audit/reports`: {
@@ -253,7 +410,8 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
             if (!snapshot.success) throw new HttpError(500, 'INVALID_BENCHMARK_RESULTS');
             repository.identity.requireCurrent(account);
             const allowed = visible();
-            if (allowed && (!snapshot.data.projectId || !allowed.includes(snapshot.data.projectId))) {
+            if ((snapshot.data.projectId && (!repository.identity.projectAvailable(snapshot.data.projectId)
+                || (allowed && !allowed.includes(snapshot.data.projectId)))) || (!snapshot.data.projectId && account.role !== 'ADMIN')) {
                 throw new HttpError(404, 'BENCHMARK_RESULTS_NOT_FOUND');
             }
             send(response, 200, snapshot.data);
@@ -272,23 +430,90 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
             send(response, 200, result);
             return;
         }
-        case `GET ${prefix}/projects`:
-            send(response, 200, repository.projects(visible(), flag(query, 'summary', false)));
+        case `GET ${prefix}/projects`: {
+            const summary = flag(query, 'summary', false);
+            const projects = repository.projects(visible(), summary);
+            send(response, 200, summary ? projects.map(project => ({ ...project,
+                canManage: repository.identity.projectCapabilities(account, project.projectId).canManage })) : projects);
+            return;
+        }
+        case `GET ${prefix}/projects/trash`:
+            send(response, 200, repository.projectRetirement.list(account, Math.min(int(query, 'limit', 50, 1), 100), int(query, 'offset', 0, 0)));
+            return;
+        case `GET ${prefix}/capabilities`: {
+            const verifier = await repository.verifications.capability();
+            if (response.destroyed) return;
+            repository.identity.requireCurrent(account);
+            send(response, 200, serviceContract(embedding !== undefined, { deviceAuthorization: !!repository.devices,
+                mcpHttp: mcpHttpEnabled, collaborationIngress: !!repository.collaboration, externalIdentity: repository.identity.external.enabled,
+                isolatedVerification: verifier.available }));
+            return;
+        }
+        case `GET ${prefix}/verifications/capability`: {
+            const capability = await repository.verifications.capability();
+            if (response.destroyed) return;
+            repository.identity.requireCurrent(account);
+            send(response, 200, capability);
+            return;
+        }
+        case `POST ${prefix}/verifications`: {
+            const key = idempotencyKey(request);
+            if (!key) throw new HttpError(400, 'VERIFICATION_IDEMPOTENCY_KEY_REQUIRED');
+            const input = await readPayload(request, verificationInput, 96 * 1024);
+            if (response.destroyed) return;
+            const task = await repository.verifications.submit(account, key, input, cancelOnClose(response));
+            if (response.destroyed) return;
+            response.setHeader('Location', task.pollVia);
+            send(response, 202, task);
+            return;
+        }
+        case `GET ${prefix}/knowledge-snapshots`:
+            send(response, 200, repository.knowledgeSnapshots.list(requestedProject(),
+                Math.min(int(query, 'limit', 50), 100), int(query, 'offset', 0, 0)));
+            return;
+        case `GET ${prefix}/knowledge-snapshots/retired`:
+            send(response, 200, repository.snapshotRetirement.retired(account, requestedProject(),
+                Math.min(int(query, 'limit', 50), 100), int(query, 'offset', 0, 0)));
             return;
         case `POST ${prefix}/summaries/generate`: {
-            const id = requestedProject();
-            const name = basename(repository.projectRoot(id)) || id;
-            send(response, 202, repository.wiki.submit(id, name));
+            const id = editableProject();
+            const name = repository.gitSources.name(id) ?? (basename(repository.projectRoot(id)) || id);
+            const key = idempotencyKey(request);
+            const notBefore = value(query, 'notBefore');
+            const date = notBefore === null ? undefined : z.iso.datetime({ offset: true }).safeParse(notBefore);
+            const availableAt = date?.success ? Date.parse(date.data) : undefined;
+            if (date && (availableAt === undefined || !Number.isSafeInteger(availableAt))) throw new HttpError(400, 'INVALID_NOT_BEFORE');
+            const mode = value(query, 'mode') ?? 'incremental';
+            if (mode !== 'full' && mode !== 'incremental') throw new HttpError(400, 'INVALID_SNAPSHOT_MODE');
+            const task = repository.wiki.submit(id, name, account, key, availableAt, mode);
+            response.setHeader('Location', task.pollVia);
+            send(response, 202, task);
             return;
         }
         case `GET ${prefix}/summaries`:
-            send(response, 200, repository.wiki.latest(requestedProject()));
+        case `GET ${prefix}/summaries/tree`: {
+            const snapshot = requestedKnowledgeSnapshot();
+            const id = snapshot?.projectId ?? requestedProject();
+            const perspective = wikiPerspective();
+            send(response, 200, url.pathname.endsWith('/tree')
+                ? repository.wiki.tree(id, snapshot?.runId, perspective)
+                : repository.wiki.latest(id, snapshot?.runId, perspective));
             return;
-        case `GET ${prefix}/summaries/tree`:
-            send(response, 200, repository.wiki.tree(requestedProject()));
+        }
+        case `GET ${prefix}/summaries/search`: {
+            const snapshot = requestedKnowledgeSnapshot();
+            const id = snapshot?.projectId ?? requestedProject();
+            const release = snapshot ?? repository.knowledgeSnapshots.list(id, 1, 0)[0];
+            const perspective = wikiPerspective();
+            const text = value(query, 'q', true);
+            const found = release ? repository.wiki.pages.search(id, release.id, perspective, text, Math.min(int(query, 'limit', 12), 30)) : [];
+            send(response, 200, flag(query, 'compact', false) ? found.map(({ id, title, revision, perspective, knowledgeSnapshotId }) =>
+                ({ id, title, revision, perspective, knowledgeSnapshotId })) : found);
             return;
+        }
         case `GET ${prefix}/agent-runs`:
-            send(response, 200, repository.agentRuns.list(requestedProject(), Math.min(int(query, 'limit', 20), 100), value(query, 'playbook')));
+            send(response, 200, repository.agentRuns.list(requestedProject(), Math.min(int(query, 'limit', 20), 100), value(query, 'playbook'))
+                .filter(canReadRun));
             return;
         case `GET ${prefix}/rules`: {
             const filter = value(query, 'ruleId')?.trim() || null;
@@ -304,17 +529,29 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
             send(response, 200, repository.detectionRules.create(input, account.username));
             return;
         }
-        case `POST ${prefix}/agent-runs/sast-triage`: {
+        case `POST ${prefix}/change-rule-candidates`: {
+            authorizeAdmin();
             const id = requestedProject();
-            const authorize = projectGuard(id);
-            const common = { projectId: id, actor: account.username, budgetChars: Math.min(int(query, 'budgetChars', 12_000), 60_000) };
+            const key = idempotencyKey(request);
+            if (!key) throw new HttpError(400, 'REVIEW_RULE_IDEMPOTENCY_KEY_REQUIRED');
+            const input = await readPayload(request, reviewRuleInput, 512 * 1024);
+            if (response.destroyed) return;
+            authorizeAdmin();
+            send(response, 200, repository.reviewRuleProposals.propose(account, id, key, input));
+            return;
+        }
+        case `POST ${prefix}/agent-runs/sast-triage`: {
+            const id = editableProject();
+            const authorize = projectGuard(id, true);
+            const common = { projectId: id, budgetChars: Math.min(int(query, 'budgetChars', 12_000), 60_000) };
+            const key = idempotencyKey(request);
             const format = value(query, 'format')?.trim().toLowerCase();
             if (format) {
                 if (!isFindingFormat(format)) throw new HttpError(400, 'UNSUPPORTED_FINDING_FORMAT');
-                const scan = await readScan(id, format, Math.min(int(query, 'maxFindings', 10), maxTriageFindings));
+                const scan = (await readScan(id, format, Math.min(int(query, 'maxFindings', 10), maxTriageFindings)))?.parsed;
                 if (!scan) return;
                 authorize();
-                send(response, 202, repository.sastTriageAgent.submit({ ...common, source: { capability: 'IMPORT_FINDINGS', format, scan } }, authorize));
+                send(response, 202, repository.sastTriageAgent.submit({ ...common, source: { capability: 'IMPORT_FINDINGS', format, scan } }, account, key));
             } else {
                 const input = await readPayload(request, triageSelection, 4096);
                 if (response.destroyed) return;
@@ -324,7 +561,7 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
                     if (!finding) throw new HttpError(404, 'EXTERNAL_FINDING_NOT_FOUND');
                     return finding;
                 });
-                send(response, 202, repository.sastTriageAgent.submit({ ...common, source: { capability: 'LOAD_FINDINGS', findings } }, authorize));
+                send(response, 202, repository.sastTriageAgent.submit({ ...common, source: { capability: 'LOAD_FINDINGS', findings } }, account, key));
             }
             return;
         }
@@ -333,13 +570,13 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
             const vulnerability = /^[a-f0-9]{16}$/.test(id) ? repository.vulnerabilities.get(id) : undefined;
             if (!vulnerability || !canReadResource(vulnerability)) throw new HttpError(404, 'VULNERABILITY_NOT_FOUND');
             const { projectId } = vulnerability;
-            const authorize = projectGuard(projectId);
+            editableProject(projectId);
             const codeVersion = declaredFindingVersion(value(query, 'codeVersion') ?? vulnerability.codeVersion);
             const ruleVersion = declaredFindingVersion(value(query, 'ruleVersion') ?? vulnerability.ruleVersion);
-            send(response, 202, repository.sastTriageAgent.submit({ projectId, actor: account.username,
+            send(response, 202, repository.sastTriageAgent.submit({ projectId,
                 budgetChars: Math.min(int(query, 'budgetChars', 12_000), 60_000), source: {
                     capability: 'LOAD_VULNERABILITY', vulnerability, codeVersion, ruleVersion
-                } }, authorize));
+                } }, account, idempotencyKey(request)));
             return;
         }
         case `GET ${prefix}/vulns`: {
@@ -353,10 +590,10 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
             return;
         }
         case `POST ${prefix}/vulns/from-finding`: {
-            const id = requestedProject();
+            const id = editableProject();
             const input = await readPayload(request, vulnerabilitySeed, 4096);
             if (response.destroyed) return;
-            requireProject(id);
+            editableProject(id);
             const finding = repository.externalFindings.get(id, input.fingerprint);
             if (!finding) throw new HttpError(404, 'EXTERNAL_FINDING_NOT_FOUND');
             repository.projectRoot(id);
@@ -366,7 +603,7 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
         }
         case `POST ${prefix}/vulns/scan/code`:
         case `POST ${prefix}/vulns/scan/taint`: {
-            const id = requestedProject();
+            const id = editableProject();
             const indexVersion = value(query, 'indexVersion');
             if (indexVersion !== null && !/^[a-f0-9]{64}$/.test(indexVersion)) throw new HttpError(400, 'INVALID_INDEX_VERSION');
             const offset = int(query, 'offset', 0, 0);
@@ -376,13 +613,13 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
             return;
         }
         case `POST ${prefix}/vulns/scan/deps`: {
-            const id = requestedProject();
+            const id = editableProject();
             const root = repository.projectRoot(id);
             const suppliedRoot = value(query, 'projectRoot');
             if (suppliedRoot !== null && suppliedRoot !== root) throw new HttpError(400, 'PROJECT_ROOT_MISMATCH');
             const inventory = await dependencyInventory(root);
             if (response.destroyed) return;
-            requireProject(id);
+            editableProject(id);
             if (repository.projectRoot(id) !== root) throw new HttpError(409, 'PROJECT_ROOT_CHANGED');
             if (!inventory.available) throw new HttpError(400, inventory.supported || inventory.issues.length
                 ? 'DEPENDENCY_INVENTORY_UNAVAILABLE' : 'NO_SUPPORTED_MANIFEST');
@@ -418,12 +655,12 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
             return;
         }
         case `POST ${prefix}/review-queue/snapshots`: {
-            const id = requestedProject();
+            const id = editableProject();
             const format = value(query, 'format')?.trim().toLowerCase();
             const budget = Math.min(int(query, 'budgetChars', 12_000), 60_000);
             let findings;
             if (format) {
-                const scan = await readScan(id, format, Math.min(int(query, 'maxFindings', 10), 100));
+                const scan = (await readScan(id, format, Math.min(int(query, 'maxFindings', 10), 100)))?.parsed;
                 if (!scan) return;
                 findings = scan.findings;
             } else {
@@ -438,6 +675,7 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
                 });
             }
             const reports = findings.map(finding => findingReport(repository, id, finding, budget).report);
+            editableProject(id);
             send(response, 200, repository.reviewQueue.submit(id, account.username, reports));
             return;
         }
@@ -453,7 +691,7 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
         case `POST ${prefix}/triage/feedback`: {
             const input = await readPayload(request, feedbackInput, 8192);
             if (response.destroyed) return;
-            send(response, 200, repository.triagePolicy.record(policyProject(input.projectId), account.username, input));
+            send(response, 200, repository.triagePolicy.record(editableProject(policyProject(input.projectId)), account.username, input));
             return;
         }
         case `GET ${prefix}/triage/feedback`: {
@@ -467,7 +705,7 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
         case `POST ${prefix}/triage/suppressions`: {
             const input = await readPayload(request, suppressionInput, 8192);
             if (response.destroyed) return;
-            send(response, 200, repository.triagePolicy.create(policyProject(input.projectId), account.username, input));
+            send(response, 200, repository.triagePolicy.create(editableProject(policyProject(input.projectId)), account.username, input));
             return;
         }
         case `GET ${prefix}/triage/suppressions`: {
@@ -481,14 +719,16 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
             const format = value(query, 'format', true).trim().toLowerCase();
             const importing = url.pathname.endsWith('/import');
             const publishing = url.pathname.endsWith('/pr');
+            if (importing) editableProject(id);
             if (publishing) authorizeAdmin();
             const authorize = publishing ? projectGuard(id) : undefined;
             const target = publishing ? githubPullRequest(value(query, 'owner', true), value(query, 'repo', true), int(query, 'prNumber')) : undefined;
             const limit = importing ? Math.min(int(query, 'maxFindings', maxFindingRows), maxFindingRows)
                 : Math.min(int(query, 'maxFindings', 10), 100);
-            const parsed = await readScan(id, format, limit);
-            if (!parsed) return;
-            if (importing) send(response, 200, repository.externalFindings.import(id, parsed));
+            const report = await readScan(id, format, limit);
+            if (!report) return;
+            const { parsed, declared } = report;
+            if (importing) send(response, 200, repository.externalFindings.import(editableProject(id), parsed, declared));
             else {
                 const budget = Math.min(int(query, 'budgetChars', 12_000), 60_000);
                 const reports = parsed.findings.map(finding => findingReport(repository, id, finding, budget));
@@ -528,7 +768,7 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
             let baseline: FindingReport;
             let frozenId: string | undefined;
             if (format) {
-                const scan = await readScan(id, format, 1);
+                const scan = (await readScan(id, format, 1))?.parsed;
                 if (!scan) return;
                 if (scan.reported !== 1 || scan.findings.length !== 1) throw new HttpError(400, 'ADVISORY_SINGLE_FINDING_REQUIRED');
                 baseline = findingReport(repository, id, scan.findings[0], budget).report;
@@ -550,7 +790,8 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
                 }
             }
             authorize();
-            const advisory = await reviewFinding(() => repository.generation.session(), baseline, cancelOnClose(response));
+            const advisory = await reviewFinding(() => repository.generation.session(), baseline, cancelOnClose(response), undefined,
+                { projectId: id, actorId: account.id });
             if (response.destroyed) return;
             authorize();
             if (frozenId && !visibleSnapshot(frozenId)) throw new HttpError(404, 'REVIEW_SNAPSHOT_NOT_FOUND');
@@ -570,7 +811,7 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
                         response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8',
                             'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
                         event('phase', { phase: 'EVIDENCE_READY' });
-                    } : undefined);
+                    } : undefined, account.id);
                 if (response.destroyed) return;
                 if (!stream) send(response, 200, result);
                 else {
@@ -587,10 +828,37 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
             }
             return;
         }
+        case `POST ${prefix}/change-reviews/compare`: {
+            const input = await readPayload(request, compareChangeInput, 8192);
+            if (response.destroyed) return;
+            editableProject(input.projectId);
+            const requested = projectId(query);
+            if (requested !== null && requested !== input.projectId) throw new HttpError(400, 'PROJECT_ID_MISMATCH');
+            const key = idempotencyKey(request);
+            if (!key) throw new HttpError(400, 'CHANGE_REVIEW_IDEMPOTENCY_KEY_REQUIRED');
+            send(response, 200, repository.changeReviews.compare(account.id, key, input));
+            return;
+        }
+        case `POST ${prefix}/change-reviews/compare-scope`: {
+            const key = idempotencyKey(request);
+            if (!key) throw new HttpError(400, 'CHANGE_REVIEW_IDEMPOTENCY_KEY_REQUIRED');
+            const input = await readPayload(request, compareChangeScopeInput, 256 * 1024);
+            if (!response.destroyed) send(response, 200, repository.changeReviews.compareScope(account, key, input));
+            return;
+        }
+        case `POST ${prefix}/change-reviews/working-copy`: {
+            const key = idempotencyKey(request);
+            if (!key) throw new HttpError(400, 'CHANGE_REVIEW_IDEMPOTENCY_KEY_REQUIRED');
+            const input = await readPayload(request, workingReviewInput, 128 * 1024);
+            if (response.destroyed) return;
+            const snapshot = await repository.changeReviews.compareWorking(account, key, input, cancelOnClose(response));
+            if (!response.destroyed) send(response, 200, snapshot);
+            return;
+        }
         case `POST ${prefix}/change-reviews`: {
             const input = await readPayload(request, changeReviewInput, maxReviewRequestBytes);
             if (response.destroyed) return;
-            requireProject(input.projectId);
+            editableProject(input.projectId);
             const requested = projectId(query);
             if (requested !== null && requested !== input.projectId) throw new HttpError(400, 'PROJECT_ID_MISMATCH');
             send(response, 200, repository.changeReviews.submit(input));
@@ -599,15 +867,10 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
         case `POST ${prefix}/agent-runs/change-review`: {
             const input = await readPayload(request, startChangeReviewInput, maxReviewRequestBytes);
             if (response.destroyed) return;
-            requireProject(input.projectId);
+            editableProject(input.projectId);
             const requested = projectId(query);
             if (requested !== null && requested !== input.projectId) throw new HttpError(400, 'PROJECT_ID_MISMATCH');
-            const run = repository.changeReviewAgent.submit(input.projectId, () => {
-                if (!('snapshotId' in input)) return repository.changeReviews.submit(input);
-                const snapshot = repository.changeReviews.get(input.snapshotId, input.projectId);
-                if (!snapshot) throw new HttpError(404, 'CHANGE_REVIEW_NOT_FOUND');
-                return snapshot;
-            });
+            const run = repository.changeReviewAgent.submit(account, input, idempotencyKey(request));
             send(response, 202, run);
             return;
         }
@@ -666,7 +929,8 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
             const id = requestedProject();
             const limit = Math.min(int(query, 'limit', 10), 50);
             const root = repository.projectRoot(id);
-            const churn = repository.assets.forProject(id) ? new Map<string, number>() : await gitChurn(root, cancelOnClose(response));
+            const churn = (repository.assets.forProject(id) || repository.gitSources.name(id)) ? new Map<string, number>()
+                : await gitChurn(root, cancelOnClose(response));
             if (response.destroyed) return;
             requireProject(id);
             if (repository.projectRoot(id) !== root) throw new HttpError(409, 'PROJECT_ROOT_CHANGED');
@@ -690,19 +954,22 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
             const requestedDepth = value(query, 'depth') === '0' ? 0 : Math.min(int(query, 'depth', 3), 12);
             const depth = operation === 'subtypes' ? 1 : operation === 'impact' ? 12 : requestedDepth;
             const target = value(query, 'target', true);
-            const project = scopedProject();
+            const snapshot = requestedKnowledgeSnapshot();
+            const project = snapshot ? snapshot.projectId : scopedProject();
             send(response, 200, flag(query, 'diagram', false)
-                ? repository.traverseView(target, project, operation, depth)
-                : repository.traverse(target, project, operation, depth));
+                ? repository.traverseView(target, project, operation, depth, snapshot?.id)
+                : repository.traverse(target, project, operation, depth, snapshot?.id));
             return;
         }
         case `POST ${prefix}/index/project`: {
             requireAdmin(account);
             const root = value(query, 'projectRoot', true);
             const languages = indexLanguages(value(query, 'lang'), flag(query, 'includeBytecode', false));
-            const canonicalRoot = await repository.start(root, languages, !flag(query, 'noIncremental', false), indexStrategy(value(query, 'strategy')));
-            const pollUrl = `${prefix}/index/project/status?${new URLSearchParams({ projectRoot: canonicalRoot })}`;
-            send(response, 202, { status: 'running', message: 'Indexing started in background', pollUrl });
+            const submitted = await repository.submitIndex(root, languages, !flag(query, 'noIncremental', false), indexStrategy(value(query, 'strategy')),
+                account, idempotencyKey(request), cancelOnClose(response));
+            const pollUrl = `${prefix}/index/project/status?${new URLSearchParams({ projectRoot: submitted.root })}`;
+            if (!response.destroyed) send(response, 202, { status: 'running', message: 'Indexing started in background', pollUrl,
+                projectId: submitted.projectId, agentRunId: submitted.agentRunId });
             return;
         }
         case `POST ${prefix}/index/file`: {
@@ -714,9 +981,11 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
             return;
         }
         case `POST ${prefix}/assets/import`: {
-            requireAdmin(account);
+            authorizeAdmin();
             const asset = await repository.assets.importArchive(request, value(query, 'strategy'), value(query, 'lang'),
-                flag(query, 'includeBytecode', false), () => { repository.identity.requireCurrent(account); }, cancelOnClose(response));
+                flag(query, 'includeBytecode', false), { accountId: account.id, key: idempotencyKey(request),
+                    authorize: authorizeAdmin, signal: cancelOnClose(response) });
+            if (response.destroyed) return;
             send(response, 202, asset);
             return;
         }
@@ -727,22 +996,48 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
             requireAdmin(account);
             const id = projectId(query);
             if (!id) throw new HttpError(400, 'INVALID_PROJECT_ID');
-            await repository.delete(id, value(query, 'projectRoot'));
+            await repository.trashProject(account, id, value(query, 'projectRoot'));
             send(response, 200, { status: 'deleted', projectId: id });
+            return;
+        }
+        case `POST ${prefix}/search/knowledge`: {
+            const input = await readPayload(request, knowledgeSearchInput, 28_000);
+            if (response.destroyed) return;
+            const result = await searchKnowledge(repository, account, input, cancelOnClose(response));
+            if (response.destroyed) return;
+            if (result.status === 'FAILED') send(response, 503, { ...result, error: 'KNOWLEDGE_SEARCH_UNAVAILABLE' });
+            else send(response, 200, result);
+            return;
+        }
+        case `GET ${prefix}/search/knowledge/open`: {
+            const input = knowledgeOpenInput.safeParse(Object.fromEntries(query));
+            if (!input.success) throw new HttpError(400, 'INVALID_INPUT');
+            const location = openKnowledge(repository, account, input.data);
+            response.writeHead(303, { Location: location, 'Cache-Control': 'no-store' }).end();
+            return;
+        }
+        case `POST ${prefix}/search/scoped`: {
+            const input = await readPayload(request, scopedSearchInput, 28_000);
+            if (response.destroyed) return;
+            const result = await scopedSearch(repository, account, input, cancelOnClose(response));
+            if (response.destroyed) return;
+            send(response, result.status === 'FAILED' ? 503 : 200, result);
             return;
         }
         case `GET ${prefix}/search/keyword`: {
             const language = value(query, 'lang')?.toLowerCase() ?? null;
             const kind = value(query, 'kind')?.toUpperCase() ?? null;
             if (kind && !kinds.some(candidate => candidate === kind)) throw new HttpError(400, 'INVALID_KIND');
-            const scope = retrievalScope();
-            const results = repository.search(value(query, 'q', true), scope.id, language, kind,
-                Math.min(int(query, 'limit', 10), 50), flag(query, 'noTest', true), scope.allowedProjects());
+            const snapshot = requestedKnowledgeSnapshot();
+            const scope = snapshot ? undefined : retrievalScope();
+            const results = repository.search(value(query, 'q', true), snapshot?.projectId ?? scope?.id ?? null, language, kind,
+                Math.min(int(query, 'limit', 10), 50), flag(query, 'noTest', true), scope?.allowedProjects() ?? null, snapshot?.id);
             send(response, 200, results);
             return;
         }
         case `GET ${prefix}/search/semantic`:
         case `GET ${prefix}/search/code`: {
+            const snapshot = requestedKnowledgeSnapshot();
             const mode = url.pathname.endsWith('/semantic') ? 'semantic' : 'code';
             const text = value(query, mode === 'semantic' ? 'q' : 'snippet', true);
             const language = value(query, 'lang')?.toLowerCase() ?? null;
@@ -750,9 +1045,9 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
             if (kind && !kinds.some(candidate => candidate === kind)) throw new HttpError(400, 'INVALID_KIND');
             const offset = int(query, 'offset', 0, 0);
             if (offset > 10_000) throw new HttpError(400, 'INVALID_OFFSET');
-            const scope = retrievalScope();
+            const scope = retrievalScope(snapshot);
             const results = await repository.vectorSearch(mode, text, {
-                projectId: scope.id, allowedProjects: scope.allowedProjects, language, kind, offset,
+                projectId: scope.id, snapshotId: snapshot?.id, allowedProjects: scope.allowedProjects, language, kind, offset,
                 limit: Math.min(int(query, 'limit', 10), 100),
                 noTest: flag(query, 'noTest', false), entryOnly: flag(query, 'entryOnly', false)
             }, cancelOnClose(response));
@@ -763,19 +1058,22 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
         }
         case `GET ${prefix}/search/graphrag`:
         case `GET ${prefix}/context/pack`: {
+            const snapshot = requestedKnowledgeSnapshot();
             const text = value(query, 'q', true);
             const isPack = url.pathname.endsWith('/pack');
             const budget = isPack ? Math.max(1000, Math.min(int(query, 'budgetChars', 12_000), 60_000)) : 0;
             const taskType = isPack ? value(query, 'taskType') ?? 'detail' : '';
-            const scope = retrievalScope();
+            const scope = retrievalScope(snapshot);
             const retrieval = await graphRag(repository, text, {
-                projectId: scope.id, allowedProjects: scope.allowedProjects, language: value(query, 'lang')?.toLowerCase() ?? null,
+                projectId: scope.id, snapshotId: snapshot?.id, allowedProjects: scope.allowedProjects, language: value(query, 'lang')?.toLowerCase() ?? null,
                 limit: Math.min(int(query, 'limit', 10), 20), depth: Math.min(int(query, 'depth', 1), 3),
                 callGraph: flag(query, 'callGraph', true), noTest: flag(query, 'noTest', true),
                 impactExpansion: query.has('impactExpansion')
                     ? flag(query, 'impactExpansion', true) : flag(query, 'dataFlow', true),
                 rerank: flag(query, 'rerank', true)
             }, cancelOnClose(response));
+            if (response.destroyed) return;
+            if (snapshot) knowledgeSnapshot(snapshot.id);
             send(response, 200, isPack ? contextPack(text, taskType, budget, retrieval) : retrieval);
             return;
         }
@@ -786,11 +1084,105 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
                 path.includes('\\') || path.split('/').some(part => !part || part === '.' || part === '..'))) {
                 throw new HttpError(400, 'INVALID_RELATIVE_FILE_PATH');
             }
-            const result = repository.locate(file, int(query, 'line'), scopedProject(), archiveEntry);
+            const line = int(query, 'line');
+            const snapshot = requestedKnowledgeSnapshot();
+            const result = snapshot
+                ? repository.knowledgeSnapshots.locate(snapshot.id,
+                    file, line, archiveEntry, value(query, 'symbol'))
+                : repository.locate(file, line, scopedProject(), archiveEntry);
             send(response, result ? 200 : 404, result ?? { error: 'NOT_FOUND' });
             return;
         }
         default: {
+            const projectLifecycle = /^\/api\/v1\/projects\/([a-f0-9]{12})\/lifecycle$/.exec(url.pathname);
+            if (projectLifecycle && (request.method === 'GET' || request.method === 'POST')) {
+                const id = projectLifecycle[1];
+                if (request.method === 'GET') send(response, 200, repository.projectRetirement.describe(account, id));
+                else {
+                    const key = idempotencyKey(request);
+                    if (!key) throw new HttpError(400, 'PROJECT_LIFECYCLE_KEY_REQUIRED');
+                    const input = await readPayload(request, projectLifecycleInput, 2048);
+                    if (!response.destroyed) {
+                        const result = repository.projectRetirement.change(account, id, input.action, input.revision, key);
+                        send(response, result.state === 'PURGING' ? 202 : 200, result);
+                    }
+                }
+                return;
+            }
+            const diagnostic = /^\/api\/v1\/admin\/diagnostics\/(requests|runs)\/([^/]+)$/.exec(url.pathname);
+            if (request.method === 'GET' && diagnostic && agentRunIdPattern.test(diagnostic[2])) {
+                authorizeAdmin();
+                send(response, 200, diagnostic[1] === 'requests' ? repository.operations.request(diagnostic[2])
+                    : repository.operations.run(diagnostic[2]));
+                return;
+            }
+            const projectCapabilities = /^\/api\/v1\/projects\/([a-f0-9]{12})\/capabilities$/.exec(url.pathname);
+            if (request.method === 'GET' && projectCapabilities) {
+                send(response, 200, repository.identity.projectCapabilities(account, projectCapabilities[1]));
+                return;
+            }
+            const projectAccess = /^\/api\/v1\/projects\/([a-f0-9]{12})\/access$/.exec(url.pathname);
+            if (projectAccess && (request.method === 'GET' || request.method === 'PUT')) {
+                const id = projectAccess[1];
+                if (request.method === 'GET') send(response, 200, repository.identity.projectAccess(account, id));
+                else {
+                    const input = await readPayload(request, z.object({
+                        accountId: z.string().min(1).max(80), role: z.enum(projectGrantRoles).nullable(), revision: z.int().nonnegative()
+                    }).strict(), 8 * 1024);
+                    if (response.destroyed) return;
+                    send(response, 200, repository.identity.setProjectGrant(account, id, input.accountId, input.role, input.revision));
+                }
+                return;
+            }
+            const transfer = /^\/api\/v1\/projects\/([a-f0-9]{12})\/access\/transfer$/.exec(url.pathname);
+            if (request.method === 'POST' && transfer) {
+                const input = await readPayload(request, z.object({
+                    accountId: z.string().min(1).max(80), revision: z.int().nonnegative()
+                }).strict(), 8 * 1024);
+                if (response.destroyed) return;
+                send(response, 200, repository.identity.transferPersonalProject(account, transfer[1], input.accountId, input.revision));
+                return;
+            }
+            const lifecycle = /^\/api\/v1\/knowledge-snapshots\/([a-f0-9-]{36})\/lifecycle$/.exec(url.pathname);
+            if (lifecycle && agentRunIdPattern.test(lifecycle[1]) && (request.method === 'GET' || request.method === 'POST')) {
+                const id = requestedProject();
+                if (request.method === 'GET') send(response, 200, repository.snapshotRetirement.describe(account, id, lifecycle[1]));
+                else {
+                    const key = idempotencyKey(request);
+                    if (!key) throw new HttpError(400, 'SNAPSHOT_IDEMPOTENCY_KEY_REQUIRED');
+                    repository.identity.requireProjectManager(account, id);
+                    const input = await readPayload(request, snapshotAction, 2048);
+                    if (!response.destroyed) send(response, 200,
+                        repository.snapshotRetirement.change(account, id, lifecycle[1], input.action, input.revision, key));
+                }
+                return;
+            }
+            const knowledge = /^\/api\/v1\/knowledge-snapshots\/([a-f0-9-]{36})(?:\/(source|changes|manifest))?$/.exec(url.pathname);
+            if (request.method === 'GET' && knowledge) {
+                const snapshot = knowledgeSnapshot(knowledge[1]);
+                if (!knowledge[2]) {
+                    send(response, 200, snapshot);
+                    return;
+                }
+                if (knowledge[2] === 'manifest') {
+                    send(response, 200, repository.knowledgeSnapshots.receipt(snapshot.id));
+                    return;
+                }
+                if (knowledge[2] === 'changes') {
+                    const delta = repository.knowledgeSnapshots.changes(snapshot.id,
+                        Math.min(int(query, 'limit', 100), 500), int(query, 'offset', 0, 0));
+                    send(response, 200, { mode: snapshot.mode, parentSnapshotId: snapshot.parentSnapshotId, ...delta });
+                    return;
+                }
+                const file = value(query, 'file', true);
+                if (file.includes('\\') || file.split('/').some(part => !part || part === '.' || part === '..')) {
+                    throw new HttpError(400, 'INVALID_RELATIVE_FILE_PATH');
+                }
+                const source = repository.knowledgeSnapshots.source(snapshot.id, file);
+                if (!source) throw new HttpError(404, 'NOT_FOUND');
+                send(response, 200, source);
+                return;
+            }
             const ruleRoute = /^\/api\/v1\/rules\/([^/]+)\/(?:(active|audit|evaluation|evaluations|rollback)|versions\/(\d+)(?:\/(review|publish|reject))?)$/.exec(url.pathname);
             if (ruleRoute) {
                 let id: string;
@@ -822,7 +1214,10 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
                 authorizeAdmin();
                 let updated;
                 if (route === 'rollback') updated = rules.rollback(id, account.username, reason);
-                else if (action === 'publish') updated = await rules.publish(id, version, account.username, reason, cancelOnClose(response), authorizeAdmin);
+                else if (action === 'publish') updated = await rules.publish(id, version, account.username, reason, cancelOnClose(response), () => {
+                    authorizeAdmin();
+                    repository.reviewRuleProposals.requireCurrentEvidence(account, id, version);
+                });
                 else if (action === 'review' || action === 'reject') updated = rules.transition(id, version, action, account.username, reason);
                 else throw new HttpError(404, 'NOT_FOUND');
                 if (!response.destroyed) send(response, 200, updated);
@@ -849,6 +1244,7 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
                     if (!input.status) throw new HttpError(400, 'INVALID_VULNERABILITY_STATUS');
                     if (response.destroyed) return;
                     if (!canReadResource(finding)) throw new HttpError(404, 'VULNERABILITY_NOT_FOUND');
+                    editableProject(finding.projectId);
                     send(response, 200, repository.vulnerabilities.changeStatus(finding.id, input.status, account.username,
                         findingPublicText(input.reason ?? '', 500), input.revision));
                 } else if (request.method === 'GET' && !operation) send(response, 200, repository.vulnerabilities.detail(finding));
@@ -889,6 +1285,7 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
                     const input = await readPayload(request, reviewAction, 4096);
                     if (response.destroyed) return;
                     if (!canReadResource(entry)) throw new HttpError(404, 'REVIEW_ENTRY_NOT_FOUND');
+                    editableProject(entry.projectId);
                     send(response, 200, repository.reviewQueue.transition(entry.id, action as ReviewAction, account.username, input));
                 } else throw new HttpError(404, 'NOT_FOUND');
                 return;
@@ -903,6 +1300,7 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
                     const input = await readPayload(request, suppressionRevoke, 8192);
                     if (response.destroyed) return;
                     if (!canReadResource(scope)) throw new HttpError(404, 'SUPPRESSION_NOT_FOUND');
+                    editableProject(scope.projectId);
                     send(response, 200, repository.triagePolicy.revoke(id, scope.projectId, account.username, input.reason));
                 } else throw new HttpError(404, 'NOT_FOUND');
                 return;
@@ -915,7 +1313,7 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
                 send(response, 200, findingReport(repository, id, finding, Math.min(int(query, 'budgetChars', 12_000), 60_000)));
                 return;
             }
-            const scanTask = /^\/api\/v1\/scan-tasks\/([^/]+)(?:\/(findings|cancel|retry))?$/.exec(url.pathname);
+            const scanTask = /^\/api\/v1\/scan-tasks\/([^/]+)(?:\/(findings|cancel|retry|execution))?$/.exec(url.pathname);
             if (scanTask && scanHistoryId.test(scanTask[1])) {
                 const [, id, action] = scanTask;
                 const task = repository.scanHistory.task(id);
@@ -923,15 +1321,23 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
                 if (request.method === 'GET' && action === 'findings') {
                     const { page, size } = scanPage();
                     send(response, 200, repository.scanHistory.findings(task, page, size));
+                } else if (request.method === 'GET' && action === 'execution') {
+                    const execution = repository.scans.execution(task.id);
+                    if (!execution) throw new HttpError(404, 'SCAN_EXECUTION_NOT_FOUND');
+                    send(response, 200, execution);
+                } else if (request.method === 'POST' && action === 'execution') {
+                    const input = await readPayload(request, jobActionInput, 2048);
+                    if (!response.destroyed) send(response, 200, repository.scans.control(task, account, input.action, input.revision, input.priority));
                 } else if (request.method === 'GET' && !action) send(response, 200, { ...task, taskId: task.id });
                 else if (request.method === 'POST' && action === 'cancel') {
-                    const cancelled = await repository.scans.cancel(task);
+                    editableProject(task.projectId);
+                    const cancelled = await repository.scans.cancel(task, account);
                     if (response.destroyed) return;
                     if (!canReadResource(cancelled)) throw new HttpError(404, 'SCAN_TASK_NOT_FOUND');
                     send(response, 200, { taskId: id, status: cancelled.status });
                 } else if (request.method === 'POST' && action === 'retry') {
-                    const restarted = repository.scans.retry(task, requireProject).task;
-                    send(response, 200, { taskId: id, status: restarted.status });
+                    const restarted = await repository.scans.retry(task, account, idempotencyKey(request), cancelOnClose(response));
+                    if (!response.destroyed) send(response, 200, { taskId: id, status: restarted.status });
                 } else throw new HttpError(404, 'NOT_FOUND');
                 return;
             }
@@ -945,30 +1351,163 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
             const cancel = /^\/api\/v1\/agent-runs\/([^/]+)\/cancel$/.exec(url.pathname);
             if (request.method === 'POST' && cancel && agentRunIdPattern.test(cancel[1])) {
                 const run = repository.agentRuns.get(cancel[1]);
-                if (!run || !canReadResource(run)) throw new HttpError(404, 'NOT_FOUND');
-                send(response, 200, run.playbook === sastTriagePlaybook ? repository.sastTriageAgent.cancel(run) : repository.changeReviewAgent.cancel(run));
+                if (!run || !canReadRun(run)) throw new HttpError(404, 'NOT_FOUND');
+                editableProject(run.projectId);
+                if (run.playbook === 'WIKI_SUMMARY') {
+                    repository.wiki.control(run, account, 'cancel');
+                    send(response, 200, repository.agentRuns.get(run.id));
+                } else if (run.playbook === 'GIT_SYNC') {
+                    const job = repository.gitSources.execution(run);
+                    if (!job) throw new HttpError(404, 'JOB_NOT_FOUND');
+                    repository.gitSources.control(account, run, 'cancel', job.revision);
+                    send(response, 200, repository.agentRuns.get(run.id));
+                } else if (run.playbook === isolatedVerificationPlaybook) {
+                    const job = repository.verifications.execution(run.id);
+                    if (!job) throw new HttpError(404, 'JOB_NOT_FOUND');
+                    repository.verifications.control(account, run.id, 'cancel', job.revision);
+                    send(response, 200, repository.agentRuns.get(run.id));
+                } else if (run.playbook === localIndexPlaybook) {
+                    const job = repository.localIndexes.execution(run.id);
+                    if (!job) throw new HttpError(404, 'JOB_NOT_FOUND');
+                    repository.localIndexes.control(account, run.id, 'cancel', job.revision);
+                    send(response, 200, repository.agentRuns.get(run.id));
+                } else send(response, 200, run.playbook === sastTriagePlaybook
+                    ? await repository.sastTriageAgent.cancel(run, account) : await repository.changeReviewAgent.cancel(run, account));
+                return;
+            }
+            const verification = /^\/api\/v1\/verifications\/([^/]+)$/.exec(url.pathname);
+            if (request.method === 'GET' && verification && agentRunIdPattern.test(verification[1])) {
+                send(response, 200, repository.verifications.inspect(account, verification[1]));
+                return;
+            }
+            const execution = /^\/api\/v1\/agent-runs\/([^/]+)\/execution(?:\/(attempts))?$/.exec(url.pathname);
+            if (execution && agentRunIdPattern.test(execution[1]) && (request.method === 'GET' || (!execution[2] && request.method === 'POST'))) {
+                const run = repository.agentRuns.get(execution[1]);
+                if (!run || !canReadRun(run) || !['WIKI_SUMMARY', 'GIT_SYNC', isolatedVerificationPlaybook,
+                    changeReviewPlaybook, sastTriagePlaybook, localIndexPlaybook].includes(run.playbook)) {
+                    throw new HttpError(404, 'NOT_FOUND');
+                }
+                const wiki = run.playbook === 'WIKI_SUMMARY';
+                const verify = run.playbook === isolatedVerificationPlaybook;
+                const review = run.playbook === changeReviewPlaybook;
+                const triage = run.playbook === sastTriagePlaybook;
+                const index = run.playbook === localIndexPlaybook;
+                if (request.method === 'GET') {
+                    const job = wiki ? repository.wiki.execution(run.id) : verify ? repository.verifications.execution(run.id)
+                        : review ? repository.changeReviewAgent.execution(run.id) : triage ? repository.sastTriageAgent.execution(run.id)
+                        : index ? repository.localIndexes.execution(run.id) : repository.gitSources.execution(run);
+                    if (!job) throw new HttpError(404, 'JOB_NOT_FOUND');
+                    const attempts = () => wiki ? repository.wiki.attempts(run.id) : verify ? repository.verifications.attempts(run.id)
+                        : review ? repository.changeReviewAgent.attempts(run.id) : triage ? repository.sastTriageAgent.attempts(run.id)
+                        : index ? repository.localIndexes.attempts(run.id) : repository.gitSources.attempts(run.id);
+                    send(response, 200, execution[2] ? attempts() : job);
+                } else {
+                    const input = await readPayload(request, jobActionInput, 2048);
+                    if (response.destroyed) return;
+                    const job = wiki ? repository.wiki.control(run, account, input.action, input.revision, input.priority)
+                        : verify ? repository.verifications.control(account, run.id, input.action, input.revision, input.priority)
+                        : review ? repository.changeReviewAgent.control(run, account, input.action, input.revision, input.priority)
+                        : triage ? repository.sastTriageAgent.control(run, account, input.action, input.revision, input.priority)
+                        : index ? repository.localIndexes.control(account, run.id, input.action, input.revision, input.priority)
+                        : repository.gitSources.control(account, run, input.action, input.revision, input.priority);
+                    send(response, 200, job);
+                }
                 return;
             }
             const runExport = /^\/api\/v1\/agent-runs\/([^/]+)\/export$/.exec(url.pathname);
             if (request.method === 'GET' && runExport && agentRunIdPattern.test(runExport[1])) {
                 const run = repository.agentRuns.get(runExport[1]);
-                if (!run || !canReadResource(run)) throw new HttpError(404, 'NOT_FOUND');
+                if (!run || !canReadRun(run)) throw new HttpError(404, 'NOT_FOUND');
                 attachment(response, 'application/json; charset=utf-8', 'run-' + run.id + '.json', Buffer.from(JSON.stringify(run)));
                 return;
             }
             const wikiExport = /^\/api\/v1\/summaries\/([^/]+)\/export$/.exec(url.pathname);
             if (request.method === 'GET' && wikiExport && agentRunIdPattern.test(wikiExport[1])) {
-                const document = repository.wiki.get(wikiExport[1]);
-                if (!document || !canReadResource(document)) throw new HttpError(404, 'NOT_FOUND');
-                attachment(response, 'text/markdown; charset=utf-8', 'wiki-' + document.id + '.md', Buffer.from(wikiMarkdown(document)));
+                const page = repository.wiki.pages.resolve(wikiPage(wikiExport[1]), wikiRevision());
+                const format = value(query, 'format') ?? 'markdown';
+                if (format !== 'markdown') throw new HttpError(400, 'WIKI_EXPORT_FORMAT_UNSUPPORTED');
+                const section = query.has('section') ? int(query, 'section', undefined, 0) : undefined;
+                attachment(response, 'text/markdown; charset=utf-8', 'wiki-' + page.id + '.md', repository.wiki.pages.export(page, section));
                 return;
             }
             const wikiResource = /^\/api\/v1\/(summaries|agent-runs)\/([^/]+)$/.exec(url.pathname);
             if (request.method === 'GET' && wikiResource && agentRunIdPattern.test(wikiResource[2])) {
                 const [, kind, id] = wikiResource;
-                const resource = kind === 'summaries' ? repository.wiki.get(id) : repository.agentRuns.get(id);
-                if (!resource || !canReadResource(resource)) throw new HttpError(404, 'NOT_FOUND');
+                if (kind === 'summaries') {
+                    const page = repository.wiki.pages.resolve(wikiPage(id), wikiRevision());
+                    if (flag(query, 'permissions', false)) {
+                        const permissions = repository.identity.projectCapabilities(account, page.projectId);
+                        send(response, 200, { ...page, canEdit: permissions.canEdit && Boolean(page.knowledgeSnapshotId) });
+                    } else send(response, 200, page);
+                    return;
+                }
+                const resource = repository.agentRuns.get(id);
+                if (!resource || !canReadRun(resource)) throw new HttpError(404, 'NOT_FOUND');
                 send(response, 200, resource);
+                return;
+            }
+            const reviewScope = /^\/api\/v1\/change-reviews\/scopes\/([^/]+)$/.exec(url.pathname);
+            if (request.method === 'GET' && reviewScope && agentRunIdPattern.test(reviewScope[1])) {
+                send(response, 200, repository.changeReviews.readScope(account, reviewScope[1]));
+                return;
+            }
+            const overlaySource = /^\/api\/v1\/change-reviews\/([^/]+)\/overlay-source$/.exec(url.pathname);
+            if (request.method === 'GET' && overlaySource && agentRunIdPattern.test(overlaySource[1])) {
+                const path = overlayPath.safeParse(value(query, 'file', true));
+                if (!path.success) throw new HttpError(400, 'INVALID_FILE');
+                send(response, 200, repository.changeReviews.overlaySource(account, requestedProject(), overlaySource[1], path.data));
+                return;
+            }
+            const patchProposal = /^\/api\/v1\/change-reviews\/([^/]+)\/patches$/.exec(url.pathname);
+            if (request.method === 'POST' && patchProposal && agentRunIdPattern.test(patchProposal[1])) {
+                const key = idempotencyKey(request);
+                if (!key) throw new HttpError(400, 'CHANGE_PATCH_IDEMPOTENCY_KEY_REQUIRED');
+                const id = requestedProject();
+                const input = await readPayload(request, proposeChangePatch, 4 * 1024 * 1024);
+                if (!response.destroyed) send(response, 200, repository.changePatches.propose(account, id, patchProposal[1], key, input));
+                return;
+            }
+            const changePatch = /^\/api\/v1\/change-patches\/([^/]+)(?:\/(artifact|decision))?$/.exec(url.pathname);
+            if (changePatch && agentRunIdPattern.test(changePatch[1])) {
+                const [, id, action] = changePatch;
+                if (request.method === 'GET' && !action) {
+                    send(response, 200, repository.changePatches.inspect(account, id));
+                    return;
+                }
+                if (request.method === 'GET' && action === 'artifact') {
+                    const artifact = repository.changePatches.artifact(account, id);
+                    response.setHeader('ETag', '"' + artifact.digest + '"');
+                    attachment(response, 'text/x-diff; charset=utf-8', 'change-' + id + '.patch', artifact.bytes);
+                    return;
+                }
+                if (request.method === 'POST' && action === 'decision') {
+                    const key = idempotencyKey(request);
+                    if (!key) throw new HttpError(400, 'CHANGE_PATCH_IDEMPOTENCY_KEY_REQUIRED');
+                    const input = await readPayload(request, decideChangePatch, 4096);
+                    if (response.destroyed) return;
+                    const result = await repository.changePatches.decide(account, id, key, input, cancelOnClose(response));
+                    if (!response.destroyed) send(response, 200, result);
+                    return;
+                }
+            }
+            const reviewFinding = /^\/api\/v1\/change-reviews\/([^/]+)\/findings\/([a-f0-9]{64})$/.exec(url.pathname);
+            if (reviewFinding && agentRunIdPattern.test(reviewFinding[1]) && (request.method === 'GET' || request.method === 'POST')) {
+                const [, reviewId, findingId] = reviewFinding;
+                const id = requestedProject();
+                if (request.method === 'GET') {
+                    send(response, 200, repository.changeReviews.findingHistory(account, id, reviewId, findingId,
+                        Math.min(int(query, 'limit', 50), 100), int(query, 'offset', 0, 0)));
+                } else {
+                    const key = idempotencyKey(request);
+                    if (!key) throw new HttpError(400, 'CHANGE_REVIEW_IDEMPOTENCY_KEY_REQUIRED');
+                    const input = await readPayload(request, reviewFindingDecision, 16 * 1024);
+                    if (!response.destroyed) send(response, 200, repository.changeReviews.decideFinding(account, id, reviewId, findingId, key, input));
+                }
+                return;
+            }
+            const ruleCandidate = /^\/api\/v1\/change-rule-candidates\/([^/]+)$/.exec(url.pathname);
+            if (request.method === 'GET' && ruleCandidate && agentRunIdPattern.test(ruleCandidate[1])) {
+                send(response, 200, repository.reviewRuleProposals.inspect(account, ruleCandidate[1]));
                 return;
             }
             const review = /^\/api\/v1\/change-reviews\/([^/]+)(\/export)?$/.exec(url.pathname);
@@ -995,12 +1534,13 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
                 }
                 if (request.method === 'DELETE') {
                     authorizeAdmin();
+                    requireProject(id);
                     await repository.watches.stop(id);
                     response.writeHead(204, { 'Cache-Control': 'no-store' }).end();
                     return;
                 }
             }
-            const asset = /^\/api\/v1\/assets\/([^/]+)(?:\/(profile|reindex|scans|scan-tasks|external-findings|authorization-evidence))?$/.exec(url.pathname);
+            const asset = /^\/api\/v1\/assets\/([^/]+)(?:\/(profile|reindex|reuse|scans|scan-tasks|external-findings|authorization-evidence))?$/.exec(url.pathname);
             if (asset && assetIdPattern.test(asset[1])) {
                 const id = asset[1];
                 if (request.method === 'GET' && (asset[2] === 'scans' || asset[2] === 'external-findings')) {
@@ -1012,25 +1552,27 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
                     return;
                 }
                 if (request.method === 'POST' && (asset[2] === 'scans' || asset[2] === 'scan-tasks')) {
-                    repository.assets.find(id, requireProject);
+                    repository.assets.find(id, editableProject);
                     const input = request.headers['content-length'] === '0' || (!request.headers['content-length']
                         && !request.headers['transfer-encoding']) ? null : await readPayload(request, startScanInput, 4096);
                     if (response.destroyed) return;
                     let scanners = input?.scanners ?? [];
                     if (!scanners.length) {
-                        const profile = await repository.assets.profile(id, [], [], requireProject);
+                        const profile = await repository.assets.profile(id, [], [], editableProject);
                         scanners = profile.scannerPlan.filter(item => item.selected && repository.scans.supports(item.scanner))
                             .map(item => item.scanner);
                     }
                     if (response.destroyed) return;
-                    const current = repository.assets.find(id, requireProject);
-                    const { task, completion } = repository.scans.submit(current, scanners, input?.timeoutSeconds);
+                    const current = repository.assets.find(id, editableProject);
+                    const signal = cancelOnClose(response);
+                    const task = await repository.scans.submit(current, scanners, input?.timeoutSeconds, account, idempotencyKey(request), signal);
+                    if (response.destroyed) return;
                     const pollUrl = `${prefix}/scan-tasks/${task.id}`;
                     if (asset[2] === 'scan-tasks') {
                         response.setHeader('Location', pollUrl);
                         send(response, 202, { taskId: task.id, status: task.status, pollUrl });
                     } else {
-                        const result = await completion;
+                        const result = await repository.scans.wait(task, signal);
                         if (response.destroyed) return;
                         requireProject(result.projectId);
                         repository.assets.find(id);
@@ -1046,23 +1588,46 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
                     return;
                 }
                 if (request.method === 'GET' && (asset[2] === undefined || asset[2] === 'profile')) {
-                    const result = asset[2] ? await repository.assets.profile(id, query.getAll('includeScanner'),
-                        query.getAll('excludeScanner'), requireProject) : repository.assets.find(id, requireProject);
-                    send(response, 200, result);
+                    if (asset[2]) send(response, 200, await repository.assets.profile(id, query.getAll('includeScanner'),
+                        query.getAll('excludeScanner'), requireProject));
+                    else {
+                        const record = repository.assets.find(id, requireProject);
+                        send(response, 200, { ...record, ...repository.identity.projectCapabilities(account, record.projectId) });
+                    }
                     return;
                 }
                 if (request.method === 'POST' && asset[2] === 'reindex') {
                     authorizeAdmin();
+                    const record = repository.assets.find(id, requireProject);
                     const strategy = value(query, 'strategy');
                     const languages = indexLanguages(value(query, 'lang'), flag(query, 'includeBytecode', false));
-                    const { asset: started } = await repository.assets.reindex(id, languages, authorizeAdmin,
+                    const { asset: started } = await repository.assets.reindex(id, languages, () => {
+                        authorizeAdmin();
+                        requireProject(record.projectId);
+                    },
                         strategy === null ? undefined : indexStrategy(strategy));
                     send(response, 202, started);
                     return;
                 }
+                if (request.method === 'POST' && asset[2] === 'reuse') {
+                    authorizeAdmin();
+                    const input = await readPayload(request, z.object({ displayName: assetDisplayName.optional() }).strict(), 4096);
+                    if (response.destroyed) return;
+                    const record = await repository.assets.reuse(id, input.displayName, value(query, 'strategy'), value(query, 'lang'),
+                        flag(query, 'includeBytecode', false), requireProject, { accountId: account.id, key: idempotencyKey(request),
+                            authorize: authorizeAdmin, signal: cancelOnClose(response) });
+                    if (!response.destroyed) send(response, 202, record);
+                    return;
+                }
+                if (request.method === 'PATCH' && !asset[2]) {
+                    const input = await readPayload(request, z.object({ displayName: assetDisplayName, revision: z.int().nonnegative() }).strict(), 4096);
+                    if (!response.destroyed) send(response, 200, repository.assets.rename(id, input.displayName, input.revision, editableProject));
+                    return;
+                }
                 if (request.method === 'DELETE' && !asset[2]) {
                     requireAdmin(account);
-                    await repository.assets.delete(id);
+                    const asset = repository.assets.find(id);
+                    await repository.trashProject(account, asset.projectId);
                     send(response, 200, { status: 'deleted', assetId: id });
                     return;
                 }
@@ -1109,6 +1674,11 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
 }
 
 const server = createServer((request, response) => {
+    const requestId = randomUUID();
+    const started = performance.now();
+    response.setHeader('X-Request-Id', requestId);
+    response.once('close', () => repository.operations.finishRequest(requestId,
+        response.writableFinished ? response.statusCode : 0, performance.now() - started, response.getHeader('Location')));
     void handleHttpRequest(request, response).catch(error => {
         if (response.destroyed) return;
         if (error instanceof EmbeddingUnavailable) {
@@ -1121,7 +1691,7 @@ const server = createServer((request, response) => {
         } else if (error instanceof URIError) {
             send(response, 400, { error: 'INVALID_URL' });
         } else {
-            console.error('Request failed:', error instanceof Error ? error.name : 'Error');
+            console.error('Request failed:', requestId, error instanceof Error ? error.name : 'Error');
             send(response, 500, { error: 'INTERNAL_ERROR' });
         }
     });
@@ -1131,6 +1701,7 @@ server.listen(port, '127.0.0.1', () => {
     if (typeof address === 'object' && address) console.error(`RepoGraph listening on http://127.0.0.1:${address.port}`);
 });
 function stop() {
+    stopping = true;
     server.close(() => void repository.close());
     void repository.scans.close().catch(() => console.error('Unable to stop scan tasks cleanly'));
 }

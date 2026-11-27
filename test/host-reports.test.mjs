@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdtempDisposable } from 'node:fs/promises';
+import { mkdtempDisposable, rename } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 
 test('offline host reports audit supplied configuration and summarize submitted logs', { timeout: 15_000 }, async t => {
@@ -43,6 +45,45 @@ test('offline host reports audit supplied configuration and summarize submitted 
     const health = await fetch(base + '/api/v1/health', { headers: { Authorization: 'Bearer ' + token } });
     assert.equal(health.status, 200);
     assert.deepEqual(await health.json(), { status: 'ok', sqlite: 'ok', ollama: 'disabled' });
+    for (const path of ['/livez', '/readyz']) {
+        const probe = await fetch(base + path);
+        assert.equal(probe.status, 200);
+        assert.deepEqual(await probe.json(), { status: 'ok' });
+    }
+    const diagnosticPath = base + '/api/v1/admin/diagnostics';
+    const authorization = { headers: { Authorization: 'Bearer ' + token } };
+    assert.equal((await fetch(diagnosticPath)).status, 401);
+    const diagnostics = await (await fetch(diagnosticPath, authorization)).json();
+    assert.equal(diagnostics.status, 'ok');
+    assert.equal(diagnostics.components.managedFiles, 'available');
+    assert.equal(diagnostics.components.fullText, 'available');
+    assert.equal(diagnostics.components.generation.status, 'disabled');
+    for (const worker of ['wiki', 'gitSync', 'ask', 'changeReview', 'sastTriage', 'archiveScan', 'localIndex']) {
+        assert.equal(diagnostics.components.workers[worker].status, 'available');
+    }
+    const store = join(fixture.path, 'index.db-assets');
+    await rename(store, store + '-offline');
+    try {
+        const fault = await (await fetch(diagnosticPath, authorization)).json();
+        assert.equal(fault.status, 'degraded');
+        assert.equal(fault.components.managedFiles, 'unavailable');
+        assert.equal(fault.components.database, 'available');
+        assert.equal((await fetch(base + '/readyz')).status, 200);
+    } finally { await rename(store + '-offline', store); }
+    const storage = new DatabaseSync(join(fixture.path, 'index.db'));
+    try { storage.exec('DROP TABLE ask_job; DROP TABLE unit_search;'); }
+    finally { storage.close(); }
+    let dispatcherFault;
+    for (let attempt = 0; attempt < 30; attempt++) {
+        dispatcherFault = await (await fetch(diagnosticPath, authorization)).json();
+        if (dispatcherFault.components.workers.ask.status === 'unavailable') break;
+        await delay(40);
+    }
+    assert.equal(dispatcherFault.status, 'degraded');
+    assert.equal(dispatcherFault.components.workers.ask.status, 'unavailable');
+    assert.equal(dispatcherFault.components.workers.wiki.status, 'available');
+    assert.equal(dispatcherFault.components.fullText, 'unavailable');
+    assert.deepEqual(dispatcherFault.activity.unavailableQueues, ['ask']);
     const payload = { dimensions: ['SECURITY_POLICY'], files: [
         { name: 'z.conf', content: "# policy\r\nPermitRootLogin = 'yes' # comment\r\nPASS_MIN_LEN=12\r\nMaxAuthTries 3\r\nTMOUT=600" },
         { name: 'a.conf', content: 'PASS_MIN_LEN=12\nMaxAuthTries 3\nTMOUT=synthetic-credential-text' }
@@ -51,6 +92,10 @@ test('offline host reports audit supplied configuration and summarize submitted 
     const response = await request(payload);
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('cache-control'), 'no-store');
+    const observed = await (await fetch(diagnosticPath + '/requests/' + response.headers.get('x-request-id'), authorization)).json();
+    assert.equal(observed.status, 200);
+    assert.ok(observed.durationMs >= 0);
+    assert.doesNotMatch(JSON.stringify(observed), /synthetic-credential-text|z\.conf|config-audit/);
     const report = await response.json();
     assert.deepEqual(report.dimensionsAudited, ['SECURITY_POLICY']);
     assert.equal(report.checkedRules, 5);

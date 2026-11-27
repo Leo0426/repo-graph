@@ -7,12 +7,16 @@ import type { RepositoryIndex } from './index.js';
 import { contextPack, securitySignals } from './retrieval.js';
 import type { RankedUnit } from './retrieval.js';
 import { isSensitiveReviewPath, redactReviewText } from './review-redaction.js';
+import { digest } from './source.js';
 import type { CodeUnit } from './source.js';
 
 const MAX_PROJECT_FINDINGS = 50_000;
 const MAX_CHANGE_REFERENCES = 12;
 type ReportIndex = Pick<RepositoryIndex, 'locate' | 'symbol' | 'graphNeighbors' | 'triagePolicy'>;
 type FindingRow = { payload: unknown };
+export type CheckVersionEvidence = 'DECLARED_VERSION' | 'VERIFIED_ARCHIVE_SOURCE';
+type CheckReceiptInput = { format: string; codeVersion: string; ruleVersion: string; source?: CheckVersionEvidence;
+    execution?: 'FAILED' | 'PARTIAL' | 'UNAVAILABLE' };
 type ContextPack = ReturnType<typeof contextPack>;
 type ReportEvidence = Omit<ContextPack['evidence'][number], 'unitId' | 'kind' | 'language' | 'source' | 'relation'> & {
     unitId?: string; kind: string; language: string; source: string; relation: string;
@@ -52,7 +56,27 @@ export class ExternalFindings {
             CREATE TABLE IF NOT EXISTS external_finding_inventory (
                 project_id TEXT PRIMARY KEY REFERENCES project(id) ON DELETE CASCADE
             );
+            CREATE TABLE IF NOT EXISTS external_finding_receipt (
+                project_id TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE, digest TEXT NOT NULL,
+                format TEXT NOT NULL, code_version TEXT NOT NULL, rule_version TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('ZERO_FINDINGS','COMPLETED','PARTIAL','FAILED')), reported INTEGER NOT NULL,
+                accepted INTEGER NOT NULL, captured_at TEXT NOT NULL, finding_keys TEXT NOT NULL DEFAULT '[]', PRIMARY KEY(project_id,digest)
+            );
+            CREATE INDEX IF NOT EXISTS external_finding_receipt_version ON external_finding_receipt(project_id,code_version,format);
+            CREATE TABLE IF NOT EXISTS external_finding_version (
+                project_id TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE, code_version TEXT NOT NULL,
+                fingerprint TEXT NOT NULL, file_path TEXT NOT NULL, start_line INTEGER NOT NULL, end_line INTEGER NOT NULL,
+                payload TEXT NOT NULL, PRIMARY KEY(project_id,code_version,fingerprint)
+            );
+            CREATE INDEX IF NOT EXISTS external_finding_version_location ON external_finding_version(project_id,code_version,file_path,start_line,end_line);
         `);
+        const columns = db.prepare("SELECT 1 FROM pragma_table_info('external_finding_receipt') WHERE name = 'finding_keys'").get();
+        if (!columns) db.exec("ALTER TABLE external_finding_receipt ADD COLUMN finding_keys TEXT NOT NULL DEFAULT '[]'");
+        const provenance = db.prepare("SELECT name FROM pragma_table_info('external_finding_receipt') WHERE name IN ('provenance','source_outcome')").all();
+        if (!provenance.some(row => row.name === 'provenance')) {
+            db.exec("ALTER TABLE external_finding_receipt ADD COLUMN provenance TEXT NOT NULL DEFAULT 'DECLARED_VERSION'");
+        }
+        if (!provenance.some(row => row.name === 'source_outcome')) db.exec('ALTER TABLE external_finding_receipt ADD COLUMN source_outcome TEXT');
     }
 
     private findingWriter() {
@@ -72,16 +96,50 @@ export class ExternalFindings {
         }
     }
 
-    import(projectId: string, input: ReturnType<typeof normalizeFindings>) {
+    import(projectId: string, input: ReturnType<typeof normalizeFindings>, declared?: CheckReceiptInput) {
         this.db.exec('BEGIN IMMEDIATE');
         try {
             const result = this.importInTransaction(projectId, input);
+            if (declared?.codeVersion) this.recordCheckInTransaction(projectId, input, declared);
             this.db.exec('COMMIT');
             return result;
         } catch (error) {
             this.db.exec('ROLLBACK');
             throw error;
         }
+    }
+
+    recordCheckInTransaction(projectId: string, input: ReturnType<typeof normalizeFindings>, stamp: CheckReceiptInput) {
+        const { accepted, fingerprints } = this.captureVersion(projectId, stamp.codeVersion, input.findings);
+        const complete = !input.truncated && !input.skipped.length && accepted === input.findings.length;
+        const status = (stamp.execution === 'FAILED' || stamp.execution === 'UNAVAILABLE') && !input.findings.length ? 'FAILED'
+            : !complete || stamp.execution ? 'PARTIAL' : input.reported ? 'COMPLETED' : 'ZERO_FINDINGS';
+        const fingerprint = digest(JSON.stringify([stamp, input]));
+        this.db.prepare(`INSERT OR IGNORE INTO external_finding_receipt
+            (project_id,digest,format,code_version,rule_version,status,reported,accepted,captured_at,finding_keys,provenance,source_outcome)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(projectId, fingerprint, stamp.format, stamp.codeVersion, stamp.ruleVersion,
+                status, input.reported, accepted, new Date().toISOString(), JSON.stringify(fingerprints), stamp.source ?? 'DECLARED_VERSION',
+                stamp.execution === 'UNAVAILABLE' ? stamp.execution : null);
+    }
+
+    private captureVersion(projectId: string, version: string, findings: ExternalFinding[]) {
+        let total = Number(this.db.prepare('SELECT count(*) AS n FROM external_finding_version WHERE project_id = ?').get(projectId)?.n ?? 0);
+        const existing = this.db.prepare('SELECT payload FROM external_finding_version WHERE project_id = ? AND code_version = ? AND fingerprint = ?');
+        const insert = this.db.prepare('INSERT INTO external_finding_version VALUES (?,?,?,?,?,?,?)');
+        let accepted = 0;
+        const fingerprints = new Set<string>();
+        for (const finding of findings) {
+            const prior = existing.get(projectId, version, finding.fingerprint) as FindingRow | undefined;
+            if (prior && !sameFingerprint(read(prior), finding)) continue;
+            if (!prior) {
+                if (total >= MAX_PROJECT_FINDINGS) continue;
+                insert.run(projectId, version, finding.fingerprint, finding.filePath, finding.startLine, finding.endLine, JSON.stringify(finding));
+                total++;
+            }
+            accepted++;
+            fingerprints.add(finding.fingerprint);
+        }
+        return { accepted, fingerprints: [...fingerprints] };
     }
 
     importInTransaction(projectId: string, input: ReturnType<typeof normalizeFindings>) {
@@ -118,6 +176,27 @@ export class ExternalFindings {
         return !!this.db.prepare('SELECT 1 FROM external_finding_inventory WHERE project_id = ?').get(projectId);
     }
 
+    reviewChecks(projectId: string, versions: readonly string[]) {
+        return this.db.prepare(`SELECT format AS tool, digest AS receipt, code_version AS codeVersion, rule_version AS ruleVersion,
+            coalesce(source_outcome,status) AS status, reported, accepted, captured_at AS capturedAt, provenance FROM external_finding_receipt
+            WHERE rowid IN (SELECT max(rowid) FROM external_finding_receipt WHERE project_id = ?
+                AND code_version IN (SELECT value FROM json_each(?)) GROUP BY format) ORDER BY format`)
+            .all(projectId, JSON.stringify(versions)) as unknown as { tool: string; receipt: string; codeVersion: string; ruleVersion: string;
+                status: 'ZERO_FINDINGS' | 'COMPLETED' | 'PARTIAL' | 'FAILED' | 'UNAVAILABLE'; reported: number; accepted: number;
+                capturedAt: string; provenance: CheckVersionEvidence }[];
+    }
+
+    reviewObservations(projectId: string, versions: readonly string[], limit: number) {
+        const rows = this.db.prepare(`SELECT DISTINCT f.code_version, f.fingerprint, f.payload, r.provenance FROM external_finding_receipt r,
+            json_each(r.finding_keys) ids JOIN external_finding_version f
+                ON f.project_id = r.project_id AND f.code_version = r.code_version AND f.fingerprint = ids.value
+            WHERE r.rowid IN (SELECT max(rowid) FROM external_finding_receipt WHERE project_id = ?
+                AND code_version IN (SELECT value FROM json_each(?)) GROUP BY format)
+            ORDER BY f.code_version, f.fingerprint, r.provenance DESC LIMIT ?`).all(projectId, JSON.stringify(versions), limit + 1) as
+            (FindingRow & { provenance: CheckVersionEvidence })[];
+        return { findings: rows.slice(0, limit).map(row => ({ ...read(row), versionEvidence: row.provenance })), truncated: rows.length > limit };
+    }
+
     get(projectId: string, fingerprint: string) {
         const row = this.db.prepare('SELECT payload FROM external_finding WHERE project_id = ? AND fingerprint = ?')
             .get(projectId, fingerprint) as FindingRow | undefined;
@@ -133,19 +212,28 @@ export class ExternalFindings {
         return { projectId, findings: rows.map(read), total, limit, offset, hasMore: offset + rows.length < total };
     }
 
-    references(projectId: string, path: string, ranges: { startLine: number; endLine: number }[], target: string) {
+    references(projectId: string, path: string, ranges: { startLine: number; endLine: number }[], target: string | readonly string[]) {
         if (!ranges.length) return { references: [] as FindingReference[], truncated: false };
-        const rows = this.db.prepare(`SELECT payload FROM external_finding
-            WHERE project_id = ? AND file_path = ? AND (? = '' OR code_version = '' OR code_version = ?)
-                AND EXISTS (SELECT 1 FROM json_each(?) AS span
-                    WHERE start_line <= json_extract(span.value, '$.endLine') AND end_line >= json_extract(span.value, '$.startLine'))
-            ORDER BY (code_version = ? AND code_version <> '') DESC, start_line, fingerprint LIMIT ?`)
-            .all(projectId, path, target, target, JSON.stringify(ranges), target, MAX_CHANGE_REFERENCES + 1) as FindingRow[];
+        const intersects = `EXISTS (SELECT 1 FROM json_each(?) AS span
+            WHERE f.start_line <= json_extract(span.value, '$.endLine') AND f.end_line >= json_extract(span.value, '$.startLine'))`;
+        const rows = (typeof target === 'string' ? this.db.prepare(`SELECT payload FROM external_finding f
+                WHERE project_id = ? AND file_path = ? AND (? = '' OR code_version = '' OR code_version = ?) AND ${intersects}
+                ORDER BY (code_version = ? AND code_version <> '') DESC, start_line, fingerprint LIMIT ?`)
+                .all(projectId, path, target, target, JSON.stringify(ranges), target, MAX_CHANGE_REFERENCES + 1)
+            : this.db.prepare(`SELECT f.payload FROM external_finding_version f
+                WHERE f.project_id = ? AND f.file_path = ? AND ${intersects}
+                    AND EXISTS (SELECT 1 FROM external_finding_receipt r, json_each(r.finding_keys) ids
+                        WHERE r.project_id = f.project_id AND r.code_version = f.code_version AND ids.value = f.fingerprint
+                            AND r.rowid IN (SELECT max(rowid) FROM external_finding_receipt WHERE project_id = f.project_id
+                                AND code_version IN (SELECT value FROM json_each(?)) GROUP BY format))
+                ORDER BY f.start_line, f.fingerprint LIMIT ?`)
+                .all(projectId, path, JSON.stringify(ranges), JSON.stringify(target), MAX_CHANGE_REFERENCES + 1)) as FindingRow[];
         const references = rows.slice(0, MAX_CHANGE_REFERENCES).map(row => {
             const { fingerprint, tool, ruleId, severity, filePath, startLine, endLine, codeVersion } = read(row);
             return { fingerprint, tool: findingPublicText(tool, 120), ruleId: findingPublicText(ruleId, 500), severity,
                 filePath: findingPublicText(filePath, 4096), startLine, endLine,
-                version: codeVersion && codeVersion === target ? 'MATCHED_DECLARED_VERSION' as const : 'UNVERIFIED' as const };
+                version: codeVersion && (typeof target === 'string' ? codeVersion === target : target.includes(codeVersion))
+                    ? 'MATCHED_DECLARED_VERSION' as const : 'UNVERIFIED' as const };
         });
         return { references, truncated: rows.length > MAX_CHANGE_REFERENCES };
     }

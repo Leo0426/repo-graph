@@ -70,16 +70,18 @@ export class DetectionRules {
     }
 
     create(input: z.infer<typeof ruleInput>, actor: string) {
+        return this.write(() => this.createInTransaction(input, actor));
+    }
+
+    createInTransaction(input: z.infer<typeof ruleInput>, actor: string) {
         const { reason, ...draft } = input;
-        return this.write(() => {
-            const prev = Number(this.db.prepare('SELECT max(version) AS current FROM detection_rule WHERE rule_id = ?').get(draft.ruleId)?.current ?? 0);
-            if (prev >= 2_147_483_647) throw new HttpError(409, 'RULE_VERSION_LIMIT');
-            const now = new Date().toISOString();
-            const rule: DetectionRule = { ...draft, version: prev + 1, status: 'CANDIDATE', active: false, createdAt: now, updatedAt: now };
-            this.addRule(rule);
-            this.record(rule, 'CREATED', actor, reason, now);
-            return rule;
-        });
+        const prev = Number(this.db.prepare('SELECT max(version) AS current FROM detection_rule WHERE rule_id = ?').get(draft.ruleId)?.current ?? 0);
+        if (prev >= 2_147_483_647) throw new HttpError(409, 'RULE_VERSION_LIMIT');
+        const now = new Date().toISOString();
+        const rule: DetectionRule = { ...draft, version: prev + 1, status: 'CANDIDATE', active: false, createdAt: now, updatedAt: now };
+        this.addRule(rule);
+        this.record(rule, 'CREATED', actor, reason, now);
+        return rule;
     }
 
     get(ruleId: string, version: number) {
@@ -157,8 +159,8 @@ export class DetectionRules {
         const draft = this.requireStatus(ruleId, version, 'IN_REVIEW');
         await assertRuleSamples(draft, signal);
         if (signal.aborted) throw new HttpError(409, 'RULE_REGRESSION_CANCELLED');
-        authorize();
         return this.write(() => {
+            authorize();
             const rule = this.requireStatus(ruleId, version, 'IN_REVIEW');
             const now = new Date().toISOString();
             const previous = this.active(ruleId);

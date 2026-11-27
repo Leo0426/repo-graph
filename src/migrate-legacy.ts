@@ -46,6 +46,9 @@ const account = z.object({
 const organization = z.object({ id, name: z.string().min(1), active: enabled, created_at: date });
 const membership = z.object({ organization_id: id, account_id: id });
 const owner = z.object({ project_id: id, owner_type: z.enum(['PERSONAL', 'ORGANIZATION']), owner_id: id, updated_at: date });
+type OwnerEvidence = z.infer<typeof owner>;
+type OwnershipReview = { projectId: string; reason: 'MISSING_OWNER_EVIDENCE' | 'CONFLICTING_OWNER_EVIDENCE' | 'UNKNOWN_LEGACY_OWNER'
+    | 'LEGACY_PROJECT_UNAVAILABLE' };
 const audit = z.object({ id: z.number().int().min(1), actor_id: id, action: z.string(), target_id: z.string(),
     reason: z.string(), created_at: date });
 const legacyProject = z.object({ project_root: z.string(), indexed_at: date });
@@ -151,8 +154,7 @@ async function migrationData(source: string, projectsRoot: string, keyPath: stri
         }
         const accountsById = new Set(accounts.map(row => row.id));
         const organizationsById = new Set(organizations.map(row => row.id));
-        if (memberships.some(row => !accountsById.has(row.account_id) || !organizationsById.has(row.organization_id))
-            || owners.some(row => !(row.owner_type === 'PERSONAL' ? accountsById : organizationsById).has(row.owner_id))) {
+        if (memberships.some(row => !accountsById.has(row.account_id) || !organizationsById.has(row.organization_id))) {
             fail('INVALID_LEGACY_OWNERSHIP');
         }
 
@@ -192,10 +194,27 @@ async function migrationData(source: string, projectsRoot: string, keyPath: stri
             projects.set(newId, { id: newId, root });
             mapping.set(oldId, newId);
         }
-        const projectOwners = owners.flatMap(entry => {
+        const claims = new Map<string, OwnerEvidence[]>();
+        const unmappedOwners = new Set<string>();
+        for (const entry of owners) {
             const target = mapping.get(entry.project_id);
-            return target ? [{ ...entry, project_id: target }] : [];
-        });
+            if (!target) { unmappedOwners.add(entry.project_id); continue; }
+            const candidates = claims.get(target) ?? [];
+            candidates.push({ ...entry, project_id: target });
+            claims.set(target, candidates);
+        }
+        const ownershipReview: OwnershipReview[] = [...unmappedOwners].map(projectId => ({ projectId, reason: 'LEGACY_PROJECT_UNAVAILABLE' }));
+        const projectOwners: OwnerEvidence[] = [];
+        for (const projectId of projects.keys()) {
+            const candidates = claims.get(projectId) ?? [];
+            const distinct = new Set(candidates.map(row => JSON.stringify([row.owner_type, row.owner_id])));
+            const unknown = candidates.some(row => !(row.owner_type === 'PERSONAL' ? accountsById : organizationsById).has(row.owner_id));
+            if (!candidates.length) ownershipReview.push({ projectId, reason: 'MISSING_OWNER_EVIDENCE' });
+            else if (distinct.size > 1) ownershipReview.push({ projectId, reason: 'CONFLICTING_OWNER_EVIDENCE' });
+            else if (unknown) ownershipReview.push({ projectId, reason: 'UNKNOWN_LEGACY_OWNER' });
+            else projectOwners.push(candidates.reduce((latest, row) => Date.parse(row.updated_at) > Date.parse(latest.updated_at) ? row : latest));
+        }
+        ownershipReview.sort((left, right) => left.projectId < right.projectId ? -1 : left.projectId > right.projectId ? 1 : 0);
         const oldVulnerabilities = tables.has('vuln_findings') ? rows(db, 'vuln_findings', legacyVulnerabilityFinding) : [];
         const oldEvidence = tables.has('vuln_taint_evidence') ? rows(db, 'vuln_taint_evidence', legacyVulnerabilityEvidence) : [];
         const vulnerabilities = prepareLegacyVulnerabilities(oldVulnerabilities, oldEvidence, mapping);
@@ -292,7 +311,8 @@ async function migrationData(source: string, projectsRoot: string, keyPath: stri
                     triageFeedback: triage.feedback.length, ruleSuppressions: triage.suppressions.length,
                     ruleSuppressionEvents: triage.events.length, managedAssets: assetPlan.assets.length },
                 skipped, projectsSkipped: projectSkips, assetsSkipped: assetPlan.skipped,
-                unmappedProjectOwners: owners.length - projectOwners.length
+                unmappedProjectOwners: owners.filter(row => !mapping.has(row.project_id)).length,
+                ownershipReview
             }
         };
     } finally { db.close(); }
@@ -323,6 +343,10 @@ function writeData(target: string, data: MigrationData) {
         for (const row of data.projectOwners) owner.run(row.project_id, row.owner_type, row.owner_id, row.updated_at);
         const audit = db.prepare('INSERT INTO enterprise_audit VALUES (?,?,?,?,?,?)');
         for (const row of data.audits) audit.run(row.id, row.actor_id, row.action, row.target_id, row.reason, row.created_at);
+        const reviewAudit = db.prepare(`INSERT INTO enterprise_audit(actor_id,action,target_id,reason,created_at)
+            VALUES (?,'LEGACY_OWNER_REVIEW_REQUIRED',?,?,?)`);
+        const reviewedAt = new Date().toISOString();
+        for (const entry of data.report.ownershipReview) reviewAudit.run(ADMIN_ID, entry.projectId, entry.reason, reviewedAt);
         if (data.providers.length) {
             const secrets = new ProviderSecrets(target + '-provider-key', process.env.REPOGRAPH_PROVIDER_ENCRYPTION_KEY, true);
             db.exec('DELETE FROM model_provider');
